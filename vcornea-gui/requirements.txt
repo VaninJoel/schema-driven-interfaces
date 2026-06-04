@@ -1,0 +1,11 @@
+# vCornea GUI — Python dependencies (pip-installable)
+# Note: CompuCell3D and the sibling `vivarium-vcornea` package are installed
+# separately (see README). `vivarium` here is vivarium-core.
+PyQt5
+numpy
+pandas
+matplotlib
+scipy
+seaborn
+pyarrow
+vivarium

@@ -1,0 +1,27 @@
+# This file is part of the new standard for Python project metadata.
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vivarium-vcornea"
+version = "0.1.0"
+authors = [{name = "Joel Vanin", email = "jvanin@iu.edu"}]
+description = "A Vivarium wrapper for the vCornea CompuCell3D model."
+readme = "README.md"
+requires-python = ">=3.9"
+
+
+dependencies = [
+    "vivarium-core",
+    "pandas",
+    "fastparquet",
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://github.com/YourUsername/vivarium-vcornea"
+Issues = "https://github.com/YourUsername/vivarium-vcornea/issues"
+
+[tool.setuptools.packages.find]
+include = ["vivarium_vcornea*"]

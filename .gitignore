@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Runtime / user-specific state
+.gui_settings.json
+parameter_structure_debug.json
+
+# Rendered-equation image cache
+.cache/
+
+# Simulation outputs / data stores
+Test Runs/
+experiments/OutStore/
+*.zarr/
+temp_store.zarr/
+
+# Windows download artifacts
+*Zone.Identifier*
+
+# Publisher PDF (redistribution-restricted) — cite via DOI instead
+angio-gui/angio_paper.pdf
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

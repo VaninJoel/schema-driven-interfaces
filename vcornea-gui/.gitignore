@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Runtime / user-specific state (written into the repo root by the GUI)
+.gui_settings.json
+parameter_structure_debug.json
+
+# Rendered-equation image cache
+.cache/
+
+# Simulation outputs
+Test Runs/
+experiments/
+*.parquet
+
+# Windows download artifacts
+*:Zone.Identifier
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
