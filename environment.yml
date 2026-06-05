@@ -1,0 +1,39 @@
+# Conda environment for the Schema-Driven Interfaces monorepo.
+#
+#   conda env create -f environment.yml      # creates env "vc"
+#   conda activate vc
+#
+# The env is named "vc" to match the GUI's CC3D launcher default
+# (cc3d_conda_env_name='vc'), so simulations run with no extra configuration.
+#
+# CompuCell3D is conda-only and pulls its own Qt/PyQt5 stack, which the PyQt5
+# GUIs reuse. Python 3.12 + CompuCell3D 4.7.0 is the combination the model was
+# developed and validated against.
+#
+# Tip: a recent conda (>=23.10, libmamba solver) resolves this quickly; older
+# conda is much faster if you `conda install -n base conda-libmamba-solver` or
+# use `mamba env create -f environment.yml` instead.
+name: vc
+channels:
+  - conda-forge
+  - compucell3d
+dependencies:
+  - python=3.12
+  - compucell3d=4.7.0
+  # data / analysis stack shared by both GUIs
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - seaborn
+  - fastparquet
+  - pyarrow
+  - zarr
+  - scikit-image
+  - pip
+  - pip:
+      - vivarium-core
+      # editable installs of the local wrapper packages (paths are relative to
+      # this file, i.e. the repository root)
+      - -e ./vivarium-vcornea
+      - -e ./vivarium-angio

@@ -39,15 +39,31 @@ GUI (PyQt5)  →  Vivarium process (ports_schema)  →  CC3D subprocess
 
 ---
 
+## Installation
+
+Everything runs in a single self-contained conda environment (`vc`) — one file
+sets up CompuCell3D and the full Python stack:
+
+```bash
+conda env create -f environment.yml
+conda activate vc
+cd vcornea-gui && python run_gui.py     # or: cd angio-gui && python run_gui.py
+```
+
+See **[INSTALL.md](INSTALL.md)** for prerequisites, the angiogenesis GUI, display
+(X11) notes, verification, and troubleshooting.
+
 ## Layout & dependencies
 
 The folders are arranged so each GUI finds its sibling process package by relative
 path (e.g. `vcornea-gui/run_gui.py` expects `../vivarium-vcornea`). Keep them as
 siblings within this repository.
 
-Each component has its own `README.md` (and, for the GUIs, a `requirements.txt`).
-Running a **simulation** additionally requires a working **CompuCell3D**
-installation; the analysis tools only need the Python packages listed per GUI.
+CompuCell3D is conda-only and is the engine behind every simulation; the
+`environment.yml` installs it (4.7.0, Python 3.12) along with the analysis stack
+and editable installs of the two wrapper packages. The analysis tools alone need
+only the Python packages — no display or CC3D required to explore existing run
+outputs.
 
 ---
 
