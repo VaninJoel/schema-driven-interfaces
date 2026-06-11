@@ -179,7 +179,7 @@ class SimulationWorker(QObject):
         params_with_store['store_path'] = str(self.zarr_path)
 
         script_content = f"""
-import sys
+import sys, os
 from vivarium.core.engine import Engine
 from vivarium_angio.composites.angiogenesis_composer import AngiogenesisComposer
 
@@ -207,13 +207,22 @@ try:
     engine.update(sim_time)
 
     print(f"Simulation completed successfully", flush=True)
-    sys.exit(0)
+    # CompuCell3D 4.7.0's simservice segfaults during Python interpreter
+    # teardown after a run (process exits 139), which the parent worker would
+    # otherwise misread as a failed simulation and skip OMEX packaging. All
+    # results are already flushed to the Zarr store by this point, so exit
+    # cleanly with os._exit() to bypass CC3D's crashing C++ destructors.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 except Exception as e:
     print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
     import traceback
     traceback.print_exc(file=sys.stderr)
-    sys.exit(1)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1)
 """
 
         # Write to temporary file

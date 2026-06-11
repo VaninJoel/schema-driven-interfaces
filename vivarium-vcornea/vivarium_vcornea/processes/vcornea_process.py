@@ -2615,29 +2615,63 @@ class VCorneaProcess(Process):
         Redirects stdout and stderr to log files in the replicate's output directory.
         """
         cc3d_file = project_path / "vCornea_v2.cc3d"
-        conda_env = self.parameters['cc3d_conda_env_name']
-        conda_exe = self.parameters.get('conda_executable_path', 'conda') # Use .get for safety
-        
+
         import os
-        # --no-capture-output forwards CC3D's stdout/stderr to our log files
-        # in real time. Without it, `conda run` buffers everything and
-        # discards subprocess output on failure, leaving only the
-        # uninformative "ERROR conda.cli.main_run: ... failed. (See above
-        # for error)" line — which is the bug that hid CC3D's real error
-        # for several debug rounds.
-        #
+        import sys
+        import importlib.util
+
         # Pass cc3d_file by NAME ONLY (not full path), with cwd set to its
-        # parent directory. Conda reassembles the inner command for a shell;
-        # any space in the path (e.g. "Test Runs/...") would otherwise be
-        # split into separate args, leaving cc3d.run_script with a truncated
-        # -i value that resolves to nothing — CC3D then exits in ~2 seconds
-        # with no output and no useful error.
-        command = [
-            conda_exe, 'run', '--no-capture-output', '-n', conda_env,
-            'python', '-m', 'cc3d.run_script',
+        # parent directory (see Popen below). Any space in the path (e.g.
+        # "Test Runs/...") could otherwise be split into separate args,
+        # leaving cc3d.run_script with a truncated -i value that resolves to
+        # nothing — CC3D then exits in ~2 seconds with no output and no error.
+
+        # Preferred path: the wrapper already runs inside a Python env that
+        # has CompuCell3D — this is the documented single-env "vc" install,
+        # and it is also how the angiogenesis model runs. In that case launch
+        # CC3D with the SAME interpreter (sys.executable). This removes two
+        # fragile couplings that previously caused silent "exit 0, no output"
+        # failures:
+        #   1. `conda` no longer has to be resolvable on PATH in the subprocess.
+        #   2. The env no longer has to be *named* exactly 'vc' (or match
+        #      cc3d_conda_env_name) — we use whatever interpreter is running.
+        #
+        # Fallback (advanced two-env setups, where the GUI env and the CC3D
+        # env are separate): if cc3d isn't importable in the current
+        # interpreter, shell out via `conda run -n <env>` into the env that
+        # does have it. --no-capture-output forwards CC3D's stdout/stderr to
+        # our log files in real time; without it, `conda run` buffers
+        # everything and discards subprocess output on failure, leaving only
+        # the uninformative "ERROR conda.cli.main_run: ... failed" line.
+        cc3d_available_here = importlib.util.find_spec('cc3d') is not None
+
+        # Pass the output directory explicitly with -o. CompuCell3D 4.7.0
+        # copies the simulation files into its output directory during startup
+        # (sim_runner.run_cc3d_project), BEFORE any steppable runs — and it
+        # refuses if that directory is the simulation folder or inside it.
+        # Without -o, CC3D defaults the output dir from the .cc3d location and
+        # the copy aborts with "Output directory cannot be the simulation
+        # folder or inside it", so the run dies on startup with exit code 1
+        # and no cell_count_*.csv. The in-steppable pg.set_output_dir() we
+        # inject runs too late to prevent this. Giving -o up front (an
+        # absolute path OUTSIDE the temp project) makes the startup copy land
+        # in the replicate dir and matches where the steppable redirect points.
+        cc3d_run_args = [
+            '-m', 'cc3d.run_script',
             '-i', cc3d_file.name,
+            '-o', str(Path(output_dir).resolve()),
         ]
-        
+
+        if cc3d_available_here:
+            command = [sys.executable, *cc3d_run_args]
+        else:
+            conda_env = self.parameters['cc3d_conda_env_name']
+            conda_exe = self.parameters.get('conda_executable_path', 'conda')  # Use .get for safety
+            command = [
+                conda_exe, 'run', '--no-capture-output', '-n', conda_env,
+                'python', *cc3d_run_args,
+            ]
+
         print(f"VCorneaProcess: Launching command: {' '.join(command)}")
 
         # ---- Create log files for stdout and stderr for this specific replicate ----

@@ -22,17 +22,25 @@ conda env create -f environment.yml
 conda activate vc
 ```
 
-This installs Python 3.12, CompuCell3D 4.7.0, the data/analysis stack, and
-editable installs of the local `vivarium-vcornea` and `vivarium-angio` packages.
+This installs Python 3.12, CompuCell3D 4.7.0, PyQt5, the data/analysis stack,
+and editable installs of the local `vivarium-vcornea` and `vivarium-angio`
+packages.
 
 > If the solve is slow on an older conda, either enable the libmamba solver
 > (`conda install -n base conda-libmamba-solver`) or use
 > `mamba env create -f environment.yml`.
 
-The environment is named **`vc`** on purpose: the GUI launches CompuCell3D via
-`conda run -n vc ...` by default (`cc3d_conda_env_name='vc'`), so no further
-configuration is needed. If you rename the env, set `cc3d_conda_env_name`
-accordingly in the GUI before running a simulation.
+`vc` is just the default name — nothing depends on it. When you launch a GUI
+from this environment, both models run CompuCell3D **in the same interpreter**
+that is already active, so there is no separate env to configure and the env
+name does not matter. (If you choose a different name, `conda activate <name>`
+in place of `conda activate vc` below.)
+
+> Advanced: you can keep the GUI in one env and CompuCell3D in another. If the
+> GUI's interpreter can't import `cc3d`, the V-Cornea model falls back to
+> launching it via `conda run -n vc` (override the env with the process
+> parameter `cc3d_conda_env_name`). The single-env install above avoids this
+> entirely.
 
 ## 3. Launch a GUI
 
@@ -65,12 +73,23 @@ conda env update -f environment.yml --prune
 
 ## Troubleshooting
 
+- **`CondaToSNonInteractiveError` / "Terms of Service have not been accepted"** —
+  on a fresh Miniconda/Anaconda, `conda env create` can refuse to proceed until
+  you accept the ToS for Anaconda's default channels, even though this project
+  only uses `conda-forge` and `compucell3d`. Accept them once and re-run:
+  ```bash
+  conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+  conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+  ```
 - **`compucell3d` not found during solve** — make sure the `compucell3d` channel
   is reachable; the `environment.yml` already lists it. Corporate proxies
   sometimes block it.
 - **GUI won't open / `qt.qpa.plugin` errors** — you have no display. Run on a
   desktop session, or use X11 forwarding; the headless simulation/analysis paths
   still work without one.
-- **Simulation exits immediately with no `cell_count_*.csv`** — the GUI couldn't
-  find CompuCell3D in the `vc` env. Confirm `conda run -n vc python -c "import cc3d"`
-  works, and that `cc3d_conda_env_name` matches your env name.
+- **Simulation exits immediately with no `cell_count_*.csv`** — CompuCell3D isn't
+  importable in the environment you launched the GUI from. Activate the env and
+  confirm `python -c "import cc3d; print('OK')"` works; if it doesn't, re-create
+  the environment (`conda env create -f environment.yml`). Per-replicate
+  `stdout.log`/`stderr.log` files in the experiment's `logs/` dir hold CC3D's
+  real error.
