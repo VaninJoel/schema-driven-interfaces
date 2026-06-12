@@ -35,3 +35,6 @@ angio-gui/angio_paper.pdf
 .vscode/
 .idea/
 .DS_Store
+
+# Local CI log dumps (not part of the repo)
+.logs/
