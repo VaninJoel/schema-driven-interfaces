@@ -20,6 +20,14 @@ channels:
 dependencies:
   - python=3.12
   - compucell3d=4.7.0
+  # GUI toolkit. CompuCell3D already pulls a PyQt5/Qt stack, but the GUIs
+  # `import PyQt5` directly, so we list it explicitly rather than rely on a
+  # transitive dependency that a future CC3D build could drop. The solver
+  # unifies this with CC3D's own Qt requirement.
+  - pyqt
+  # Lets the GUI kill the whole CC3D subprocess tree cleanly on Cancel
+  # (cross-platform); without it, conda+CC3D grandchildren can linger.
+  - psutil
   # data / analysis stack shared by both GUIs
   - pandas
   - numpy
@@ -30,6 +38,10 @@ dependencies:
   - pyarrow
   - zarr
   - scikit-image
+  # PDF generation for the OMEX combo/summary reports (make_omex_*_report.py,
+  # triggered from the GUI after a run). Without it the run itself still
+  # succeeds, but the report step fails with "No module named 'reportlab'".
+  - reportlab
   - pip
   - pip:
       - vivarium-core

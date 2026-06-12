@@ -1,0 +1,61 @@
+@echo off
+REM On-target installer (Windows). Bundled into the self-extracting .exe by
+REM build.bat and run after extraction, with the working directory set to the
+REM extracted payload (vc_env.tar.gz + payload\ + this script).
+REM
+REM Relocates the conda-pack'd environment, repairs prefixes (conda-unpack),
+REM installs the app code, and creates launchers + Start-menu/Desktop shortcuts.
+setlocal enabledelayedexpansion
+
+set "PREFIX=%SDI_PREFIX%"
+if "%PREFIX%"=="" set "PREFIX=%LOCALAPPDATA%\SchemaDrivenInterfaces"
+
+echo Installing Schema-Driven Interfaces to: %PREFIX%
+if not exist "%PREFIX%" mkdir "%PREFIX%"
+
+echo   - unpacking environment (this is the large step)...
+REM tar ships with Windows 10+; python fallback if absent.
+tar -xzf vc_env.tar.gz -C "%PREFIX%" || ^
+  python -c "import tarfile,sys; tarfile.open(sys.argv[1]).extractall(sys.argv[2])" vc_env.tar.gz "%PREFIX%"
+
+echo   - finalizing environment (conda-unpack)...
+call "%PREFIX%\Scripts\conda-unpack.exe"
+
+echo   - installing application files...
+set "SDI=%PREFIX%\share\sdi"
+if not exist "%SDI%" mkdir "%SDI%"
+if exist "%SDI%\payload" rmdir /s /q "%SDI%\payload"
+xcopy /e /i /q payload "%SDI%\payload" >nul
+set "APPS=%SDI%\payload"
+
+REM --- Launchers (pythonw => no console window) ---
+if not exist "%PREFIX%\Scripts" mkdir "%PREFIX%\Scripts"
+> "%PREFIX%\Scripts\vcornea-gui.bat" echo @start "" "%PREFIX%\pythonw.exe" "%APPS%\vcornea-gui\run_gui.py" %%*
+> "%PREFIX%\Scripts\angio-gui.bat"   echo @start "" "%PREFIX%\pythonw.exe" "%APPS%\angio-gui\run_gui.py" %%*
+
+REM --- Desktop + Start-menu shortcuts ---
+set "SMDIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Schema-Driven Interfaces"
+if not exist "%SMDIR%" mkdir "%SMDIR%"
+call :mkshortcut "V-Cornea Simulation"     "%APPS%\vcornea-gui\run_gui.py"
+call :mkshortcut "Angiogenesis Simulation" "%APPS%\angio-gui\run_gui.py"
+
+echo.
+echo Schema-Driven Interfaces installed successfully.
+echo   Launch from the Start menu, or run:
+echo       "%PREFIX%\Scripts\vcornea-gui.bat"
+echo       "%PREFIX%\Scripts\angio-gui.bat"
+endlocal
+exit /b 0
+
+:mkshortcut
+set "TITLE=%~1"
+set "TARGETPY=%~2"
+powershell -NoProfile -Command ^
+  "$ws = New-Object -ComObject WScript.Shell;" ^
+  "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), $env:SMDIR)) {" ^
+  "  $lnk = $ws.CreateShortcut((Join-Path $dir ('%TITLE%' + '.lnk')));" ^
+  "  $lnk.TargetPath = '%PREFIX%\pythonw.exe';" ^
+  "  $lnk.Arguments = '\"%TARGETPY%\"';" ^
+  "  $lnk.WorkingDirectory = (Split-Path '%TARGETPY%');" ^
+  "  $lnk.Save() }"
+exit /b 0

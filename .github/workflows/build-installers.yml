@@ -1,0 +1,64 @@
+name: Build desktop installers
+
+# Each OS installer must be built on its own runner. We pack the EXACT conda
+# environment from environment.yml (conda-pack), so there is no fragile
+# re-solve — the installer ships the same bytes we test. Artifacts are uploaded
+# and attached to a GitHub Release when a v* tag is pushed.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest   # has the `defaults` channel CC3D 4.7.0 needs
+          auto-update-conda: true
+
+      # CC3D 4.7.0 only resolves with the defaults channel present; accept its ToS.
+      - name: Accept Anaconda channel ToS
+        shell: bash -el {0}
+        run: |
+          conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+          conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
+
+      - name: Install build tools (conda-pack + packager)
+        shell: bash -el {0}
+        run: conda install -n base -c conda-forge conda-pack makeself 7zip -y
+
+      - name: Build installer (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash -el {0}
+        run: bash installer/build.sh
+
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd /C call {0}
+        run: call installer\build.bat
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            installer/dist/*.sh
+            installer/dist/*.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/dist/*.sh
+            installer/dist/*.exe
