@@ -65,7 +65,8 @@ cp "$HERE/install.sh" "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh"
 
 echo ">> [5/5] Building self-extracting installer with makeself"
-makeself --gzip "$STAGE" "$INSTALLER" \
+# makeself lives in base (not on PATH here), same as conda-pack above.
+conda run -n base makeself --gzip "$STAGE" "$INSTALLER" \
     "Schema-Driven Interfaces installer" ./install.sh
 
 echo ">> Done: $INSTALLER"
