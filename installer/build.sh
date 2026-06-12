@@ -22,7 +22,9 @@ REPO="$(cd "$HERE/.." && pwd)"
 ENV_NAME="${SDI_ENV_NAME:-sdi-dist}"
 STAGE="$HERE/stage"
 DIST="$HERE/dist"
-VERSION="$(grep -m1 '^version' "$REPO/vivarium-vcornea/pyproject.toml" | tr -d ' "' | cut -d= -f2 || echo 0.1.0)"
+# NB: strip \r too — pyproject.toml may have CRLF line endings, and a stray
+# carriage return in the artifact filename makes actions/upload-artifact reject it.
+VERSION="$(grep -m1 '^version' "$REPO/vivarium-vcornea/pyproject.toml" | tr -d ' "\r' | cut -d= -f2 || echo 0.1.0)"
 
 case "$(uname -s)" in
     Linux)  OSTAG="Linux-$(uname -m)";;
