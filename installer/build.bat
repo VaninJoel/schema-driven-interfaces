@@ -19,26 +19,21 @@ set "INSTALLER=%DIST%\SchemaDrivenInterfaces-Windows-x86_64.zip"
 
 echo ^>^> [1/5] Creating conda env %SDI_ENV_NAME% from environment.yml
 REM The community 'compucell3d' anaconda.org channel is occasionally slow or
-REM returns HTTP 503 / connection timeouts. Be patient and retry a few times so
-REM a transient upstream blip doesn't fail the whole build.
+REM returns HTTP 503 / connection timeouts. Bump conda's own download retries
+REM and timeouts so transient blips don't break the env build.
 set "CONDA_REMOTE_MAX_RETRIES=5"
 set "CONDA_REMOTE_CONNECT_TIMEOUT_SECS=30"
 set "CONDA_REMOTE_READ_TIMEOUT_SECS=120"
 call conda env list | findstr /b /c:"%SDI_ENV_NAME% " >nul
 if %errorlevel%==0 (set "ENVCMD=update --prune") else (set "ENVCMD=create")
-set "ENVTRY=0"
-:envbuild
-set /a ENVTRY+=1
+REM IMPORTANT: do NOT abort on a non-zero exit here. On Windows, `conda env
+REM create` ALWAYS reports failure at its bundled pip step because the
+REM vs2015_win-64 activation script errors ("registry key not found" / GOTO End)
+REM — but the conda packages (cc3d, PyQt5, ...) install fine. We delete that
+REM script just below and redo the pip installs in step 2, and the
+REM import-verification guard there is what aborts the build if the env is
+REM genuinely incomplete (e.g. a real anaconda.org outage left cc3d missing).
 call conda env %ENVCMD% -n "%SDI_ENV_NAME%" -f "%REPO%\environment.yml"
-if errorlevel 1 (
-    if %ENVTRY% lss 3 (
-        echo    attempt %ENVTRY% failed ^(likely anaconda.org^); retrying in 30s...
-        timeout /t 30 /nobreak >nul
-        goto envbuild
-    )
-    echo ERROR: conda env build failed after %ENVTRY% attempts — aborting.
-    exit /b 1
-)
 
 REM The vs2015_win-64 conda package ships a broken activation script
 REM (vs2015_compiler_vars.bat does `GOTO End` with no `:End` label), which makes
