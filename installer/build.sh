@@ -43,10 +43,16 @@ else
 fi
 
 echo ">> [2/5] Reinstalling wrapper packages non-editable (relocatable)"
+# vivarium-core is a pip-only dep; ensure it's present (no-op if already installed).
+conda run -n "$ENV_NAME" python -m pip install vivarium-core
 TMPWHL="$(mktemp -d)"
 conda run -n "$ENV_NAME" python -m pip wheel "$REPO/vivarium-vcornea" "$REPO/vivarium-angio" \
     -w "$TMPWHL" --no-deps
 conda run -n "$ENV_NAME" python -m pip install --no-deps --force-reinstall "$TMPWHL"/*.whl
+
+# Fail loudly if the env is incomplete, so we never ship a broken installer.
+conda run -n "$ENV_NAME" python -c \
+    "import cc3d, PyQt5, reportlab, vivarium, vivarium_vcornea, vivarium_angio; print('packaged env OK')"
 
 echo ">> [3/5] Packing environment (conda-pack)"
 rm -rf "$STAGE" "$DIST"; mkdir -p "$STAGE/payload" "$DIST"
