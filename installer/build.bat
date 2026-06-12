@@ -1,6 +1,6 @@
 @echo off
 REM Build the Schema-Driven Interfaces desktop installer for Windows using
-REM conda-pack + a 7-Zip self-extracting archive (.exe).
+REM conda-pack + a .zip package.
 REM
 REM Like build.sh, this packs the EXACT environment from environment.yml rather
 REM than re-solving (required for CompuCell3D 4.7.0 — see README.md).
@@ -25,12 +25,34 @@ if %errorlevel%==0 (
     call conda env create -n "%SDI_ENV_NAME%" -f "%REPO%\environment.yml"
 )
 
-echo ^>^> [2/5] Reinstalling wrapper packages non-editable
+REM The vs2015_win-64 conda package ships a broken activation script
+REM (vs2015_compiler_vars.bat does `GOTO End` with no `:End` label), which makes
+REM conda's pip step AND `conda run` fail on Windows — silently leaving the
+REM pip-only packages (vivarium-core + the wrappers) UNINSTALLED. Remove it; we
+REM don't need an MSVC compiler at runtime. We then (re)install those packages
+REM explicitly in step 2.
+for /f "delims=" %%i in ('conda info --base') do set "CONDA_BASE=%%i"
+set "ENVDIR=%CONDA_BASE%\envs\%SDI_ENV_NAME%"
+if exist "%ENVDIR%\etc\conda\activate.d\vs2015_compiler_vars.bat" (
+    del /f /q "%ENVDIR%\etc\conda\activate.d\vs2015_compiler_vars.bat"
+    echo    removed broken vs2015_compiler_vars.bat activation script
+)
+
+echo ^>^> [2/5] Installing pip packages (vivarium-core + wrappers, non-editable)
+REM env-create's pip step fails on Windows (see above), so install explicitly.
+call conda run -n "%SDI_ENV_NAME%" python -m pip install vivarium-core
 set "TMPWHL=%TEMP%\sdi_wheels"
 if exist "%TMPWHL%" rmdir /s /q "%TMPWHL%"
 mkdir "%TMPWHL%"
 call conda run -n "%SDI_ENV_NAME%" python -m pip wheel "%REPO%\vivarium-vcornea" "%REPO%\vivarium-angio" -w "%TMPWHL%" --no-deps
 call conda run -n "%SDI_ENV_NAME%" python -m pip install --no-deps --force-reinstall "%TMPWHL%\*.whl"
+
+REM Fail loudly if the env is incomplete, so we never ship a broken installer.
+call conda run -n "%SDI_ENV_NAME%" python -c "import cc3d, PyQt5, reportlab, vivarium, vivarium_vcornea, vivarium_angio; print('packaged env OK')"
+if errorlevel 1 (
+    echo ERROR: packaged env is missing required packages — aborting build.
+    exit /b 1
+)
 
 echo ^>^> [3/5] Packing environment (conda-pack)
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
