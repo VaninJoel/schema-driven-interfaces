@@ -61,7 +61,18 @@ if exist "%DIST%" rmdir /s /q "%DIST%"
 mkdir "%STAGE%\payload"
 mkdir "%DIST%"
 REM Use the conda-pack executable, not a `conda pack` subcommand.
-call conda run -n base conda-pack -n "%SDI_ENV_NAME%" -o "%STAGE%\vc_env.tar.gz" --force
+REM --ignore-missing-files: we deliberately deleted the broken vs2015 activation
+REM script above, so conda-pack would otherwise abort on the "deleted/overwritten
+REM conda-managed file" check. It's a no-op activation helper, safe to omit.
+call conda run -n base conda-pack -n "%SDI_ENV_NAME%" -o "%STAGE%\vc_env.tar.gz" --ignore-missing-files --force
+if errorlevel 1 (
+    echo ERROR: conda-pack failed — aborting build instead of shipping an env-less zip.
+    exit /b 1
+)
+if not exist "%STAGE%\vc_env.tar.gz" (
+    echo ERROR: conda-pack produced no vc_env.tar.gz — aborting build.
+    exit /b 1
+)
 
 echo ^>^> [4/5] Staging app code + model data
 for %%I in (vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper) do (
