@@ -50,7 +50,9 @@ conda run -n "$ENV_NAME" python -m pip install --no-deps --force-reinstall "$TMP
 
 echo ">> [3/5] Packing environment (conda-pack)"
 rm -rf "$STAGE" "$DIST"; mkdir -p "$STAGE/payload" "$DIST"
-conda pack -n "$ENV_NAME" -o "$STAGE/vc_env.tar.gz" --force
+# Use the conda-pack executable (installed in base), not a `conda pack`
+# subcommand — the latter isn't registered as a conda plugin in all versions.
+conda run -n base conda-pack -n "$ENV_NAME" -o "$STAGE/vc_env.tar.gz" --force
 
 echo ">> [4/5] Staging app code + model data"
 for item in vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper \
