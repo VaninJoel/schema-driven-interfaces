@@ -45,7 +45,8 @@ set "TMPWHL=%TEMP%\sdi_wheels"
 if exist "%TMPWHL%" rmdir /s /q "%TMPWHL%"
 mkdir "%TMPWHL%"
 call conda run -n "%SDI_ENV_NAME%" python -m pip wheel "%REPO%\vivarium-vcornea" "%REPO%\vivarium-angio" -w "%TMPWHL%" --no-deps
-call conda run -n "%SDI_ENV_NAME%" python -m pip install --no-deps --force-reinstall "%TMPWHL%\*.whl"
+REM cmd.exe does NOT expand *.whl, so install by name via --find-links instead.
+call conda run -n "%SDI_ENV_NAME%" python -m pip install --no-deps --force-reinstall --no-index --find-links "%TMPWHL%" vivarium-vcornea vivarium-angio
 
 REM Fail loudly if the env is incomplete, so we never ship a broken installer.
 call conda run -n "%SDI_ENV_NAME%" python -c "import cc3d, PyQt5, reportlab, vivarium, vivarium_vcornea, vivarium_angio; print('packaged env OK')"
