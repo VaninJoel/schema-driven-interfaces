@@ -37,11 +37,25 @@ INSTALLER="$DIST/SchemaDrivenInterfaces-${VERSION}-${OSTAG}.sh"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
 echo ">> [1/5] Creating conda env '$ENV_NAME' from environment.yml"
+# The community 'compucell3d' anaconda.org channel is occasionally slow or
+# returns HTTP 503 / connection timeouts. Be patient and retry a few times
+# before giving up, so a transient upstream blip doesn't fail the whole build.
+export CONDA_REMOTE_MAX_RETRIES=5
+export CONDA_REMOTE_CONNECT_TIMEOUT_SECS=30
+export CONDA_REMOTE_READ_TIMEOUT_SECS=120
+retry() {
+    local n=1
+    until "$@"; do
+        if [ "$n" -ge 3 ]; then return 1; fi
+        echo ">> attempt $n failed (likely anaconda.org); retrying in 30s..."
+        n=$((n + 1)); sleep 30
+    done
+}
 if conda env list | grep -qE "^$ENV_NAME\s"; then
-    conda env update -n "$ENV_NAME" -f "$REPO/environment.yml" --prune
+    retry conda env update -n "$ENV_NAME" -f "$REPO/environment.yml" --prune
 else
     # environment.yml's name: is 'vc'; -n overrides it for the dist build.
-    conda env create -n "$ENV_NAME" -f "$REPO/environment.yml"
+    retry conda env create -n "$ENV_NAME" -f "$REPO/environment.yml"
 fi
 
 echo ">> [2/5] Reinstalling wrapper packages non-editable (relocatable)"
