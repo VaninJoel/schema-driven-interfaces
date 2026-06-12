@@ -15,7 +15,7 @@ set "REPO=%HERE%\.."
 if "%SDI_ENV_NAME%"=="" set "SDI_ENV_NAME=sdi-dist"
 set "STAGE=%HERE%\stage"
 set "DIST=%HERE%\dist"
-set "INSTALLER=%DIST%\SchemaDrivenInterfaces-Windows-x86_64.exe"
+set "INSTALLER=%DIST%\SchemaDrivenInterfaces-Windows-x86_64.zip"
 
 echo ^>^> [1/5] Creating conda env %SDI_ENV_NAME% from environment.yml
 call conda env list | findstr /b /c:"%SDI_ENV_NAME% " >nul
@@ -37,7 +37,8 @@ if exist "%STAGE%" rmdir /s /q "%STAGE%"
 if exist "%DIST%" rmdir /s /q "%DIST%"
 mkdir "%STAGE%\payload"
 mkdir "%DIST%"
-call conda pack -n "%SDI_ENV_NAME%" -o "%STAGE%\vc_env.tar.gz" --force
+REM Use the conda-pack executable, not a `conda pack` subcommand.
+call conda run -n base conda-pack -n "%SDI_ENV_NAME%" -o "%STAGE%\vc_env.tar.gz" --force
 
 echo ^>^> [4/5] Staging app code + model data
 for %%I in (vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper) do (
@@ -47,21 +48,22 @@ for %%F in (README.md INSTALL.md) do copy /y "%REPO%\%%F" "%STAGE%\payload\" >nu
 for /d /r "%STAGE%\payload" %%D in (__pycache__ experiments) do if exist "%%D" rmdir /s /q "%%D"
 copy /y "%HERE%\install.bat" "%STAGE%\install.bat" >nul
 
-echo ^>^> [5/5] Building self-extracting .exe with 7-Zip
-REM Build a 7z SFX: config specifies that install.bat runs after extraction.
-> "%STAGE%\__sfx_config.txt" (
-  echo ;!@Install@!UTF-8!
-  echo Title="Schema-Driven Interfaces"
-  echo RunProgram="cmd /c install.bat"
-  echo ;!@InstallEnd@!
+echo ^>^> [5/5] Packaging Windows installer (.zip)
+REM A .zip (built with the 7z we already install) is robust and needs no SFX
+REM module. The user extracts it and double-clicks install.bat, which does the
+REM unpack + conda-unpack + shortcut creation. Drop a short readme alongside.
+> "%STAGE%\README-INSTALL.txt" (
+  echo Schema-Driven Interfaces - Windows install
+  echo.
+  echo 1. Extract this zip anywhere ^(e.g. your Downloads folder^).
+  echo 2. Double-click install.bat.
+  echo 3. Launch from the Start menu ^("V-Cornea Simulation" / "Angiogenesis Simulation"^).
+  echo.
+  echo Installs to %%LOCALAPPDATA%%\SchemaDrivenInterfaces ^(no admin rights needed^).
 )
 pushd "%STAGE%"
-7z a -t7z -mx=5 "%TEMP%\sdi_payload.7z" * -x^^!__sfx_config.txt >nul
+call conda run -n base 7z a -tzip -mx=5 "%INSTALLER%" * >nul
 popd
-REM Concatenate the 7z SFX module + config + archive into a single .exe
-for /f "delims=" %%P in ('where 7z.sfx 2^>nul') do set "SFXMOD=%%P"
-if "%SFXMOD%"=="" for /f "delims=" %%P in ('conda run -n base python -c "import os,sys; p=os.path.dirname(sys.executable); print(os.path.join(p,'Library','bin','7z.sfx'))"') do set "SFXMOD=%%P"
-copy /b "%SFXMOD%" + "%STAGE%\__sfx_config.txt" + "%TEMP%\sdi_payload.7z" "%INSTALLER%" >nul
 
 echo ^>^> Done: %INSTALLER%
 dir "%INSTALLER%"

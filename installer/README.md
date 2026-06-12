@@ -32,10 +32,12 @@ self-extracting installer. The installer ships the same bytes we test.
 |---------|---------------------------------------------------|-----------------------------------|
 | Linux   | `SchemaDrivenInterfaces-<ver>-Linux-x86_64.sh`    | `bash <file>.sh` → desktop entry  |
 | macOS   | `SchemaDrivenInterfaces-<ver>-macOS-<arch>.sh`    | run installer → `.command` on Desktop |
-| Windows | `SchemaDrivenInterfaces-<ver>-Windows-x86_64.exe` | run installer → Start-menu shortcut |
+| Windows | `SchemaDrivenInterfaces-<ver>-Windows-x86_64.zip` | extract → double-click `install.bat` → Start-menu shortcut |
 
 The Linux/macOS installers are [makeself](https://makeself.io/) self-extracting
-archives; the Windows installer is a 7-Zip self-extracting `.exe`.
+archives (one double-click file). The Windows installer is currently a `.zip`
+the user extracts and runs `install.bat` from — robust and dependency-free; a
+single-file `.exe` (NSIS/Inno Setup) is a planned follow-up.
 
 ## Building
 
@@ -47,8 +49,10 @@ Release on any `v*` tag (or via "Run workflow").
 Locally, for the OS you're on:
 
 ```bash
-# one-time build tools
-conda install -n base -c conda-forge conda-pack makeself 7zip -y
+# one-time build tools (makeself on Linux/macOS; 7zip on Windows — makeself
+# has no Windows build)
+conda install -n base -c conda-forge conda-pack makeself -y   # Linux/macOS
+# conda install -n base -c conda-forge conda-pack 7zip -y      # Windows
 
 # Linux / macOS
 bash installer/build.sh

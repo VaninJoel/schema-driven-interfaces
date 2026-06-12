@@ -33,9 +33,18 @@ jobs:
           conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
           conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
 
-      - name: Install build tools (conda-pack + packager)
+      # makeself is the Linux/macOS packager and has no win-64 build; 7zip is
+      # the Windows packager. Installing the wrong one for the OS fails the job,
+      # so install per-OS.
+      - name: Install build tools (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash -el {0}
-        run: conda install -n base -c conda-forge conda-pack makeself 7zip -y
+        run: conda install -n base -c conda-forge conda-pack makeself -y
+
+      - name: Install build tools (Windows)
+        if: runner.os == 'Windows'
+        shell: bash -el {0}
+        run: conda install -n base -c conda-forge conda-pack 7zip -y
 
       - name: Build installer (Linux/macOS)
         if: runner.os != 'Windows'
@@ -52,7 +61,7 @@ jobs:
           name: installer-${{ matrix.os }}
           path: |
             installer/dist/*.sh
-            installer/dist/*.exe
+            installer/dist/*.zip
           if-no-files-found: error
 
       - name: Attach to release
@@ -61,4 +70,4 @@ jobs:
         with:
           files: |
             installer/dist/*.sh
-            installer/dist/*.exe
+            installer/dist/*.zip
