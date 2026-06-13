@@ -91,6 +91,7 @@ for %%I in (vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper)
 for %%F in (README.md INSTALL.md) do copy /y "%REPO%\%%F" "%STAGE%\payload\" >nul
 for /d /r "%STAGE%\payload" %%D in (__pycache__ experiments) do if exist "%%D" rmdir /s /q "%%D"
 copy /y "%HERE%\install.bat" "%STAGE%\install.bat" >nul
+copy /y "%HERE%\repair_env.py" "%STAGE%\repair_env.py" >nul
 
 echo ^>^> [5/5] Packaging Windows installer (.zip)
 REM A .zip (built with the 7z we already install) is robust and needs no SFX

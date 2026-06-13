@@ -27,6 +27,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo   - verifying environment integrity...
+REM conda-unpack can corrupt .py files containing backslash escapes on Windows
+REM (conda-pack #154, e.g. _pytest\pathlib.py). Detect and restore them from the
+REM pristine packed env so imports don't crash with SyntaxError.
+call "%PREFIX%\python.exe" "%~dp0repair_env.py" "%PREFIX%" "vc_env.tar.gz"
+
 echo   - installing application files...
 set "SDI=%PREFIX%\share\sdi"
 if not exist "%SDI%" mkdir "%SDI%"

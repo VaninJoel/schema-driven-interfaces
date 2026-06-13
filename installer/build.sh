@@ -85,6 +85,7 @@ find "$STAGE/payload" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/
 find "$STAGE/payload" -type d -name experiments -prune -exec rm -rf {} + 2>/dev/null || true
 cp "$HERE/install.sh" "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh"
+cp "$HERE/repair_env.py" "$STAGE/repair_env.py"
 
 echo ">> [5/5] Building self-extracting installer with makeself"
 # makeself lives in base (not on PATH here), same as conda-pack above.
