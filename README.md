@@ -11,6 +11,23 @@ model, and running an experiment never requires editing simulation code by hand.
 
 ---
 
+## ⬇️ Download & install — no coding required
+
+Pre-built desktop installers bundle **everything** (including CompuCell3D) — no
+Python or conda setup. Download the one for your computer, then follow the last
+column. All builds live on the **[Releases page](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest)**.
+
+| Your computer | Download | Then |
+|---|---|---|
+| **Windows** (64-bit) | [Windows installer (.zip)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-Windows-x86_64.zip) | Extract the zip, double-click **`install.bat`**, then open **V-Cornea Simulation** / **Angiogenesis Simulation** from the Start menu. |
+| **macOS** (Apple Silicon) | [macOS installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-0.1.0-macOS-arm64.sh) | In Terminal: `chmod +x <file> && ./<file>`, then launch from the desktop. |
+| **Linux** (64-bit) | [Linux installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-0.1.0-Linux-x86_64.sh) | In a terminal: `chmod +x <file> && ./<file>`, then launch from the app menu. |
+
+Installs into your user folder — **no admin rights needed**. Prefer to run from
+the source code instead? See [Run from source](#run-from-source-developers).
+
+---
+
 ## Components
 
 | Folder | What it is |
@@ -39,7 +56,10 @@ GUI (PyQt5)  →  Vivarium process (ports_schema)  →  CC3D subprocess
 
 ---
 
-## Installation
+## Run from source (developers)
+
+> Most users want the **Download & install** section near the top of this page.
+> This section is for running directly from the source tree.
 
 Everything runs in a single self-contained conda environment (`vc`) — one file
 sets up CompuCell3D and the full Python stack:
