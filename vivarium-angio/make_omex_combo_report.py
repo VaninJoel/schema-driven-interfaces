@@ -23,6 +23,32 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+import os
+
+
+def _register_conda_dll_dirs():
+    """Make the packaged conda env usable when launched without `conda activate`.
+
+    Run via the env's python.exe directly (as the GUI launches this reporter),
+    conda's DLL dirs aren't on the search path, so numpy's MKL/LAPACK chain —
+    which matplotlib calls for every plot — fails to load and crashes the process
+    with a delay-load error (0xc06d007f). Register the conda DLL dirs explicitly.
+    No-op off Windows or in an already-activated env.
+    """
+    if sys.platform != 'win32' or not hasattr(os, 'add_dll_directory'):
+        return
+    for sub in ('Library\\bin', 'Library\\mingw-w64\\bin',
+                'Library\\usr\\bin', 'Scripts', ''):
+        d = os.path.join(sys.prefix, sub)
+        if os.path.isdir(d):
+            try:
+                os.add_dll_directory(d)
+            except OSError:
+                pass
+
+
+_register_conda_dll_dirs()
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -88,14 +114,20 @@ def _contents_rows(omex):
 
 # ----------------------------------------------------------------- discovery
 def discover_combos(root):
-    """Group flat `<base>_comboNNN_repRR/` replicate dirs by combination."""
+    """Group run directories (each holding a `data.zarr`) by combination.
+
+    Sweep/replicate runs use flat `<base>_comboNNN_repRR/` dirs, grouped here by
+    stripping the `_repRR` suffix. A plain single run has no `_repNN` suffix, so
+    its directory is treated as its own one-replicate combination — otherwise the
+    GUI's single runs would never produce a report.
+    """
     root = Path(root)
-    reps = sorted(d for d in root.iterdir()
-                  if d.is_dir() and re.search(r'_rep\d+$', d.name)
-                  and (d / 'data.zarr').exists())
     combos = {}
-    for d in reps:
-        combos.setdefault(re.sub(r'_rep\d+$', '', d.name), []).append(d)
+    for d in sorted(root.iterdir()):
+        if not (d.is_dir() and (d / 'data.zarr').exists()):
+            continue
+        key = re.sub(r'_rep\d+$', '', d.name) if re.search(r'_rep\d+$', d.name) else d.name
+        combos.setdefault(key, []).append(d)
     return combos
 
 
@@ -520,7 +552,7 @@ def generate(root, creator=None):
     root = Path(root)
     combos = discover_combos(root)
     if not combos:
-        print(f"[angio_report] no replicate dirs with data.zarr under {root}")
+        print(f"[angio_report] no runs with data.zarr under {root}")
         return []
     scan_spec, labels = derive_scan(combos)
     num_replicates = max(len(v) for v in combos.values())

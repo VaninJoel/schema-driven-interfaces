@@ -21,6 +21,32 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+import os
+
+
+def _register_conda_dll_dirs():
+    """Make the packaged conda env usable when launched without `conda activate`.
+
+    Run via the env's python.exe directly (as the GUI launches this reporter),
+    conda's DLL dirs aren't on the search path, so numpy's MKL/LAPACK chain —
+    which matplotlib calls for every plot — fails to load and crashes the process
+    with a delay-load error (0xc06d007f). Register the conda DLL dirs explicitly.
+    No-op off Windows or in an already-activated env.
+    """
+    if sys.platform != 'win32' or not hasattr(os, 'add_dll_directory'):
+        return
+    for sub in ('Library\\bin', 'Library\\mingw-w64\\bin',
+                'Library\\usr\\bin', 'Scripts', ''):
+        d = os.path.join(sys.prefix, sub)
+        if os.path.isdir(d):
+            try:
+                os.add_dll_directory(d)
+            except OSError:
+                pass
+
+
+_register_conda_dll_dirs()
+
 import numpy as np
 import pandas as pd
 

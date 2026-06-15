@@ -36,6 +36,13 @@ tar -xzf vc_env.tar.gz -C "$PREFIX"
 echo "  - finalizing environment (conda-unpack)..."
 "$PREFIX/bin/python" "$PREFIX/bin/conda-unpack"
 
+echo "  - verifying environment integrity..."
+# Cheap insurance: restore any .py that conda-unpack may have corrupted from the
+# pristine packed env. The backslash-mangling bug (conda-pack #154) is
+# Windows-only, so this is a no-op here, but it guards against any relocation
+# surprise on any OS.
+"$PREFIX/bin/python" "$(dirname "$0")/repair_env.py" "$PREFIX" "vc_env.tar.gz" || true
+
 echo "  - installing application files..."
 SDI="$PREFIX/share/sdi"
 mkdir -p "$SDI"

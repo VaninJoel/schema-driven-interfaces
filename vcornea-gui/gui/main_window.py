@@ -753,7 +753,9 @@ class VCorneaMainWindow(QMainWindow):
 
         self.setWindowTitle("V-Cornea Simulation")
         self.setGeometry(100, 100, 1400, 900)
-        self.setMinimumSize(1100, 700)
+        # Keep the floor small enough to fit a high-DPI 1080p panel (where the
+        # logical screen can be ~960x500); tabs scroll, so the window can shrink.
+        self.setMinimumSize(800, 560)
         self.setStyleSheet(
             "QMainWindow { background: #f7f7f7; }"
             "QGroupBox { font-weight: bold; border: 1px solid #d9d9d9;"
@@ -2853,6 +2855,16 @@ def main():
     app.setStyle('Fusion')  # Modern cross-platform style
 
     window = VCorneaMainWindow()
+    # Fit the window within the available screen. High-DPI display scaling
+    # (e.g. 200% on a 1080p panel) leaves little logical screen space, so clamp
+    # the default 1400x900 geometry to what actually fits and center it instead
+    # of overflowing the monitor.
+    avail = app.primaryScreen().availableGeometry()
+    w = min(window.width(), avail.width())
+    h = min(window.height(), avail.height())
+    window.resize(w, h)
+    window.move(avail.left() + (avail.width() - w) // 2,
+                avail.top() + (avail.height() - h) // 2)
     window.show()
 
     sys.exit(app.exec_())

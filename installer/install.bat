@@ -20,6 +20,18 @@ tar -xzf vc_env.tar.gz -C "%PREFIX%" || ^
 
 echo   - finalizing environment (conda-unpack)...
 call "%PREFIX%\Scripts\conda-unpack.exe"
+if errorlevel 1 (
+    echo ERROR: conda-unpack failed — the environment may not run correctly.
+    echo Press any key to close.
+    pause >nul
+    exit /b 1
+)
+
+echo   - verifying environment integrity...
+REM conda-unpack can corrupt .py files containing backslash escapes on Windows
+REM (conda-pack #154, e.g. _pytest\pathlib.py). Detect and restore them from the
+REM pristine packed env so imports don't crash with SyntaxError.
+call "%PREFIX%\python.exe" "%~dp0repair_env.py" "%PREFIX%" "vc_env.tar.gz"
 
 echo   - installing application files...
 set "SDI=%PREFIX%\share\sdi"
@@ -41,9 +53,15 @@ call :mkshortcut "Angiogenesis Simulation" "%APPS%\angio-gui\run_gui.py"
 
 echo.
 echo Schema-Driven Interfaces installed successfully.
-echo   Launch from the Start menu, or run:
+echo   Launch from the Start menu ("V-Cornea Simulation" / "Angiogenesis Simulation"),
+echo   or run these from a terminal:
 echo       "%PREFIX%\Scripts\vcornea-gui.bat"
 echo       "%PREFIX%\Scripts\angio-gui.bat"
+echo.
+REM Keep the window open so the user can read the result (double-click closes it
+REM instantly otherwise).
+echo Press any key to close this window.
+pause >nul
 endlocal
 exit /b 0
 

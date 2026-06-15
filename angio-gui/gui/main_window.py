@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QGroupBox, QPushButton, QLabel, QMessageBox, QComboBox,
     QTextBrowser, QSplitter, QFileDialog, QProgressBar, QDoubleSpinBox,
-    QCheckBox, QLineEdit, QSpinBox, QDialog, QDialogButtonBox
+    QCheckBox, QLineEdit, QSpinBox, QDialog, QDialogButtonBox, QScrollArea
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -529,6 +529,7 @@ class AngiogenesisMainWindow(QMainWindow):
 
         self.setWindowTitle("Angiogenesis Simulation")
         self.setGeometry(100, 100, 1400, 900)
+        self.setMinimumSize(800, 560)
 
         self.init_ui()
         self.create_parameter_tabs()
@@ -677,7 +678,15 @@ class AngiogenesisMainWindow(QMainWindow):
 
             tab_layout.addStretch()
             tab_widget.setLayout(tab_layout)
-            self.tab_widget.addTab(tab_widget, tab_name)
+
+            # Wrap each tab in a scroll area so the window can shrink below the
+            # full parameter list. Without this the layout's minimum height
+            # exceeds the screen on high-DPI displays and content is clipped.
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(tab_widget)
+            scroll.setFrameShape(QScrollArea.NoFrame)
+            self.tab_widget.addTab(scroll, tab_name)
 
     def create_parameter_widget(self, param_name: str):
         """
@@ -2375,6 +2384,16 @@ def main():
     app.setStyle('Fusion')  # Modern cross-platform style
 
     window = AngiogenesisMainWindow()
+    # Fit the window within the available screen. High-DPI display scaling
+    # (e.g. 200% on a 1080p panel) leaves little logical screen space, so clamp
+    # the default 1400x900 geometry to what actually fits and center it instead
+    # of overflowing the monitor.
+    avail = app.primaryScreen().availableGeometry()
+    w = min(window.width(), avail.width())
+    h = min(window.height(), avail.height())
+    window.resize(w, h)
+    window.move(avail.left() + (avail.width() - w) // 2,
+                avail.top() + (avail.height() - h) // 2)
     window.show()
 
     sys.exit(app.exec_())
