@@ -32,16 +32,26 @@ def _register_conda_dll_dirs():
     fails to load and crashes the process with a delay-load error (0xc06d007f).
     Register the conda DLL dirs explicitly. No-op off Windows / in an activated env.
     """
-    if sys.platform != 'win32' or not hasattr(os, 'add_dll_directory'):
+    if sys.platform != 'win32':
         return
+    dirs = []
     for sub in ('Library\\bin', 'Library\\mingw-w64\\bin',
                 'Library\\usr\\bin', 'Scripts', ''):
         d = os.path.join(sys.prefix, sub)
         if os.path.isdir(d):
-            try:
-                os.add_dll_directory(d)
-            except OSError:
-                pass
+            dirs.append(d)
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    os.add_dll_directory(d)
+                except OSError:
+                    pass
+    # add_dll_directory only governs DLLs the Python loader resolves; numpy/MKL
+    # delay-load their secondary DLLs (mkl_intel_thread, libiomp5md, ...) through
+    # a plain LoadLibrary that searches PATH, not the added dirs. Prepending these
+    # to PATH is what `conda activate` does, and it's what actually prevents the
+    # 0xc06d007f delay-load crash.
+    if dirs:
+        os.environ['PATH'] = os.pathsep.join(dirs) + os.pathsep + os.environ.get('PATH', '')
 
 
 _register_conda_dll_dirs()
