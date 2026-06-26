@@ -121,9 +121,13 @@ class SimulationWorker(QObject):
             # Save run metadata to experiment directory
             self._save_run_metadata(exit_code, final_step)
 
-            # Always package the run into a COMBINE/OMEX archive (no opt-out)
-            if exit_code == 0 and self.zarr_path.exists():
-                self._generate_omex_archive(final_step)
+            # Always package the run into a COMBINE/OMEX archive (no opt-out) —
+            # successful AND failed. A failed run produces a typed archive marked
+            # failed (no executable SED-ML, status.json=failed) carrying params,
+            # provenance, logs and any partial Zarr outputs, instead of being left
+            # as a loose directory.
+            run_succeeded = (exit_code == 0 and self.zarr_path.exists())
+            self._generate_omex_archive(final_step, failed=not run_succeeded)
 
             if exit_code == 0:
                 self.progress.emit(100, "Simulation completed successfully!")
@@ -207,6 +211,20 @@ try:
     engine.update(sim_time)
 
     print(f"Simulation completed successfully", flush=True)
+
+    # Capture the model from the LIVE process instance BEFORE we hard-exit:
+    # serialize the native CC3D project from the executed self.specs and record the
+    # live source path (Tasks D & E). os._exit() below bypasses Process.finish(),
+    # so this is the only point at which the live instance is still in memory. The
+    # parent worker's OMEX builder discovers <exp_dir>/model_export/ and bundles it.
+    try:
+        proc = composite['processes']['angiogenesis']
+        exp_dir = os.path.dirname(params['angiogenesis_process']['store_path'])
+        proc.export_model_export_dir(exp_dir)
+        print("Captured native CC3D model export", flush=True)
+    except Exception as _e:
+        print(f"Warning: model export capture failed: {{_e}}", flush=True)
+
     # CompuCell3D 4.7.0's simservice segfaults during Python interpreter
     # teardown after a run (process exits 139), which the parent worker would
     # otherwise misread as a failed simulation and skip OMEX packaging. All
@@ -346,6 +364,8 @@ except Exception as e:
             'experiment_name': self.exp_name,
             'timestamp': datetime.now().isoformat(),
             'parameters': self.parameters,
+            'simulation_status': 'success' if exit_code == 0 else 'failed',
+            'run_reference': self._build_run_reference(),  # Task B (None for single runs)
             'execution': {
                 'exit_code': exit_code,
                 'success': exit_code == 0,
@@ -375,12 +395,34 @@ except Exception as e:
         except Exception as e:
             print(f"Warning: Could not save run metadata: {e}")
 
-    def _generate_omex_archive(self, final_step):
-        """Package the Zarr store into a COMBINE/OMEX archive sibling to it.
+    def _build_run_reference(self):
+        """Task B back-reference for sweep runs, derived from sweep/replicate
+        provenance carried on the parameters. None for single runs."""
+        p = self.parameters
+        scan = p.get('parameter_scan')
+        scan_point = p.get('scan_point')
+        replicate_id = p.get('replicate_id')
+        parent = (p.get('parent_experiment_id') or p.get('parent_experiment')
+                  or p.get('batch_id'))
+        if not (scan or scan_point or replicate_id is not None or parent):
+            return None
+        return {
+            'parent_experiment_id': parent,
+            'parameter_combination': scan_point or None,
+            'replicate_index': replicate_id,
+            'combination_index': p.get('combination_index'),
+            'total_combinations': p.get('total_combinations'),
+            'total_replicates': p.get('total_replicates'),
+            'parameter_scan': scan or None,
+        }
 
-        Standards-compliant provenance is always-on: every successful run
-        produces an .omex archive at exp_dir/<exp_name>.omex. Failures here
-        are logged but never block the run from being reported as complete.
+    def _generate_omex_archive(self, final_step, failed=False):
+        """Package the run into a COMBINE/OMEX archive sibling to the Zarr store.
+
+        Standards-compliant provenance is always-on: every run — successful or
+        failed — produces an .omex archive at exp_dir/<exp_name>.omex. A failed
+        run is marked failed (no executable SED-ML); see create_omex_archive_from_zarr.
+        Failures here are logged but never block the run from being reported.
         """
         try:
             # Load omex_generator directly from the source file so we don't
@@ -410,8 +452,16 @@ except Exception as e:
                 'model_version': '1.0.0',
                 'parameters': self.parameters,
                 'final_step': final_step,
+                'final_mcs': final_step,
                 'zarr_store_path': str(self.zarr_path),
+                'simulation_status': 'failed' if failed else 'success',
+                'run_reference': self._build_run_reference(),  # Task B (None for single runs)
             }
+            # Surface sweep/replicate provenance so the SED-ML scan notes resolve.
+            for key in ('parameter_scan', 'scan_point', 'combination_index',
+                        'total_combinations', 'replicate_id', 'total_replicates'):
+                if self.parameters.get(key) is not None:
+                    run_metadata[key] = self.parameters[key]
             omex_path = create_omex_archive_from_zarr(
                 zarr_store_path=self.zarr_path,
                 run_metadata=run_metadata,
@@ -419,8 +469,10 @@ except Exception as e:
                 archive_path=self.exp_dir / f"{self.exp_name}.omex",
                 exp_name=self.exp_name,
                 creator=self.parameters.get('creator'),  # experimenter (provenance), if set
+                logs_dir=self.logs_dir,                   # stdout/stderr captured by this worker
+                failed=failed,
             )
-            print(f"Generated OMEX archive: {omex_path}")
+            print(f"Generated {'FAILED ' if failed else ''}OMEX archive: {omex_path}")
         except Exception as e:
             print(f"Warning: Could not generate OMEX archive: {e}")
 

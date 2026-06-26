@@ -17,6 +17,17 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+# Backs the COMBINE/OMEX + SED-ML conformance check in test_omex_validation.py.
+# Pinned so the standards-validation claim is reproducible on a fresh checkout,
+# not a manual pip-install someone has to know to do.
+validation = [
+    "biosimulators-utils>=0.2.3",
+    # biosimulators-utils -> kisao imports pkg_resources, which setuptools>=81
+    # removed; pin below the removal so the COMBINE validator imports cleanly.
+    "setuptools<81",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/joelvanin/vivarium-angio"
 "Bug Tracker" = "https://github.com/joelvanin/vivarium-angio/issues"

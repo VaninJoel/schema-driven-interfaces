@@ -1300,9 +1300,11 @@ class AngiogenesisMainWindow(QMainWindow):
             <pre style='background-color: #2c3e50; color: #ecf0f1; padding: 10px; border-radius: 5px; font-size: 10px;'>
 batch_sweep_20251106_143052/
 ├── baseline_combo001_rep01/
-│   ├── data.zarr/
-│   ├── logs/
-│   └── run_metadata.json
+│   ├── data.zarr/                      (full trajectory)
+│   ├── logs/                           (stdout.log, stderr.log)
+│   ├── model_export/                   (native CC3D project + live source)
+│   ├── run_metadata.json               (provenance + run_reference)
+│   └── baseline_combo001_rep01.omex    (COMBINE/OMEX archive)
 ├── baseline_combo001_rep02/
 ├── baseline_combo002_rep01/
 └── ...</pre>
@@ -1327,6 +1329,35 @@ batch_sweep_20251106_143052/
                 <li><strong>Output Directory:</strong> Choose where experiments are saved (local or network drives)</li>
                 <li><strong>Zarr Format:</strong> Efficient hierarchical storage with incremental writes</li>
             </ul>
+        </div>
+
+        <div class="section">
+            <h2>Standards-Based Provenance &amp; Validation</h2>
+            <p>Every run is packaged into a self-contained <strong>COMBINE/OMEX archive</strong>
+            (<code>&lt;run&gt;.omex</code>) alongside its outputs — a portable, standards-compliant
+            record of exactly what was run.</p>
+            <div class="feature"><strong>SED-ML + manifest:</strong> each successful archive carries an
+                executable SED-ML description (master) and a typed OMEX manifest covering every entry.</div>
+            <div class="feature"><strong>Re-runnable model artifact:</strong> the exact model is embedded two ways —
+                (1) the first-party Python source pinned to the <em>live</em> module that actually ran, plus a
+                re-run driver, resolved parameters and a pinned environment descriptor; and (2) a
+                <strong>native CompuCell3D project</strong> (<code>model/angiogenesis.cc3d</code>) serialized from the
+                run's live specs, runnable under stock <code>cc3d.run_script</code> with no Vivarium. (The native
+                project uses a CC3D-native output dumper in place of the Vivarium writer: dynamics are identical,
+                output cadence is not bit-identical to the Zarr.)</div>
+            <div class="feature"><strong>Failed runs are preserved, not discarded:</strong> a failed run produces a
+                typed archive explicitly marked failed (<code>status.json</code>,
+                <code>run_metadata.simulation_status</code>) with no executable SED-ML — so it can never be mistaken
+                for a reproducible success — while still keeping parameters, logs and any partial outputs for audit.</div>
+            <div class="feature"><strong>Sweep back-references:</strong> each run's <code>run_metadata.json</code>
+                records its parent experiment, swept-parameter point and replicate index, so a per-run archive is
+                never an orphan.</div>
+            <div class="feature"><strong>Community-standard conformance:</strong> archives are checked for
+                structural validity and validated against the COMBINE/OMEX + SED-ML specifications using
+                <a href="https://docs.biosimulators.org/Biosimulators_utils/">biosimulators-utils</a>. This validator
+                ships as a pinned <code>validation</code> dependency (installed by the project's conda environment),
+                so the conformance check is reproducible on a fresh checkout — see
+                <code>test_omex_validation.py</code>.</div>
         </div>
 
         <div class="section">
@@ -1964,6 +1995,22 @@ batch_sweep_20251106_143052/
                 params_copy = params.copy()
                 params_copy['exp_name'] = exp_name
                 params_copy['creator'] = self.current_params.get('creator')  # OMEX provenance
+
+                # Task B: sweep/replicate provenance so each run's archive carries a
+                # back-reference to its parent experiment, swept-parameter point and
+                # replicate index (populated only for sweeps/replicates).
+                is_sweep_run = len(self.parameter_combinations) > 1
+                if is_sweep_run or replicates > 1:
+                    params_copy['parent_experiment_id'] = base_exp_name
+                    params_copy['total_combinations'] = len(self.parameter_combinations)
+                    params_copy['total_replicates'] = replicates
+                if is_sweep_run:
+                    params_copy['parameter_scan'] = dict(self.sweep_parameters)
+                    params_copy['scan_point'] = {
+                        k: params[k] for k in self.sweep_parameters if k in params}
+                    params_copy['combination_index'] = combo_idx + 1
+                if replicates > 1:
+                    params_copy['replicate_id'] = rep_idx + 1
 
                 print(f"Launching simulation {run_counter}/{self.total_combinations}: {exp_name}")
 

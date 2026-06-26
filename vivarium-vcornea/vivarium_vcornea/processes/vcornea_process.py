@@ -1818,6 +1818,10 @@ class VCorneaProcess(Process):
             run_metadata = self._create_run_metadata(sim_params, parameter_changes, run_name)
             run_metadata['replicate_id'] = replicate_id
             run_metadata['total_replicates'] = num_replicates
+            # Task B: per-run back-reference so a sweep/replicate run's archive is not
+            # an orphan (parent experiment, swept-parameter point, replicate index).
+            run_metadata['run_reference'] = self._build_run_reference(
+                sim_params, run_name, replicate_id, num_replicates)
             
             # Keep the working directory inside the user's chosen output
             # directory — it's where they can inspect Parameters.py and the
@@ -2073,27 +2077,32 @@ class VCorneaProcess(Process):
             with open(run_output_dir / "run_metadata.json", 'w') as f:
                 json.dump(run_metadata, f, indent=2)
 
-            # Only generate the COMBINE/OMEX archive for successful replicates.
-            # Producing an .omex for a failed run is misleading provenance —
-            # the archive would be ~3 KB of stderr with no real outputs.
-            if run_metadata.get('simulation_success'):
-                try:
-                    from ..utils.omex_generator import create_omex_archive
-                    omex_path = create_omex_archive(
-                        run_output_dir=run_output_dir,
-                        run_metadata=run_metadata,
-                        sim_params=sim_params,
-                        include_model=True,   # bundle the CC3D project so model/@source resolves
-                        creator=self.parameters.get('creator'),  # experimenter (provenance); None -> omitted
-                    )
-                    run_metadata['omex_archive'] = str(omex_path.name)
-                    # Re-save metadata with OMEX info
-                    with open(run_output_dir / "run_metadata.json", 'w') as f:
-                        json.dump(run_metadata, f, indent=2)
-                    print(f"    - Generated OMEX archive: {omex_path.name}")
-                except Exception as e:
-                    print(f"    - Warning: Could not generate OMEX archive: {e}")
-                    run_metadata['omex_archive'] = None
+            # Always produce a typed COMBINE/OMEX archive — successful AND failed.
+            # A failed run gets an archive marked failed (no executable SED-ML, a
+            # machine-readable status), carrying params/provenance, logs and any
+            # partial outputs. This keeps the run's provenance honest about failure
+            # rather than leaving it as a loose directory: the original concern (an
+            # .omex for a failed run is misleading provenance) is addressed by making
+            # the archive explicitly NOT a reproducible success, not by skipping it.
+            run_succeeded = bool(run_metadata.get('simulation_success'))
+            try:
+                from ..utils.omex_generator import create_omex_archive
+                omex_path = create_omex_archive(
+                    run_output_dir=run_output_dir,
+                    run_metadata=run_metadata,
+                    sim_params=sim_params,
+                    include_model=True,   # bundle the CC3D project so model/@source resolves
+                    creator=self.parameters.get('creator'),  # experimenter (provenance); None -> omitted
+                    failed=not run_succeeded,
+                )
+                run_metadata['omex_archive'] = str(omex_path.name)
+                # Re-save metadata with OMEX info
+                with open(run_output_dir / "run_metadata.json", 'w') as f:
+                    json.dump(run_metadata, f, indent=2)
+                print(f"    - Generated {'FAILED ' if not run_succeeded else ''}OMEX archive: {omex_path.name}")
+            except Exception as e:
+                print(f"    - Warning: Could not generate OMEX archive: {e}")
+                run_metadata['omex_archive'] = None
 
             self._update_experiment_log(output_base, run_metadata)
             # Keep the working directory inside the run output dir for
@@ -2335,6 +2344,30 @@ class VCorneaProcess(Process):
                 return f"{param}{value}"
         else:
             return f"{param}_{str(value)}"
+
+    def _build_run_reference(self, sim_params, run_name, replicate_id, num_replicates):
+        """Task B back-reference: stop a sweep/replicate run's archive from being an
+        orphan. Returns {parent_experiment_id, parameter_combination, replicate_index,
+        ...} or None for a single (non-sweep, single-replicate) run."""
+        scan_spec = self.parameters.get('parameter_scan')
+        scan_point = self.parameters.get('scan_point')
+        if scan_spec and scan_point is None:
+            scan_point = {p: sim_params.get(p) for p in scan_spec if p in sim_params}
+        is_sweep = bool(scan_spec)
+        is_replicated = bool(num_replicates and num_replicates > 1)
+        if not (is_sweep or is_replicated):
+            return None
+        parent = (self.parameters.get('parent_experiment_id')
+                  or self.parameters.get('parent_experiment') or run_name)
+        return {
+            'parent_experiment_id': parent,
+            'parameter_combination': scan_point or None,
+            'replicate_index': replicate_id,
+            'combination_index': self.parameters.get('combination_index'),
+            'total_combinations': self.parameters.get('total_combinations'),
+            'total_replicates': num_replicates,
+            'parameter_scan': scan_spec or None,
+        }
 
     def _create_run_metadata(self, sim_params, parameter_changes, run_name):
         """Create comprehensive metadata for this run."""

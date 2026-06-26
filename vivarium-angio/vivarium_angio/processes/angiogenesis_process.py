@@ -282,6 +282,67 @@ class WriterSteppable(SteppableBasePy):
         # We can do some final processing here if needed
         pass
 
+
+# =============================================================================
+# Native CC3D project export templates (Task E)
+# -----------------------------------------------------------------------------
+# A standalone, stock-CC3D-runnable project is serialized from the LIVE self.specs
+# of the executed AngiogenesisProcess (see export_model_export_dir). The Vivarium-
+# directed WriterSteppable is replaced by a CC3D-native frequency-based dumper so a
+# `cc3d.run_script` run produces output with NO vivarium import. Dynamics are
+# identical; output cadence/format is native (not bit-identical to the Zarr).
+# =============================================================================
+
+# Native output steppable substituted for the Vivarium WriterSteppable. Contains a
+# literal "{mcs:06d}" — do NOT str.format() this template.
+_NATIVE_DUMPER_STEPPABLE = '''"""Native CC3D output steppable for the exported angiogenesis project.
+
+SUBSTITUTES for the Vivarium-directed WriterSteppable used in the archived run:
+dumps a frequency-based snapshot of (cell type, cell id, VEGF field) to .npy under
+native_output/ so a standalone `cc3d.run_script` produces output WITHOUT vivarium.
+Dynamics are identical to the archived run; output cadence/format is native, so it
+is not bit-identical to the archived Zarr trajectory.
+"""
+import os
+import numpy as np
+from cc3d.core.PySteppables import SteppableBasePy
+
+
+class NativeDumperSteppable(SteppableBasePy):
+    def __init__(self, frequency=10):
+        SteppableBasePy.__init__(self, frequency)
+
+    def step(self, mcs):
+        out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "native_output")
+        os.makedirs(out, exist_ok=True)
+        arr = np.zeros((self.dim.x, self.dim.y, self.dim.z, 3))
+        vegf = self.field.VEGF
+        for x, y, z in self.every_pixel():
+            cell = self.cell_field[x, y, z]
+            if cell:
+                arr[x, y, z, 0] = cell.type
+                arr[x, y, z, 1] = cell.id
+            arr[x, y, z, 2] = vegf[x, y, z]
+        np.save(os.path.join(out, f"step_{mcs:06d}.npy"), arr)
+'''
+
+# Main project script. Absolute import works because cc3d.run_script puts the
+# project's Simulation/ dir on sys.path. {frequency} is filled by str.format().
+_NATIVE_MAIN_SCRIPT = '''from cc3d import CompuCellSetup
+from angiogenesisSteppables import NativeDumperSteppable
+
+CompuCellSetup.register_steppable(steppable=NativeDumperSteppable(frequency={frequency}))
+CompuCellSetup.run()
+'''
+
+_NATIVE_CC3D_DESCRIPTOR = '''<Simulation version="4.7.0">
+    <XMLScript Type="XMLScript">Simulation/angiogenesis.xml</XMLScript>
+    <PythonScript Type="Python">Simulation/angiogenesis.py</PythonScript>
+    <Resource Type="Python">Simulation/angiogenesisSteppables.py</Resource>
+</Simulation>
+'''
+
+
 class AngiogenesisProcess(Process):
     """
     Vivarium Process for angiogenesis simulation with comprehensive metadata.
@@ -1216,6 +1277,92 @@ class AngiogenesisProcess(Process):
 
         return issues
 
+    def export_model_export_dir(self, dest_dir):
+        """Capture this run's model from the LIVE instance into <dest_dir>/model_export/.
+
+        Two artifacts, both resolved from the actual executed instance (never a
+        reconstruction or a build/lib shadow copy), consumed by the OMEX builder:
+
+          * native/  — a runnable stock-CC3D project serialized from the LIVE
+            ``self.specs`` via ``build_xml(*self.specs).getCC3DXMLElementString()``
+            (Task E). The Vivarium WriterSteppable is replaced by a native
+            frequency-based dumper so the project runs under ``cc3d.run_script``
+            with no vivarium import.
+          * live_source.json — the first-party Python source paths resolved with
+            ``inspect.getsourcefile(type(self))`` (Task D), pinning the embedded
+            source to the exact imported module that ran.
+
+        Best-effort: failures are logged and never propagate into the run. Returns
+        the model_export dir Path (created on success)."""
+        import inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        dest = _Path(dest_dir) / 'model_export'
+
+        # (a) Native CC3D project from the LIVE specs of this instance (Task E).
+        try:
+            from cc3d.core.PyCoreSpecs import build_xml
+            cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
+            sim = dest / 'native' / 'Simulation'
+            sim.mkdir(parents=True, exist_ok=True)
+            freq = int(self.parameters.get('write_frequency', 10) or 10)
+            (sim / 'angiogenesis.xml').write_text(cc3dml)
+            (sim / 'angiogenesisSteppables.py').write_text(_NATIVE_DUMPER_STEPPABLE)
+            (sim / 'angiogenesis.py').write_text(_NATIVE_MAIN_SCRIPT.format(frequency=freq))
+            (dest / 'native' / 'angiogenesis.cc3d').write_text(_NATIVE_CC3D_DESCRIPTOR)
+        except Exception as e:
+            print(f"Warning: native CC3D project export failed: {e}")
+
+        # (b) Live source paths — pinned to the exact executed modules (Task D).
+        try:
+            files = []
+            proc_src = inspect.getsourcefile(type(self))
+            if proc_src:
+                files.append([str(_Path(proc_src).resolve()),
+                              'model/src/angiogenesis_process.py'])
+            try:
+                from vivarium_angio.composites import angiogenesis_composer as _cmod
+                comp_src = inspect.getsourcefile(_cmod)
+                if comp_src:
+                    files.append([str(_Path(comp_src).resolve()),
+                                  'model/src/angiogenesis_composer.py'])
+            except Exception:
+                pass
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / 'live_source.json').write_text(_json.dumps({
+                'primary': 'model/src/angiogenesis_process.py',
+                'resolved_via': 'inspect.getsourcefile(type(self))',
+                'files': files,
+            }, indent=2))
+        except Exception as e:
+            print(f"Warning: live model-source capture failed: {e}")
+
+        return dest
+
+    def _build_run_reference(self, params):
+        """Task B back-reference: stop a sweep run's archive from being an orphan.
+
+        Returns {parent_experiment_id, parameter_combination, replicate_index, ...}
+        derived from sweep/replicate provenance carried on the params, or None for a
+        single (non-sweep, non-replicate) run."""
+        scan = params.get('parameter_scan')
+        scan_point = params.get('scan_point')
+        replicate_id = params.get('replicate_id')
+        parent = (params.get('parent_experiment_id') or params.get('parent_experiment')
+                  or params.get('batch_id'))
+        if not (scan or scan_point or replicate_id is not None or parent):
+            return None
+        return {
+            'parent_experiment_id': parent,
+            'parameter_combination': scan_point or None,
+            'replicate_index': replicate_id,
+            'combination_index': params.get('combination_index'),
+            'total_combinations': params.get('total_combinations'),
+            'total_replicates': params.get('total_replicates'),
+            'parameter_scan': scan or None,
+        }
+
     def generate_experiment_metadata(self, params, run_info=None):
         """
         Generate comprehensive experiment metadata.
@@ -1254,6 +1401,16 @@ class AngiogenesisProcess(Process):
             'validation': self.validate_parameters(params),
             'schema_version': '1.0',
         }
+
+        # Surface sweep/replicate provenance at top level so the SED-ML scan notes
+        # (generate_sedml_document) can reference this run's place in the scan.
+        for key in ('parameter_scan', 'scan_point', 'combination_index',
+                    'total_combinations', 'replicate_id', 'total_replicates'):
+            if params.get(key) is not None:
+                metadata[key] = params[key]
+
+        # Task B: per-run back-reference (None for single runs).
+        metadata['run_reference'] = self._build_run_reference(params)
 
         if run_info:
             metadata.update(run_info)
@@ -1296,6 +1453,12 @@ class AngiogenesisProcess(Process):
                     'zarr_store_path': str(self.store),
                 },
             )
+            # Capture the model from the LIVE specs/class BEFORE teardown so the
+            # archive embeds a native CC3D project + source pinned to the executed
+            # module (Tasks D & E). create_omex_archive_from_zarr auto-discovers the
+            # model_export/ dir alongside the Zarr store.
+            from pathlib import Path as _Path
+            self.export_model_export_dir(_Path(self.store).parent)
             omex_path = create_omex_archive_from_zarr(
                 zarr_store_path=self.store,
                 run_metadata=run_metadata,

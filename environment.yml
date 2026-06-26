@@ -46,6 +46,11 @@ dependencies:
   - pip:
       - vivarium-core
       # editable installs of the local wrapper packages (paths are relative to
-      # this file, i.e. the repository root)
-      - -e ./vivarium-vcornea
-      - -e ./vivarium-angio
+      # this file, i.e. the repository root). The [validation] extra pulls
+      # biosimulators-utils (pinned) so the COMBINE/OMEX + SED-ML conformance
+      # check in each package's test_omex_validation.py is reproducible on a
+      # fresh checkout rather than a manual pip-install. The extra also pins
+      # setuptools<81 because biosimulators-utils -> kisao still imports
+      # pkg_resources, which setuptools>=81 removed.
+      - -e ./vivarium-vcornea[validation]
+      - -e ./vivarium-angio[validation]

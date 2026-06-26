@@ -835,9 +835,17 @@ def create_omex_archive(
     citation: str = ("Vanin et al. (2025). V-Cornea: a computational model of the "
                      "corneal epithelium."),
     keywords: Optional[List[str]] = None,
+    failed: bool = False,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
+
+    Failed runs (`failed=True`): the same container and typed manifest, carrying
+    params/provenance, logs and any partial outputs that exist, but marked failed and
+    WITHOUT asserting a reproducible experiment — the executable SED-ML is omitted
+    (so a consumer cannot mistake it for a completed run), a machine-readable
+    status.json is added, run_metadata.simulation_status='failed', and the provenance
+    RDF states the failure.
 
     The archive structure follows OMEX conventions:
     - manifest.xml at root (required)
@@ -884,10 +892,14 @@ def create_omex_archive(
         if primary:
             model_source = primary
 
+    status = 'failed' if failed else 'success'
+
     output_files = [item.name for item in run_output_dir.iterdir()
                     if item.is_file() and item.suffix != '.omex']
 
-    sedml_content = generate_sedml_document(
+    # A failed run omits the executable SED-ML entirely so a consumer cannot mistake
+    # the archive for a completed, reproducible experiment.
+    sedml_content = None if failed else generate_sedml_document(
         run_metadata=run_metadata,
         sim_params=sim_params,
         output_files=output_files,
@@ -903,13 +915,15 @@ def create_omex_archive(
                 else [{'given': str(cr)}] if cr else [])
     cfg = run_metadata.get('simulation_config', {})
     kp = run_metadata.get('key_parameters', {})
+    status_phrase = ("FAILED run (incomplete; not a reproducible experiment). " if failed
+                     else "")
     auto_desc = description or (
-        f"CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
+        f"{status_phrase}CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
         f"injury={'yes' if cfg.get('has_injury') else 'no'}"
         f"{(' (' + str(cfg.get('injury_type')) + ')') if cfg.get('has_injury') else ''}. "
         f"Key parameters: {', '.join(f'{k}={v}' for k, v in kp.items())}.")
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"V-Cornea simulation: {run_name}",
+        title=f"V-Cornea simulation: {run_name}" + (" [FAILED]" if failed else ""),
         description=auto_desc,
         created=run_metadata.get('created_at'),
         modified=datetime.now().isoformat(),
@@ -922,13 +936,33 @@ def create_omex_archive(
 
     manifest_entries = []
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # 1. SED-ML (master)
-        zf.writestr('simulation.sedml', sedml_content)
-        manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
+        # 1. SED-ML (master) — successful runs only. A failed archive omits it so a
+        #    consumer cannot mistake it for a completed, reproducible experiment.
+        if sedml_content is not None:
+            zf.writestr('simulation.sedml', sedml_content)
+            manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
 
         # 2. OMEX Metadata (provenance)
         zf.writestr('metadata.rdf', metadata_rdf)
         manifest_entries.append({'location': 'metadata.rdf', 'format': OMEX_METADATA_FORMAT})
+
+        # 2b. status.json — unambiguous machine-readable run status. Primary signal a
+        #     consumer uses to tell a failed archive from a success.
+        status_doc = {
+            'status': status,
+            'simulation_success': not failed,
+            'executable_sedml_present': not failed,
+            'run_name': run_name,
+            'error_message': run_metadata.get('error_message'),
+            'note': ('This run did NOT complete successfully. The archive preserves '
+                     'parameters, provenance, logs and any partial outputs for audit, '
+                     'but intentionally contains no executable SED-ML and asserts no '
+                     'reproducible experiment.' if failed else
+                     'Run completed successfully; simulation.sedml is the executable '
+                     'master describing the reproducible experiment.'),
+        }
+        zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
+        manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})
 
         # 3. Output files
         for item in run_output_dir.iterdir():
@@ -1459,16 +1493,21 @@ def validate_omex_manifest(manifest_content: str, archive_files: List[str]) -> D
     # Collect locations from manifest
     manifest_locations = set()
     has_master = False
+    has_sedml = False
 
     for content in root.findall('.//{%s}content' % OMEX_MANIFEST_NAMESPACE):
         location = content.get('location')
         if location and location != '.':
             manifest_locations.add(location)
+        if location and location.endswith('.sedml'):
+            has_sedml = True
         if content.get('master') == 'true':
             has_master = True
 
-    # Check for master file
-    if not has_master:
+    # A master entry is required only when the archive carries an executable SED-ML.
+    # A failed-run archive deliberately omits the SED-ML (so it cannot be mistaken for
+    # a reproducible success) and therefore has no master — that is valid.
+    if has_sedml and not has_master:
         errors.append("No file marked as master='true'")
 
     # Check that all archive files are in manifest
