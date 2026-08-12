@@ -93,8 +93,15 @@ def schema_fingerprint(schema: Dict[str, Any], *, port: str = 'inputs') -> str:
 # Code provenance (git checkout -> build stamp -> unavailable)
 # =============================================================================
 
-def _run_git(args, cwd) -> Optional[str]:
-    """Run a git command, returning stripped stdout or None. Never raises."""
+def _run_git(args, cwd, allow_empty: bool = False) -> Optional[str]:
+    """Run a git command, returning stripped stdout, or None on failure.
+
+    `allow_empty` distinguishes "ran fine and produced no output" from "failed".
+    That difference matters for queries whose empty result is the answer — e.g.
+    `branch -r --contains <sha>` prints nothing when no remote branch contains the
+    commit, which is exactly the case the caller needs to detect. Without it an
+    unpushed commit is indistinguishable from a git error.
+    """
     try:
         proc = subprocess.run(
             ['git', *args], cwd=str(cwd), capture_output=True, text=True,
@@ -104,7 +111,8 @@ def _run_git(args, cwd) -> Optional[str]:
         return None  # git absent, not executable, or timed out
     if proc.returncode != 0:
         return None
-    return proc.stdout.strip() or None
+    out = proc.stdout.strip()
+    return out if (out or allow_empty) else None
 
 
 def _normalize_remote(url: Optional[str]) -> Optional[str]:
@@ -163,12 +171,26 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
         untracked = [ln[3:] for ln in (_run_git(['status', '--porcelain'], here) or '')
                      .splitlines() if ln.startswith('??')]
         remote = _normalize_remote(_run_git(['config', '--get', 'remote.origin.url'], here))
+
+        # A commit URL is only worth publishing if the commit is actually reachable
+        # from the remote. Constructing it from the hash alone yields a link that
+        # 404s for every unpushed commit -- an archive asserting a source location
+        # that does not exist. None means "could not determine" (no remote, or git
+        # failed); a stale remote-tracking ref can only produce a false NEGATIVE,
+        # which under-claims rather than over-claims.
+        on_remote = None
+        remote_contains = _run_git(['branch', '-r', '--contains', commit], here,
+                                   allow_empty=True)
+        if remote_contains is not None:
+            on_remote = any(ln.strip() for ln in remote_contains.splitlines())
+
         info: Dict[str, Any] = {
             'source': 'git',
             'commit': commit,
             'commit_short': commit[:7],
             'dirty': dirty,
             'untracked_present': bool(untracked),
+            'commit_on_remote': on_remote,
             # Human-facing version anchored to the repository's tag history when
             # tags exist (e.g. v0.1.0-3-g44e563d), so a released build reports the
             # release it came from rather than a bare hash.
@@ -178,26 +200,35 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
             'remote_url': remote,
             'repo_root': _run_git(['rev-parse', '--show-toplevel'], here),
         }
+        # A URL is published only when the commit both describes the code that ran
+        # (clean tree) and can actually be fetched by a reader (present on the
+        # remote). Anything less is recorded as a note rather than a link.
+        notes = []
         if dirty:
-            # Tracked changes mean the commit does NOT describe what ran. Say so
-            # rather than publishing a URL that points at different code.
-            info['commit_url'] = None
-            info['note'] = (
+            notes.append(
                 'Tracked files were modified relative to this commit when the run '
                 'executed. The commit identifies the nearest committed state only '
-                'and does NOT fully describe the code that produced this result.'
-            )
-        else:
-            if remote:
-                info['commit_url'] = f'{remote}/commit/{commit}'
-            if untracked:
-                # Not a warning about the result, but recorded so an auditor can
-                # see the workspace was not pristine.
-                info['note'] = (
-                    f'All tracked files match this commit. {len(untracked)} '
-                    'untracked path(s) were present in the working tree and are '
-                    'not described by it.'
-                )
+                'and does NOT fully describe the code that produced this result.')
+        if on_remote is False:
+            notes.append(
+                'This commit exists only in the local repository and has not been '
+                'pushed, so the source is not publicly resolvable. Push the commit '
+                'before distributing this archive.')
+        elif on_remote is None and remote:
+            notes.append(
+                'Could not determine whether this commit is present on the remote; '
+                'no source link is asserted.')
+        if untracked:
+            # Not a warning about the result, but recorded so an auditor can see
+            # the workspace was not pristine.
+            notes.append(
+                f'{len(untracked)} untracked path(s) were present in the working '
+                'tree and are not described by this commit.')
+
+        info['commit_url'] = (f'{remote}/commit/{commit}'
+                              if (remote and not dirty and on_remote) else None)
+        if notes:
+            info['note'] = ' '.join(notes)
         return info
 
     stamp = _read_build_stamp(here)
