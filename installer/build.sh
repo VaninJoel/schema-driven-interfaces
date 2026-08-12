@@ -70,6 +70,14 @@ conda run -n "$ENV_NAME" python -m pip install --no-deps --force-reinstall "$TMP
 conda run -n "$ENV_NAME" python -c \
     "import cc3d, PyQt5, reportlab, vivarium, vivarium_vcornea, vivarium_angio; print('packaged env OK')"
 
+# Freeze the source revision into the packaged wrappers while the checkout is
+# still available. The installed application imports them from site-packages and
+# ships without .git, so without this every run an end user performs would report
+# its code identity as unavailable. Must run BEFORE conda-pack so the stamp is
+# inside the packed environment. Non-fatal: a missing stamp costs provenance,
+# not function.
+conda run -n "$ENV_NAME" python "$HERE/write_build_stamp.py" "$REPO" || true
+
 echo ">> [3/5] Packing environment (conda-pack)"
 rm -rf "$STAGE" "$DIST"; mkdir -p "$STAGE/payload" "$DIST"
 # Use the conda-pack executable (installed in base), not a `conda pack`
@@ -83,6 +91,11 @@ for item in vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper 
 done
 find "$STAGE/payload" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE/payload" -type d -name experiments -prune -exec rm -rf {} + 2>/dev/null || true
+# vcornea-gui/run_gui.py puts the payload's vivarium-vcornea ahead of
+# site-packages on sys.path, so V-Cornea imports the staged copy: stamp it too.
+conda run -n "$ENV_NAME" python "$HERE/write_build_stamp.py" "$REPO" \
+    --payload "$STAGE/payload" || true
+
 cp "$HERE/install.sh" "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh"
 cp "$HERE/repair_env.py" "$STAGE/repair_env.py"

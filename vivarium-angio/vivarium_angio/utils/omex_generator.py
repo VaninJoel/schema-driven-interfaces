@@ -47,8 +47,9 @@ NUML_NAMESPACE = "http://www.numl.org/numl/level1/version1"
 KISAO_ALGORITHM_ID = "KISAO:0000241"
 # Algorithm parameter carrying the RNG seed, so the archived experiment
 # description states which stochastic realization the bundled data represents.
-# TODO(verify): confirm this term ID against the KiSAO ontology release pinned by
-# biosimulators-utils before submission; it is referenced only here.
+# KISAO:0000488 is "seed" (synonym "random seed"), defined as the parameter that
+# "allows one to reproduce their results while running the same algorithm on the
+# same computer" — verified against the KiSAO ontology via EBI OLS.
 KISAO_RANDOM_SEED_ID = "KISAO:0000488"
 SEDML_SYMBOL_TIME = "urn:sedml:symbol:time"
 MODEL_LANGUAGE_URI = "urn:sedml:language:compucell3d"

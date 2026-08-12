@@ -65,6 +65,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Freeze the source revision into the packaged wrappers while the checkout is
+REM still available. The installed application imports them from site-packages and
+REM ships without .git, so without this every run an end user performs would report
+REM its code identity as unavailable. Must run BEFORE conda-pack so the stamp lands
+REM inside the packed environment. Non-fatal by design.
+call conda run -n "%SDI_ENV_NAME%" python "%HERE%\write_build_stamp.py" "%REPO%"
+
 echo ^>^> [3/5] Packing environment (conda-pack)
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 if exist "%DIST%" rmdir /s /q "%DIST%"
@@ -90,6 +97,10 @@ for %%I in (vcornea-gui angio-gui vivarium-vcornea vivarium-angio vcornea_paper)
 )
 for %%F in (README.md INSTALL.md) do copy /y "%REPO%\%%F" "%STAGE%\payload\" >nul
 for /d /r "%STAGE%\payload" %%D in (__pycache__ experiments) do if exist "%%D" rmdir /s /q "%%D"
+REM vcornea-gui\run_gui.py puts the payload's vivarium-vcornea ahead of
+REM site-packages on sys.path, so V-Cornea imports the staged copy: stamp it too.
+call conda run -n "%SDI_ENV_NAME%" python "%HERE%\write_build_stamp.py" "%REPO%" --payload "%STAGE%\payload"
+
 copy /y "%HERE%\install.bat" "%STAGE%\install.bat" >nul
 copy /y "%HERE%\repair_env.py" "%STAGE%\repair_env.py" >nul
 
