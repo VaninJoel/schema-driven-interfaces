@@ -153,31 +153,51 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
 
     commit = _run_git(['rev-parse', 'HEAD'], here)
     if commit:
-        # `git status --porcelain` prints one line per modified/untracked path;
-        # any output at all means the tree does not match the commit.
-        dirty = bool(_run_git(['status', '--porcelain'], here))
+        # Modified TRACKED files and merely-untracked files are reported
+        # separately, because they carry different risk. A tracked modification
+        # means the commit demonstrably does not describe the code that ran. An
+        # untracked file usually does not affect the run at all (editor state,
+        # scratch output, tool configuration) — treating it as equivalent would
+        # leave every run flagged as modified and make the flag meaningless.
+        dirty = bool(_run_git(['status', '--porcelain', '--untracked-files=no'], here))
+        untracked = [ln[3:] for ln in (_run_git(['status', '--porcelain'], here) or '')
+                     .splitlines() if ln.startswith('??')]
         remote = _normalize_remote(_run_git(['config', '--get', 'remote.origin.url'], here))
         info: Dict[str, Any] = {
             'source': 'git',
             'commit': commit,
             'commit_short': commit[:7],
             'dirty': dirty,
+            'untracked_present': bool(untracked),
+            # Human-facing version anchored to the repository's tag history when
+            # tags exist (e.g. v0.1.0-3-g44e563d), so a released build reports the
+            # release it came from rather than a bare hash.
+            'describe': _run_git(['describe', '--tags', '--always', '--dirty'], here),
             'branch': _run_git(['rev-parse', '--abbrev-ref', 'HEAD'], here),
             'committed_at': _run_git(['show', '-s', '--format=%cI', 'HEAD'], here),
             'remote_url': remote,
             'repo_root': _run_git(['rev-parse', '--show-toplevel'], here),
         }
         if dirty:
-            # A dirty tree means the commit does NOT describe what ran. Say so
+            # Tracked changes mean the commit does NOT describe what ran. Say so
             # rather than publishing a URL that points at different code.
             info['commit_url'] = None
             info['note'] = (
-                'Working tree had uncommitted changes when this run executed. The '
-                'commit identifies the nearest committed state only and does NOT '
-                'fully describe the code that produced this result.'
+                'Tracked files were modified relative to this commit when the run '
+                'executed. The commit identifies the nearest committed state only '
+                'and does NOT fully describe the code that produced this result.'
             )
-        elif remote:
-            info['commit_url'] = f'{remote}/commit/{commit}'
+        else:
+            if remote:
+                info['commit_url'] = f'{remote}/commit/{commit}'
+            if untracked:
+                # Not a warning about the result, but recorded so an auditor can
+                # see the workspace was not pristine.
+                info['note'] = (
+                    f'All tracked files match this commit. {len(untracked)} '
+                    'untracked path(s) were present in the working tree and are '
+                    'not described by it.'
+                )
         return info
 
     stamp = _read_build_stamp(here)
@@ -212,7 +232,7 @@ def short_label(record: Optional[Dict[str, Any]]) -> str:
     code = record.get('code') or {}
     src = code.get('source')
     if src == 'git':
-        code_txt = f"code {code.get('commit_short', '?')}"
+        code_txt = f"code {code.get('describe') or code.get('commit_short', '?')}"
         if code.get('dirty'):
             code_txt += ' (modified)'
     elif src == 'build_stamp':
