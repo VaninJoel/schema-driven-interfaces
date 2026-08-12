@@ -797,7 +797,7 @@ def _collect_model_files(model_path):
     return files, primary
 
 
-def generate_environment_manifest():
+def generate_environment_manifest(provenance=None):
     """Pinned descriptor of the software environment that executed the run.
 
     Requirement 2.5.4 asks for the computational context to be identifiable, not
@@ -843,20 +843,58 @@ def generate_environment_manifest():
         'platform': platform.platform(),
         'machine': platform.machine(),
         'packages': versions,
+        # Which revision of the wrapper produced this run. Belongs here as much as
+        # the third-party versions do: "what you need to reproduce this" is the
+        # packages AND the source revision that drove them.
+        'code': _provenance_block(provenance),
         'note': ('These packages must be installed to re-execute the CC3D project '
                  'bundled under model/. They are named, not embedded; the archive '
                  'carries the model and its parameters, not the runtime.'),
     }, indent=2, default=str)
 
 
+def _provenance_block(provenance):
+    """Compact, self-describing code/schema identity for embedding in JSON artifacts.
+
+    Returns None when nothing was captured, so a consumer can distinguish "not
+    recorded" from "recorded as unknown".
+    """
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    if not (code or prov.get('schema_fingerprint')):
+        return None
+    return {
+        'code_revision': code.get('describe') or code.get('commit_short'),
+        'commit': code.get('commit'),
+        'commit_url': code.get('commit_url'),
+        'working_tree_modified': code.get('dirty'),
+        'revision_retrievable': code.get('commit_on_remote'),
+        'identity_source': code.get('source'),
+        'schema_fingerprint': prov.get('schema_fingerprint'),
+        'note': ('code_revision identifies the source revision that produced this '
+                 'archive; schema_fingerprint identifies the parameter definitions '
+                 'the run was configured under. A modified working tree or an '
+                 'unretrievable revision is reported rather than hidden.'),
+    }
+
+
 def generate_omex_metadata_rdf(*, title, description=None, created=None, modified=None,
                                creators=None, license_uri=None, citation=None,
-                               keywords=None, about='.'):
+                               keywords=None, about='.', provenance=None):
     """Build an OMEX-Metadata RDF/XML document (Dublin Core terms + vCard creators).
 
     Records the run's provenance: title, description, creator(s) (the person
     RESPONSIBLE for the parameter choices), created/modified dates, license, and a
     bibliographic citation. This is attribution/provenance — not authentication.
+
+    Code and schema identity are emitted here as well as in run_metadata.json,
+    because this is the standards-native location: a COMBINE-aware reader inspects
+    metadata.rdf, and should not have to parse an application-specific JSON file to
+    learn which revision produced the archive. Mapping:
+
+        dcterms:hasVersion  -> the code revision (release-anchored where tagged)
+        dcterms:source      -> a retrievable link to that revision
+        dcterms:conformsTo  -> the schema fingerprint the run was configured under
     """
     RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     DCT = "http://purl.org/dc/terms/"
@@ -897,6 +935,20 @@ def generate_omex_metadata_rdf(*, title, description=None, created=None, modifie
         add('bibliographicCitation', citation)
     for kw in (keywords or []):
         add('subject', kw)
+
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    version = code.get('describe') or code.get('commit_short') or code.get('commit')
+    if version:
+        # Flagged when the tree did not match the revision, so the version string
+        # is never read as a complete description of what ran.
+        add('hasVersion', f"{version} (modified working tree)" if code.get('dirty') else version)
+    if code.get('commit_url'):
+        # Emitted only when the guard confirmed the revision is retrievable; see
+        # provenance.code_provenance.
+        add('source', code['commit_url'])
+    if prov.get('schema_fingerprint'):
+        add('conformsTo', prov['schema_fingerprint'])
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
 
 
@@ -1010,6 +1062,7 @@ def create_omex_archive(
         citation=citation,
         keywords=keywords or ['CompuCell3D', 'cornea', 'epithelium',
                               'agent-based model', 'wound healing'],
+        provenance=run_metadata.get('provenance'),
     )
 
     manifest_entries = []
@@ -1045,7 +1098,8 @@ def create_omex_archive(
         # 2c. environment.json — what is needed to re-execute the bundled project
         #     (requirement 2.5.4). Written for failed runs too: knowing which
         #     environment produced a failure is exactly what makes it diagnosable.
-        zf.writestr('environment.json', generate_environment_manifest())
+        zf.writestr('environment.json',
+                    generate_environment_manifest(run_metadata.get('provenance')))
         manifest_entries.append({'location': 'environment.json',
                                  'format': FORMAT_URIS['.json']})
 
@@ -1439,10 +1493,25 @@ def create_experiment_scan_archive(
             scan_spec=scan_spec, combinations=combinations, run_name=run_name,
             sim_params=sim_params, num_replicates=num_replicates)
 
+    # Code identity of the tooling that assembled this experiment-level archive.
+    # Only the code half is captured: the schema fingerprint is a property of a
+    # configured run and lives in the per-point archives. Imported defensively
+    # because this module is also loaded by file path, where relative imports have
+    # no package context.
+    try:
+        try:
+            from .provenance import code_provenance
+        except ImportError:
+            from provenance import code_provenance
+        scan_provenance = {'code': code_provenance()}
+    except Exception:
+        scan_provenance = None
+
     scan_metadata = {
         'run_name': run_name,
         'created_at': datetime.now().isoformat(),
         'vivarium_wrapper_version': '1.0.0',
+        'provenance': _provenance_block(scan_provenance),
         'archive_type': 'experiment_scan',
         'comparison': bool(summaries),
         'parameter_scan': scan_spec,
@@ -1468,6 +1537,7 @@ def create_experiment_scan_archive(
         citation=citation,
         keywords=keywords or ['CompuCell3D', 'cornea', 'parameter scan',
                               'agent-based model', 'wound healing'],
+        provenance=scan_provenance,
     )
 
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:

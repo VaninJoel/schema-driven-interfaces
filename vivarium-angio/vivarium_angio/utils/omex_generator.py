@@ -279,7 +279,32 @@ def _collect_model_export(model_export_dir):
     return native_files, live_source_files, native_primary
 
 
-def generate_environment_manifest():
+def _provenance_block(provenance):
+    """Compact, self-describing code/schema identity for embedding in JSON artifacts.
+
+    Returns None when nothing was captured, so a consumer can distinguish "not
+    recorded" from "recorded as unknown".
+    """
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    if not (code or prov.get('schema_fingerprint')):
+        return None
+    return {
+        'code_revision': code.get('describe') or code.get('commit_short'),
+        'commit': code.get('commit'),
+        'commit_url': code.get('commit_url'),
+        'working_tree_modified': code.get('dirty'),
+        'revision_retrievable': code.get('commit_on_remote'),
+        'identity_source': code.get('source'),
+        'schema_fingerprint': prov.get('schema_fingerprint'),
+        'note': ('code_revision identifies the source revision that produced this '
+                 'archive; schema_fingerprint identifies the parameter definitions '
+                 'the run was configured under. A modified working tree or an '
+                 'unretrievable revision is reported rather than hidden.'),
+    }
+
+
+def generate_environment_manifest(provenance=None):
     """Best-effort pinned environment descriptor: the package versions needed to
     re-execute the embedded model source. The integrated model depends on
     CompuCell3D + vivarium packages that cannot be embedded as bytes, so they are
@@ -314,6 +339,10 @@ def generate_environment_manifest():
         'python_version': platform.python_version(),
         'platform': platform.platform(),
         'packages': versions,
+        # Which revision of the first-party code this environment was executing.
+        # Belongs here as much as the third-party versions do: "what you need to
+        # reproduce this" is the packages AND the model source revision.
+        'code': _provenance_block(provenance),
         'note': ('These packages must be installed to re-execute the embedded model '
                  'source. They are named, not embedded; see model/run_model.py.'),
     }, indent=2, default=str)
@@ -376,7 +405,11 @@ def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
     has_native = bool(native_primary)
     summary = {
         'model_name': run_metadata.get('model_name', 'Angiogenesis'),
+        # A declared, hand-maintained version: a statement about the model's
+        # scientific content, deliberately NOT advanced by every code change.
+        # `provenance` below is the machine-checkable identity.
         'model_version': run_metadata.get('model_version', '1.0.0'),
+        'provenance': _provenance_block(run_metadata.get('provenance')),
         'model_type': 'Cellular Potts model (CompuCell3D / vivarium process)',
         'process': 'vivarium_angio.processes.angiogenesis_process.AngiogenesisProcess',
         'simulation_status': status,
@@ -426,8 +459,18 @@ def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
 
 def generate_omex_metadata_rdf(*, title, description=None, created=None, modified=None,
                                creators=None, license_uri=None, citation=None,
-                               keywords=None, about='.'):
-    """OMEX-Metadata RDF/XML (Dublin Core + vCard). Provenance/attribution."""
+                               keywords=None, about='.', provenance=None):
+    """OMEX-Metadata RDF/XML (Dublin Core + vCard). Provenance/attribution.
+
+    Code and schema identity are emitted here as well as in run_metadata.json,
+    because this is the standards-native location: a COMBINE-aware reader inspects
+    metadata.rdf, and should not have to parse an application-specific JSON file to
+    learn which revision produced the archive. Mapping:
+
+        dcterms:hasVersion  -> the code revision (release-anchored where tagged)
+        dcterms:source      -> a retrievable link to that revision
+        dcterms:conformsTo  -> the schema fingerprint the run was configured under
+    """
     RDF = RDF_NAMESPACE
     DCT = DC_NAMESPACE
     VC = "http://www.w3.org/2006/vcard/ns#"
@@ -467,6 +510,20 @@ def generate_omex_metadata_rdf(*, title, description=None, created=None, modifie
         add('bibliographicCitation', citation)
     for kw in (keywords or []):
         add('subject', kw)
+
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    version = code.get('describe') or code.get('commit_short') or code.get('commit')
+    if version:
+        # Flagged when the tree did not match the revision, so the version string
+        # is never read as a complete description of what ran.
+        add('hasVersion', f"{version} (modified working tree)" if code.get('dirty') else version)
+    if code.get('commit_url'):
+        # Emitted only when the guard confirmed the revision is retrievable; see
+        # provenance.code_provenance.
+        add('source', code['commit_url'])
+    if prov.get('schema_fingerprint'):
+        add('conformsTo', prov['schema_fingerprint'])
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
 
 
@@ -828,7 +885,8 @@ def create_omex_archive_from_zarr(
         modified=datetime.now().isoformat(),
         creators=creators, license_uri=license_uri, citation=citation,
         keywords=keywords or ['angiogenesis', 'vasculogenesis', 'cellular Potts model',
-                              'VEGF', 'agent-based model'])
+                              'VEGF', 'agent-based model'],
+        provenance=run_metadata.get('provenance'))
 
     manifest_entries: List[Dict[str, str]] = []
 
@@ -881,7 +939,8 @@ def create_omex_archive_from_zarr(
         zf.writestr('model/run_params.json', json.dumps(sim_params, indent=2, default=str))
         manifest_entries.append({'location': 'model/run_params.json', 'format': FORMAT_URIS['.json']})
         #    3d. pinned environment descriptor (what to install to re-run)
-        zf.writestr('model/environment.json', generate_environment_manifest())
+        zf.writestr('model/environment.json',
+                    generate_environment_manifest(run_metadata.get('provenance')))
         manifest_entries.append({'location': 'model/environment.json', 'format': FORMAT_URIS['.json']})
         #    3e. self-contained re-run driver
         zf.writestr('model/run_model.py', generate_run_model_script())
@@ -1124,9 +1183,25 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
     else:
         sedml = generate_comparison_sedml_document(scan_spec, [], run_name, sim_params, num_replicates)
 
+    # Code identity of the tooling that assembled this experiment-level archive.
+    # Only the code half is captured here: the schema fingerprint is a property of
+    # a configured run, and lives in the per-point archives rather than being
+    # re-derived (which would mean constructing a process, and so a simulation).
+    # Imported defensively because this module is also loaded by file path, where
+    # relative imports have no package context.
+    try:
+        try:
+            from .provenance import code_provenance
+        except ImportError:
+            from provenance import code_provenance
+        scan_provenance = {'code': code_provenance()}
+    except Exception:
+        scan_provenance = None
+
     scan_metadata = {
         'run_name': run_name, 'created_at': datetime.now().isoformat(),
         'archive_type': 'experiment_scan', 'comparison': bool(summaries),
+        'provenance': _provenance_block(scan_provenance),
         'parameter_scan': scan_spec, 'total_scan_points': len(combinations or []),
         'replicates_per_point': num_replicates,
         'metrics': ANGIO_METRIC_COLUMNS,
@@ -1141,7 +1216,8 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
                      f"combinations of an angio scan ({'; '.join(f'{k} in {list(v)}' for k, v in scan_spec.items())})."),
         created=scan_metadata['created_at'], modified=scan_metadata['created_at'],
         creators=creators, license_uri=license_uri, citation=citation,
-        keywords=keywords or ['angiogenesis', 'parameter scan', 'cellular Potts model', 'VEGF'])
+        keywords=keywords or ['angiogenesis', 'parameter scan', 'cellular Potts model', 'VEGF'],
+        provenance=scan_provenance)
 
     # The comparison SED-ML sets model/@source = 'model/model_summary.json'
     # (see generate_comparison_sedml_document). Bundle that file so the @source
@@ -1151,7 +1227,8 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
     # and intentionally does not embed per-run model source); the per-run archives
     # at each scan point carry the re-runnable model artifact.
     model_summary = generate_model_summary(
-        {'model_name': 'Angiogenesis', 'schema_version': '1.0'}, sim_params)
+        {'model_name': 'Angiogenesis', 'schema_version': '1.0',
+         'provenance': scan_provenance}, sim_params)
 
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('scan.sedml', sedml)
