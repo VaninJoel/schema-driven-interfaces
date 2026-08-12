@@ -60,11 +60,16 @@ class SimulationWorker(QObject):
         self.process = None
         self.temp_script = None
         self.monitoring = False
+        # Wall-clock start, stamped when run() begins. Recorded with the run so a
+        # reviewer can distinguish a run that finished quickly from one that was
+        # cut short, and so batch cost is auditable.
+        self._started_at = None
 
     @pyqtSlot()
     def run(self):
         """Main method executed on background thread."""
         try:
+            self._started_at = time.time()
             self.progress.emit(0, f"Initializing simulation: {self.exp_name}")
 
             # Create temporary script for subprocess execution
@@ -366,12 +371,20 @@ except Exception as e:
             'parameters': self.parameters,
             'simulation_status': 'success' if exit_code == 0 else 'failed',
             'run_reference': self._build_run_reference(),  # Task B (None for single runs)
+            # The seed handed to the CPM kernel for THIS run (assigned per-run by
+            # the scheduler, so it is never the -1 sentinel here).
+            'random_seed': self.parameters.get('random_seed'),
+            'provenance': self._collect_provenance(),
             'execution': {
                 'exit_code': exit_code,
                 'success': exit_code == 0,
                 'final_step': final_step,
                 'expected_steps': int(self.sim_time),
-                'completion_percentage': (final_step / self.sim_time * 100) if self.sim_time > 0 else 0
+                'completion_percentage': (final_step / self.sim_time * 100) if self.sim_time > 0 else 0,
+                'duration_seconds': (round(time.time() - self._started_at, 3)
+                                     if self._started_at else None),
+                'started_at': (datetime.fromtimestamp(self._started_at).isoformat()
+                               if self._started_at else None),
             },
             'files': {
                 'stdout_log': 'logs/stdout.log',
@@ -394,6 +407,36 @@ except Exception as e:
                 json.dump(metadata, f, indent=2)
         except Exception as e:
             print(f"Warning: Could not save run metadata: {e}")
+
+    def _collect_provenance(self):
+        """Schema fingerprint + code identity for this run (requirement 2.5.1).
+
+        Loaded from the source tree by path for the same reason _generate_omex_archive
+        does: an older `vivarium_angio` may be installed in the active environment
+        without this submodule. Best-effort — never blocks a run.
+        """
+        try:
+            project_root = Path(__file__).resolve().parents[2]
+            mod_path = (project_root / 'vivarium-angio' / 'vivarium_angio'
+                        / 'utils' / 'provenance.py')
+            if not mod_path.exists():
+                return {'error': f'provenance module not found at {mod_path}'}
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location('angio_provenance', str(mod_path))
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            record = mod.run_provenance(start_path=mod_path.parent)
+            # The schema fingerprint is computed ONCE by the main window, which
+            # already holds the schema, and handed to each worker. It is not
+            # recomputed here: instantiating AngiogenesisProcess builds and starts
+            # a CC3D simulation in its constructor, so a "just read the schema"
+            # call would launch a stray simulation per run.
+            fingerprint = self.parameters.get('_schema_fingerprint')
+            if fingerprint:
+                record['schema_fingerprint'] = fingerprint
+            return record
+        except Exception as e:
+            return {'error': f'provenance capture failed: {e}'}
 
     def _build_run_reference(self):
         """Task B back-reference for sweep runs, derived from sweep/replicate
@@ -456,6 +499,12 @@ except Exception as e:
                 'zarr_store_path': str(self.zarr_path),
                 'simulation_status': 'failed' if failed else 'success',
                 'run_reference': self._build_run_reference(),  # Task B (None for single runs)
+                # Run identity: which realization, which parameter definitions,
+                # which code. Consumed by the SED-ML writer and the PDF report.
+                'random_seed': self.parameters.get('random_seed'),
+                'provenance': self._collect_provenance(),
+                'duration_seconds': (round(time.time() - self._started_at, 3)
+                                     if self._started_at else None),
             }
             # Surface sweep/replicate provenance so the SED-ML scan notes resolve.
             for key in ('parameter_scan', 'scan_point', 'combination_index',

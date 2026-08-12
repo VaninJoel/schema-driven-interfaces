@@ -477,6 +477,18 @@ class AngiogenesisMainWindow(QMainWindow):
         self.process = AngiogenesisProcess()
         self.schema = self.process.ports_schema()
 
+        # Content hash of the parameter definitions driving this session's controls.
+        # Computed once here (the schema is already in hand) and attached to every
+        # run, so each result records exactly which definitions it was configured
+        # under. Workers must not recompute it: constructing AngiogenesisProcess
+        # starts a CC3D simulation.
+        self.schema_fingerprint = None
+        try:
+            from vivarium_angio.utils.provenance import schema_fingerprint
+            self.schema_fingerprint = schema_fingerprint(self.schema)
+        except Exception as e:
+            print(f"Warning: could not compute schema fingerprint: {e}")
+
         # Extract schema information using utilities
         self.parameter_structure = get_parameter_structure(self.schema)
         self.display_names = get_display_name_mapping(self.schema)
@@ -1966,6 +1978,18 @@ batch_sweep_20251106_143052/
         replicates = self.replicate_spinbox.value()
         self.simulation_threads = []
 
+        # Every run's seed is drawn INDEPENDENTLY from the operating system's
+        # entropy source rather than derived by offsetting a shared base. Deriving
+        # replicate seeds arithmetically would make their independence an assumption
+        # about how the generator expands adjacent seeds, rather than a property of
+        # the experimental design. The batch stays reproducible because every drawn
+        # seed is recorded with its run, not because it can be regenerated from a
+        # single number. Nothing here prescribes a value: absent an explicit seed,
+        # the value is decided at launch and reported afterwards.
+        import random as _random
+        self._seed_rng = _random.SystemRandom()
+        self._seed_ceiling = 2 ** 31 - 1
+
         # Status message
         if len(self.parameter_combinations) > 1 or replicates > 1:
             self.statusBar().showMessage(
@@ -1995,6 +2019,29 @@ batch_sweep_20251106_143052/
                 params_copy = params.copy()
                 params_copy['exp_name'] = exp_name
                 params_copy['creator'] = self.current_params.get('creator')  # OMEX provenance
+                params_copy['_schema_fingerprint'] = self.schema_fingerprint
+
+                # Per-run seed, drawn independently unless the operator pinned one.
+                # A pinned seed (including one swept over random_seed) exists to
+                # reproduce a specific realization, so it applies to the first
+                # replicate; any further replicates must be distinct realizations or
+                # they are not replicates, and therefore draw their own seeds. The
+                # origin is recorded so a reader can tell a chosen seed from a
+                # reported one.
+                try:
+                    pinned_seed = int(params.get('random_seed', -1))
+                except (TypeError, ValueError):
+                    pinned_seed = -1
+                if pinned_seed >= 0 and rep_idx == 0:
+                    run_seed, seed_origin = pinned_seed, 'explicit'
+                else:
+                    run_seed = self._seed_rng.randrange(1, self._seed_ceiling)
+                    seed_origin = 'drawn'
+                    if pinned_seed >= 0:
+                        print(f"  note: {exp_name} replicate {rep_idx + 1} draws its own "
+                              f"seed ({run_seed}); a pinned seed applies to replicate 1 only")
+                params_copy['random_seed'] = run_seed
+                params_copy['random_seed_origin'] = seed_origin
 
                 # Task B: sweep/replicate provenance so each run's archive carries a
                 # back-reference to its parent experiment, swept-parameter point and

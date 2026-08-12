@@ -45,6 +45,11 @@ NUML_NAMESPACE = "http://www.numl.org/numl/level1/version1"
 # KiSAO:0000241 = Metropolis Monte Carlo (CPM/GGH family — used by the
 # angiogenesis Cellular Potts model just as it is by the vCornea model).
 KISAO_ALGORITHM_ID = "KISAO:0000241"
+# Algorithm parameter carrying the RNG seed, so the archived experiment
+# description states which stochastic realization the bundled data represents.
+# TODO(verify): confirm this term ID against the KiSAO ontology release pinned by
+# biosimulators-utils before submission; it is referenced only here.
+KISAO_RANDOM_SEED_ID = "KISAO:0000488"
 SEDML_SYMBOL_TIME = "urn:sedml:symbol:time"
 MODEL_LANGUAGE_URI = "urn:sedml:language:compucell3d"
 
@@ -335,12 +340,13 @@ def generate_run_model_script():
 # Exact wording of the output-cadence caveat for the exported native CC3D project.
 # Stated verbatim in model_summary.json whenever a native .cc3d is bundled.
 NATIVE_CADENCE_CAVEAT = (
-    "The exported native CC3D project (model/angiogenesis.cc3d) reproduces identical "
-    "model dynamics, but supplies output through a CC3D-native frequency-based dumper "
-    "steppable substituted for the Vivarium-directed WriterSteppable used in the "
-    "archived run. Snapshot timing and on-disk output format may therefore differ "
-    "from the archived Zarr trajectory: the dynamics are identical, the output cadence "
-    "is not bit-identical.")
+    "The exported native CC3D project (model/angiogenesis.cc3d) reproduces the archived "
+    "run's model, random seed, and number of Monte Carlo steps, so re-executing it "
+    "reproduces the same trajectory. It supplies output through a CC3D-native "
+    "frequency-based dumper steppable substituted for the Vivarium-directed "
+    "WriterSteppable used in the archived run, writing .npy snapshots under "
+    "native_output/ rather than the Zarr hierarchy. The on-disk output format therefore "
+    "differs from the archived trajectory even though the dynamics it records do not.")
 
 
 def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
@@ -496,6 +502,9 @@ def generate_sedml_document(
     scan_point = run_metadata.get('scan_point')
     combo_index = run_metadata.get('combination_index')
     total_combos = run_metadata.get('total_combinations')
+    # Resolved before the notes are written because both the human-readable notes
+    # and the executable algorithmParameter below report it.
+    seed = sim_params.get('random_seed', run_metadata.get('random_seed'))
 
     # Document notes
     notes = ET.SubElement(root, 'notes')
@@ -518,9 +527,35 @@ def generate_sedml_document(
                  f"PARAMETER SCAN: this archive holds ONE point of a scan{pos}. This "
                  f"run's swept values: {pt}. Full scan space: {dims}. The executable "
                  "scan description lives in the experiment-level scan archive."]
+    # State the seed as recorded fact. Previously this asserted "different seed"
+    # for every replicate without the seed being set or captured anywhere — a
+    # provenance claim the archive could not support.
+    if seed is not None and str(seed) != '-1':
+        info += [f"Random number generator seed: {seed} (recorded as SED-ML "
+                 f"algorithmParameter {KISAO_RANDOM_SEED_ID}). The Cellular Potts "
+                 "algorithm is stochastic; this seed identifies the realization "
+                 "the bundled data represents."]
+    else:
+        info += ["Random number generator seed: not recorded for this run, so the "
+                 "trajectory cannot be replayed exactly; compare replicate "
+                 "distributions rather than individual trajectories."]
     if n_replicates and n_replicates > 1:
-        info += [f"Replicate {run_metadata.get('replicate_id', '?')} of {n_replicates} "
-                 "(stochastic; identical parameters, different seed)."]
+        info += [f"Replicate {run_metadata.get('replicate_id', '?')} of {n_replicates}: "
+                 "identical parameters, distinct seed per replicate."]
+
+    prov = run_metadata.get('provenance') or {}
+    if prov.get('schema_fingerprint') or prov.get('code'):
+        code = prov.get('code') or {}
+        bits = [f"schema fingerprint {prov.get('schema_fingerprint', 'unrecorded')}"]
+        if code.get('source') == 'git':
+            bits.append(f"code commit {code.get('commit', '?')}"
+                        + (" (working tree modified — commit does not fully describe "
+                           "the code that ran)" if code.get('dirty') else ''))
+            if code.get('commit_url'):
+                bits.append(f"source: {code['commit_url']}")
+        elif code.get('source') == 'build_stamp':
+            bits.append(f"built from commit {code.get('commit', '?')}")
+        info += ["", "RUN IDENTITY: " + "; ".join(bits) + "."]
     for line in info:
         p = ET.SubElement(body, '{%s}p' % XHTML_NAMESPACE)
         p.text = line
@@ -551,6 +586,15 @@ def generate_sedml_document(
 
     algorithm = ET.SubElement(sim, 'algorithm')
     algorithm.set('kisaoID', KISAO_ALGORITHM_ID)
+
+    # The RNG seed is part of the executable description, not just a note: it
+    # identifies which realization of the stochastic process this archive holds.
+    # Omitted (rather than guessed) when the run predates seed capture.
+    if seed is not None and str(seed) != '-1':
+        algo_params = ET.SubElement(algorithm, 'listOfAlgorithmParameters')
+        seed_param = ET.SubElement(algo_params, 'algorithmParameter')
+        seed_param.set('kisaoID', KISAO_RANDOM_SEED_ID)
+        seed_param.set('value', str(seed))
 
     # Task
     list_of_tasks = ET.SubElement(root, 'listOfTasks')

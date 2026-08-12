@@ -360,7 +360,16 @@ class AngiogenesisProcess(Process):
         'veder': 0.3,
         'vesec': 0.3,
         'exp_name': 'vivarium_run',
+        # RNG seed handed to the CPM kernel. -1 means "draw one and record it";
+        # the orchestrator resolves it to a concrete value BEFORE launching, so a
+        # run is never executed under an unrecorded seed. See AUTO_SEED below.
+        'random_seed': -1,
     }
+
+    # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a
+    # negative value is unambiguous. The GUI/scheduler replaces it with a drawn
+    # seed and writes that value into the experiment specification.
+    AUTO_SEED = -1
 
     # Define reference papers as class constants for reusability
     REFERENCES = {
@@ -460,8 +469,19 @@ class AngiogenesisProcess(Process):
         super().__init__(parameters)
 
         self.specs = []
-        
-        simCore = PottsCore(dim_x=200, dim_y=200, dim_z=1, steps=10000, fluctuation_amplitude=5.0, neighbor_order=1, boundary_x="Periodic", boundary_y="Periodic")
+
+        # Resolve the RNG seed before building the model so the value that
+        # actually reaches the CPM kernel is the value recorded in metadata.
+        # A seed still unset at this point (direct API use rather than a GUI
+        # launch) is drawn here and written back onto self.parameters, so no
+        # run can execute under a seed nobody recorded.
+        self.random_seed = self._resolve_random_seed()
+
+        # random_seed is carried in PottsCore.spec_dict, so build_xml() emits it
+        # into the exported native CC3D project too — the seed travels with the
+        # re-runnable artifact rather than only with the metadata.
+        simCore = PottsCore(dim_x=200, dim_y=200, dim_z=1, steps=10000, fluctuation_amplitude=5.0, neighbor_order=1, boundary_x="Periodic", boundary_y="Periodic",
+                            random_seed=self.random_seed)
         self.specs.append(simCore)
 
         simMeta = Metadata(num_processors=1)
@@ -531,6 +551,31 @@ class AngiogenesisProcess(Process):
         self.core_sim.start()
         
         self.mcs = 0
+
+    def _resolve_random_seed(self):
+        """Return the concrete RNG seed for this run, drawing one if unset.
+
+        The scheduler normally assigns a seed per run (so the whole batch is
+        recorded before anything launches). This is the fallback for direct API
+        use: rather than let CC3D self-seed from an unrecorded source, draw a
+        seed here and write it back onto self.parameters so it is captured by
+        generate_experiment_metadata() and reaches the archive.
+        """
+        import random as _random
+        raw = self.parameters.get('random_seed', self.AUTO_SEED)
+        try:
+            seed = int(raw)
+        except (TypeError, ValueError):
+            seed = self.AUTO_SEED
+        if seed < 0:
+            # Drawn from the OS entropy source, not the module-level generator, so
+            # the value cannot be influenced by any earlier seeding of `random`.
+            # 2**31-1 keeps it inside the range CC3D's C++ RNG accepts across
+            # platforms.
+            seed = _random.SystemRandom().randrange(1, 2 ** 31 - 1)
+            self.parameters.setdefault('random_seed_origin', 'drawn')
+        self.parameters['random_seed'] = seed
+        return seed
 
     def ports_schema(self):
         """
@@ -1105,6 +1150,52 @@ class AngiogenesisProcess(Process):
                     '_parameter_type': 'control',
                 },
 
+                'random_seed': {
+                    '_default': AngiogenesisProcess.AUTO_SEED,
+                    '_updater': 'set',
+                    '_emit': True,
+
+                    '_display_name': 'Random Seed',
+                    '_description': 'Seed for the Monte Carlo random number generator. '
+                                    'Leave at -1 to draw a seed automatically; the drawn '
+                                    'value is recorded with the run either way.',
+                    '_long_description':
+                        'The Cellular Potts algorithm is stochastic, so two runs with identical '
+                        'parameters diverge unless they share a seed. Setting this value fixes '
+                        'the trajectory as far as the execution environment allows; -1 draws a '
+                        'fresh seed, which is then written into the experiment specification, '
+                        'the run metadata, and the archived SED-ML, so a reader can always tell '
+                        'which seed produced the data in front of them. When several replicates '
+                        'are requested, each receives a distinct seed derived from this one, so '
+                        'the ensemble as a whole is reproducible rather than merely repeatable.',
+
+                    '_category': 'Simulation Setup',
+                    '_subcategory': 'Reproducibility',
+                    '_expert_level': 'intermediate',
+
+                    '_unit': 'dimensionless',
+                    '_unit_long': 'Integer seed (-1 = draw automatically)',
+                    '_conversion_factor': None,
+
+                    '_mathematical_range': (-1, 2147483646),
+
+                    '_gui_hints': {
+                        'widget_type': 'spinbox',
+                    },
+
+                    '_affects_output': ['trajectory_realization'],
+                    '_related_parameters': [],
+
+                    '_biological_meaning':
+                        'Not a biological quantity. It selects which realization of the '
+                        'stochastic process is observed, and therefore determines whether a '
+                        'difference between two runs reflects a parameter change or ordinary '
+                        'run-to-run variability.',
+
+                    '_parameter_type': 'control',
+                    '_measurable': False,
+                },
+
                 'write_frequency': {
                     '_default': 10,
                     '_updater': 'set',
@@ -1303,7 +1394,25 @@ class AngiogenesisProcess(Process):
         # (a) Native CC3D project from the LIVE specs of this instance (Task E).
         try:
             from cc3d.core.PyCoreSpecs import build_xml
-            cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
+            # The Potts spec carries the model's configured step ceiling (a large
+            # constant), not the length of THIS run — the run length is a Vivarium
+            # concern (how many times next_update was called). Exporting the ceiling
+            # verbatim produced a project that re-ran to 10,000 MCS regardless of an
+            # archived run of, say, 10 steps: same model and seed, wrong duration.
+            # Serialize the archived run's actual length instead, so the exported
+            # project reproduces the run rather than merely the model. The override
+            # is reverted immediately: self.specs belongs to the live simulation,
+            # which may still be stepping when export is called.
+            steps_override = self.mcs or int(self.parameters.get('sim_time', 0) or 0)
+            potts = next((s for s in self.specs if isinstance(s, PottsCore)), None)
+            prior_steps = getattr(potts, 'steps', None) if potts is not None else None
+            if potts is not None and steps_override > 0:
+                potts.steps = int(steps_override)
+            try:
+                cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
+            finally:
+                if potts is not None and prior_steps is not None:
+                    potts.steps = prior_steps
             sim = dest / 'native' / 'Simulation'
             sim.mkdir(parents=True, exist_ok=True)
             freq = int(self.parameters.get('write_frequency', 10) or 10)
@@ -1400,7 +1509,22 @@ class AngiogenesisProcess(Process):
             'parameter_changes': param_changes,
             'validation': self.validate_parameters(params),
             'schema_version': '1.0',
+            # The seed actually handed to the CPM kernel (resolved in __init__,
+            # so this is never the -1 sentinel).
+            'random_seed': getattr(self, 'random_seed', params.get('random_seed')),
         }
+
+        # Run identity (requirement 2.5.1): a content hash of the parameter
+        # definitions in force, plus the identity of the code that ran. Recorded
+        # separately from the hand-maintained model/schema version strings above,
+        # which cannot detect drift on their own. Best-effort — provenance capture
+        # must never fail a run.
+        try:
+            from ..utils.provenance import run_provenance
+            metadata['provenance'] = run_provenance(schema)
+            metadata['schema_fingerprint'] = metadata['provenance']['schema_fingerprint']
+        except Exception as e:
+            metadata['provenance'] = {'error': f'provenance capture failed: {e}'}
 
         # Surface sweep/replicate provenance at top level so the SED-ML scan notes
         # (generate_sedml_document) can reference this run's place in the scan.
