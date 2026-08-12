@@ -31,10 +31,12 @@ vcornea-gui/experiments/
 # Publisher PDF (redistribution-restricted) — cite via DOI instead
 angio-gui/angio_paper.pdf
 
-# Editor / OS
+# Editor / OS / local tooling
 .vscode/
 .idea/
 .DS_Store
+# Claude Code machine-local settings (contains absolute paths for this machine)
+.claude/settings.local.json
 
 # Local CI log dumps (not part of the repo)
 .logs/

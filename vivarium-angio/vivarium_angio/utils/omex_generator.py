@@ -45,6 +45,11 @@ NUML_NAMESPACE = "http://www.numl.org/numl/level1/version1"
 # KiSAO:0000241 = Metropolis Monte Carlo (CPM/GGH family — used by the
 # angiogenesis Cellular Potts model just as it is by the vCornea model).
 KISAO_ALGORITHM_ID = "KISAO:0000241"
+# Algorithm parameter carrying the RNG seed, so the archived experiment
+# description states which stochastic realization the bundled data represents.
+# TODO(verify): confirm this term ID against the KiSAO ontology release pinned by
+# biosimulators-utils before submission; it is referenced only here.
+KISAO_RANDOM_SEED_ID = "KISAO:0000488"
 SEDML_SYMBOL_TIME = "urn:sedml:symbol:time"
 MODEL_LANGUAGE_URI = "urn:sedml:language:compucell3d"
 
@@ -67,6 +72,7 @@ FORMAT_URIS = {
     '.txt': 'http://purl.org/NET/mediatypes/text/plain',
     '.log': 'http://purl.org/NET/mediatypes/text/plain',
     '.xml': 'http://purl.org/NET/mediatypes/application/xml',
+    '.cc3d': 'http://purl.org/NET/mediatypes/application/xml',
     '.py': 'http://purl.org/NET/mediatypes/text/x-python',
     '.parquet': 'http://purl.org/NET/mediatypes/application/x-parquet',
     # Zarr metadata files (per Zarr v2/v3 spec: hidden JSON files at each node)
@@ -205,21 +211,217 @@ def extract_zarr_metrics(zarr_store_path):
     return ("\n".join(rows) + "\n") if len(rows) > 1 else None
 
 
-def generate_model_summary(run_metadata, sim_params):
-    """A small self-describing model artifact (the angio model is Python code, not a
-    standalone file). model/@source points at this so the archive is self-contained."""
+def _collect_model_source_files():
+    """Return ([(src_path, archive_path), ...], primary_archive_path) for the
+    first-party Python source that DEFINES the integrated angiogenesis model.
+
+    Unlike the decoupled case there is no .cc3d/CC3DML/PIFF on disk: the model is
+    built in Python — AngiogenesisProcess constructs the CC3D specs from the
+    parameters and carries the WriterSteppable, and the composer is the run entry
+    point — so the actual source IS the model artifact. The primary file (what the
+    SED-ML model/@source should resolve to) is the process module."""
+    pkg_root = Path(__file__).resolve().parents[1]   # .../vivarium_angio
+    candidates = [
+        (pkg_root / 'processes' / 'angiogenesis_process.py',
+         'model/src/angiogenesis_process.py'),
+        (pkg_root / 'composites' / 'angiogenesis_composer.py',
+         'model/src/angiogenesis_composer.py'),
+    ]
+    files = [(p, a) for (p, a) in candidates if p.exists()]
+    primary = ('model/src/angiogenesis_process.py' if files
+               else 'model/model_summary.json')
+    return files, primary
+
+
+def _collect_model_export(model_export_dir):
+    """Discover a `model_export/` staging directory written by the LIVE process at
+    run time (AngiogenesisProcess.export_model_export_dir). Returns
+    (native_files, live_source_files, native_primary):
+
+      * native_files       — [(abs_path, archive_loc)] for a runnable stock-CC3D
+                             project (model/angiogenesis.cc3d + model/Simulation/*),
+                             serialized from the live `self.specs` of the run.
+      * live_source_files  — [(abs_path, archive_loc)] for the first-party Python
+                             source, resolved from the LIVE imported module of the
+                             executed process (inspect.getsourcefile), so the embed
+                             is pinned to the exact code that ran — never a build/lib
+                             shadow copy.
+      * native_primary     — 'model/<name>.cc3d' if a native project was exported,
+                             else None.
+
+    Empty/(),None when the staging dir is absent (e.g. post-hoc regeneration with
+    no live instance) — the caller then falls back to static source resolution."""
+    model_export_dir = Path(model_export_dir)
+    native_files, live_source_files, native_primary = [], [], None
+    if not model_export_dir.exists():
+        return native_files, live_source_files, native_primary
+
+    native_root = model_export_dir / 'native'
+    if native_root.exists():
+        for p in sorted(native_root.rglob('*')):
+            if not p.is_file():
+                continue
+            loc = f"model/{p.relative_to(native_root).as_posix()}"
+            native_files.append((p, loc))
+            if p.suffix == '.cc3d':
+                native_primary = loc
+
+    ls = model_export_dir / 'live_source.json'
+    if ls.exists():
+        try:
+            info = json.loads(ls.read_text())
+            for abs_path, loc in info.get('files', []):
+                ap = Path(abs_path)
+                if ap.exists():
+                    live_source_files.append((ap, loc))
+        except Exception:
+            pass
+    return native_files, live_source_files, native_primary
+
+
+def generate_environment_manifest():
+    """Best-effort pinned environment descriptor: the package versions needed to
+    re-execute the embedded model source. The integrated model depends on
+    CompuCell3D + vivarium packages that cannot be embedded as bytes, so they are
+    *named* here for the reviewer to reconstruct the runtime."""
+    import platform
+    pkgs = ['cc3d', 'vivarium-core', 'vivarium-angio', 'zarr', 'numcodecs',
+            'numpy', 'scipy', 'pandas']
+    versions = {}
+    try:
+        from importlib.metadata import version
+    except Exception:
+        version = None
+    for name in pkgs:
+        v = None
+        if version is not None:
+            try:
+                v = version(name)
+            except Exception:
+                v = None
+        if v is None:
+            # conda-installed packages (notably CompuCell3D) may carry no
+            # importlib.metadata distribution record; fall back to the module's
+            # own __version__ so the most important dependency is not reported
+            # as 'unknown'.
+            try:
+                mod = __import__(name.replace('-', '_'))
+                v = getattr(mod, '__version__', None)
+            except Exception:
+                v = None
+        versions[name] = v or 'unknown'
     return json.dumps({
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'packages': versions,
+        'note': ('These packages must be installed to re-execute the embedded model '
+                 'source. They are named, not embedded; see model/run_model.py.'),
+    }, indent=2, default=str)
+
+
+# A self-contained driver that re-executes the model from the bundled parameters,
+# mirroring the path the GUI worker uses (Engine + AngiogenesisComposer).
+_RUN_MODEL_SCRIPT = '''"""Re-run the integrated angiogenesis model from this OMEX archive.
+
+Prerequisites: install the packages named in environment.json (CompuCell3D,
+vivarium-core, vivarium-angio). Then, with model/src on PYTHONPATH, run:
+
+    python run_model.py
+
+This reconstructs the run from run_params.json using the same Vivarium
+Engine + AngiogenesisComposer path the GUI uses.
+"""
+import json
+from pathlib import Path
+
+from vivarium.core.engine import Engine
+from vivarium_angio.composites.angiogenesis_composer import AngiogenesisComposer
+
+params = json.loads((Path(__file__).parent / "run_params.json").read_text())
+composer = AngiogenesisComposer({"angiogenesis_process": params})
+engine = Engine(composite=composer.generate())
+engine.update(params.get("sim_time", 100.0))
+print("Re-run complete.")
+'''
+
+
+def generate_run_model_script():
+    """The model/run_model.py re-run driver (see _RUN_MODEL_SCRIPT)."""
+    return _RUN_MODEL_SCRIPT
+
+
+# Exact wording of the output-cadence caveat for the exported native CC3D project.
+# Stated verbatim in model_summary.json whenever a native .cc3d is bundled.
+NATIVE_CADENCE_CAVEAT = (
+    "The exported native CC3D project (model/angiogenesis.cc3d) reproduces the archived "
+    "run's model, random seed, and number of Monte Carlo steps, so re-executing it "
+    "reproduces the same trajectory. It supplies output through a CC3D-native "
+    "frequency-based dumper steppable substituted for the Vivarium-directed "
+    "WriterSteppable used in the archived run, writing .npy snapshots under "
+    "native_output/ rather than the Zarr hierarchy. The on-disk output format therefore "
+    "differs from the archived trajectory even though the dynamics it records do not.")
+
+
+def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
+                           native_primary=None, status='success',
+                           source_provenance='static'):
+    """Human-readable index for the embedded model artifact.
+
+    The integrated angio model is built in Python. The re-runnable artifact is the
+    bundled Python source under model/src/ (+ run_params.json, environment.json,
+    run_model.py) and, when it could be serialized from the live run, a runnable
+    native CC3D project (model/angiogenesis.cc3d). This summary indexes them and
+    states the re-run contract, the native-output cadence caveat, and how the
+    embedded source was resolved."""
+    has_native = bool(native_primary)
+    summary = {
         'model_name': run_metadata.get('model_name', 'Angiogenesis'),
         'model_version': run_metadata.get('model_version', '1.0.0'),
         'model_type': 'Cellular Potts model (CompuCell3D / vivarium process)',
         'process': 'vivarium_angio.processes.angiogenesis_process.AngiogenesisProcess',
-        'note': ('The model is encoded in the Python angiogenesis process, not a '
-                 'standalone CC3D project file. This summary + the parameters below '
-                 'identify the exact model; full trajectory data is under zarr/.'),
+        'simulation_status': status,
+        'artifact_type': ('native_cc3d_project+python_source' if has_native
+                          else 'python_source'),
+        # How the embedded model/src/*.py was resolved: 'live' = pinned to the exact
+        # imported module of the executed process (inspect.getsourcefile); 'static' =
+        # best-effort resolution from the generator's own location (no live instance).
+        'source_provenance': source_provenance,
+        'model_source_files': [a for (_p, a) in (artifact_files or [])],
+        'entry_point': 'model/run_model.py',
+        'resolved_parameters': 'model/run_params.json',
+        'environment': 'model/environment.json',
+        'rerun': {
+            'reproducible_from_archive': 'native+partial' if has_native else 'partial',
+            'how': ('Install the packages listed in environment.json, put model/src '
+                    'on PYTHONPATH, then run model/run_model.py (it reads '
+                    'run_params.json).'),
+            'limitation': ('This model is defined in Python and depends on the '
+                           'CompuCell3D + vivarium_angio packages, which are named in '
+                           'environment.json rather than embedded as bytes. The archive '
+                           'carries the complete model definition and the exact '
+                           'parameters, not the full Python runtime.'),
+        },
+        'note': ('The model is encoded in the Python angiogenesis process. The bundled '
+                 'source + parameters identify and reconstruct the exact model; full '
+                 'trajectory data is under zarr/.'),
         'schema_version': run_metadata.get('schema_version', '1.0'),
         'reference': ANGIO_CITATION,
         'parameters': sim_params,
-    }, indent=2, default=str)
+    }
+    if has_native:
+        summary['native_project'] = {
+            'entry_point': native_primary,
+            'runnable_with': 'stock cc3d.run_script (no vivarium import required)',
+            'output_mechanism': ('native frequency-based dumper steppable '
+                                 '(NativeDumperSteppable) substituted for the '
+                                 'Vivarium-directed WriterSteppable'),
+            'cadence_caveat': NATIVE_CADENCE_CAVEAT,
+        }
+        summary['rerun']['native'] = (
+            'Open model/angiogenesis.cc3d with stock CompuCell3D '
+            '(e.g. `python -m cc3d.run_script -i model/angiogenesis.cc3d -o out`). '
+            'No vivarium/zarr required; output via the native dumper. ' + NATIVE_CADENCE_CAVEAT)
+    return json.dumps(summary, indent=2, default=str)
 
 
 def generate_omex_metadata_rdf(*, title, description=None, created=None, modified=None,
@@ -313,6 +515,9 @@ def generate_sedml_document(
     scan_point = run_metadata.get('scan_point')
     combo_index = run_metadata.get('combination_index')
     total_combos = run_metadata.get('total_combinations')
+    # Resolved before the notes are written because both the human-readable notes
+    # and the executable algorithmParameter below report it.
+    seed = sim_params.get('random_seed', run_metadata.get('random_seed'))
 
     # Document notes
     notes = ET.SubElement(root, 'notes')
@@ -335,9 +540,35 @@ def generate_sedml_document(
                  f"PARAMETER SCAN: this archive holds ONE point of a scan{pos}. This "
                  f"run's swept values: {pt}. Full scan space: {dims}. The executable "
                  "scan description lives in the experiment-level scan archive."]
+    # State the seed as recorded fact. Previously this asserted "different seed"
+    # for every replicate without the seed being set or captured anywhere — a
+    # provenance claim the archive could not support.
+    if seed is not None and str(seed) != '-1':
+        info += [f"Random number generator seed: {seed} (recorded as SED-ML "
+                 f"algorithmParameter {KISAO_RANDOM_SEED_ID}). The Cellular Potts "
+                 "algorithm is stochastic; this seed identifies the realization "
+                 "the bundled data represents."]
+    else:
+        info += ["Random number generator seed: not recorded for this run, so the "
+                 "trajectory cannot be replayed exactly; compare replicate "
+                 "distributions rather than individual trajectories."]
     if n_replicates and n_replicates > 1:
-        info += [f"Replicate {run_metadata.get('replicate_id', '?')} of {n_replicates} "
-                 "(stochastic; identical parameters, different seed)."]
+        info += [f"Replicate {run_metadata.get('replicate_id', '?')} of {n_replicates}: "
+                 "identical parameters, distinct seed per replicate."]
+
+    prov = run_metadata.get('provenance') or {}
+    if prov.get('schema_fingerprint') or prov.get('code'):
+        code = prov.get('code') or {}
+        bits = [f"schema fingerprint {prov.get('schema_fingerprint', 'unrecorded')}"]
+        if code.get('source') == 'git':
+            bits.append(f"code commit {code.get('commit', '?')}"
+                        + (" (working tree modified — commit does not fully describe "
+                           "the code that ran)" if code.get('dirty') else ''))
+            if code.get('commit_url'):
+                bits.append(f"source: {code['commit_url']}")
+        elif code.get('source') == 'build_stamp':
+            bits.append(f"built from commit {code.get('commit', '?')}")
+        info += ["", "RUN IDENTITY: " + "; ".join(bits) + "."]
     for line in info:
         p = ET.SubElement(body, '{%s}p' % XHTML_NAMESPACE)
         p.text = line
@@ -368,6 +599,15 @@ def generate_sedml_document(
 
     algorithm = ET.SubElement(sim, 'algorithm')
     algorithm.set('kisaoID', KISAO_ALGORITHM_ID)
+
+    # The RNG seed is part of the executable description, not just a note: it
+    # identifies which realization of the stochastic process this archive holds.
+    # Omitted (rather than guessed) when the run predates seed capture.
+    if seed is not None and str(seed) != '-1':
+        algo_params = ET.SubElement(algorithm, 'listOfAlgorithmParameters')
+        seed_param = ET.SubElement(algo_params, 'algorithmParameter')
+        seed_param.set('kisaoID', KISAO_RANDOM_SEED_ID)
+        seed_param.set('value', str(seed))
 
     # Task
     list_of_tasks = ET.SubElement(root, 'listOfTasks')
@@ -483,18 +723,78 @@ def create_omex_archive_from_zarr(
     license_uri: str = "https://spdx.org/licenses/CC-BY-4.0.html",
     citation: str = ANGIO_CITATION,
     keywords: Optional[List[str]] = None,
+    logs_dir: Optional[Union[str, Path]] = None,
+    failed: bool = False,
+    model_export_dir: Optional[Union[str, Path]] = None,
 ) -> Path:
-    """Package a Zarr store into an OMEX archive.
+    """Package a run into an OMEX archive (successful OR failed).
 
-    Now self-contained + indexed: bundles a model_summary.json (model/@source), a
-    metadata.rdf (provenance), and a metrics.csv (scalar signals extracted from the
-    Zarr store) which the SED-ML indexes as dataDescriptions/dataGenerators.
+    Self-contained + indexed. A SUCCESSFUL archive co-locates the five-item audit
+    record: (i) parameterization + provenance metadata (run_metadata.json,
+    sim_params.json, metadata.rdf), (ii) execution logs, (iii) raw outputs (the Zarr
+    trajectory + metrics.csv), (iv) the model artifact, and (v) a manifest typing
+    every entry. An executable SED-ML (uniformTimeCourse + algorithm) is the master.
+
+    The model artifact is re-runnable, not just descriptive: the first-party Python
+    source under model/src/ (+ a re-run driver, resolved parameters and a pinned
+    environment descriptor) and — when the live process captured it at run time
+    (`model_export/`, see AngiogenesisProcess.export_model_export_dir) — a runnable
+    native stock-CC3D project (model/angiogenesis.cc3d + model/Simulation/*),
+    serialized from the live `self.specs` of the run. When a native project is
+    present model/@source resolves to it; otherwise to the bundled Python source.
+    The embedded source is pinned to the LIVE imported module of the executed
+    process when `model_export/` is present, falling back to best-effort static
+    resolution otherwise (recorded as source_provenance in model_summary.json).
+
+    FAILED archive (`failed=True`): same container and typed manifest, carrying
+    params/provenance, logs, and any partial outputs that exist, but marked failed
+    and WITHOUT asserting a reproducible experiment — the executable SED-ML is
+    omitted entirely (so a consumer cannot mistake it for a completed run), a
+    machine-readable status.json is added, run_metadata.simulation_status='failed',
+    and the provenance RDF states the failure. A failed run tolerates a missing or
+    partial Zarr store.
+
+    Logs are best-effort: `logs_dir` defaults to `<zarr parent>/logs`; absent → omitted.
 
     Returns the created .omex Path.
     """
     zarr_store_path = Path(zarr_store_path).resolve()
-    if not zarr_store_path.exists():
+    zarr_exists = zarr_store_path.exists()
+    if not zarr_exists and not failed:
         raise FileNotFoundError(f"Zarr store not found: {zarr_store_path}")
+    status = 'failed' if failed else 'success'
+
+    # Execution logs live alongside the Zarr store under <exp_dir>/logs by default
+    # (see angio-gui SimulationWorker). Collect any *.log files best-effort.
+    if logs_dir is None:
+        logs_dir = zarr_store_path.parent / 'logs'
+    logs_dir = Path(logs_dir)
+    log_files = (sorted(p for p in logs_dir.glob('*.log') if p.is_file())
+                 if logs_dir.exists() else [])
+
+    # Native model export staging dir, written by the LIVE process at run time.
+    # Auto-discover alongside the Zarr store unless an explicit path is given.
+    if model_export_dir is None:
+        model_export_dir = zarr_store_path.parent / 'model_export'
+    native_files, live_source_files, native_primary = _collect_model_export(model_export_dir)
+
+    # Source-of-truth for the embedded Python source: the LIVE module path when the
+    # process captured it, else best-effort static resolution from this generator's
+    # own location (no live instance available — e.g. post-hoc regeneration).
+    if live_source_files:
+        model_source_files = live_source_files
+        source_provenance = 'live'
+    else:
+        model_source_files, _ = _collect_model_source_files()
+        source_provenance = 'static'
+
+    # model/@source priority: native .cc3d > primary Python source > summary.
+    if native_primary:
+        model_primary_source = native_primary
+    elif model_source_files:
+        model_primary_source = model_source_files[0][1]
+    else:
+        model_primary_source = 'model/model_summary.json'
 
     exp_name = (
         exp_name or sim_params.get('exp_name')
@@ -506,16 +806,22 @@ def create_omex_archive_from_zarr(
     archive_path = Path(archive_path).resolve()
     zarr_prefix_in_archive = f"zarr/{exp_name}"
 
-    # Scalar metrics (best-effort) + the columns the SED-ML should index.
-    metrics_csv = extract_zarr_metrics(zarr_store_path)
+    # Scalar metrics (best-effort) + the columns the SED-ML should index. A failed
+    # run is not indexed as an executable experiment, so metrics are skipped there.
+    metrics_csv = extract_zarr_metrics(zarr_store_path) if (zarr_exists and not failed) else None
     metric_columns = ANGIO_METRIC_COLUMNS if metrics_csv else []
 
-    # OMEX Metadata (provenance).
+    # Stamp the machine-readable failure status onto the provenance record.
+    run_metadata = {**run_metadata, 'simulation_status': status}
+
+    # OMEX Metadata (provenance) — the description states the run status explicitly.
     cr = creator or run_metadata.get('creator')
     creators = ([cr] if isinstance(cr, dict) else [{'given': str(cr)}] if cr else [])
+    status_phrase = ("FAILED run (incomplete; not a reproducible experiment)" if failed
+                     else "completed run")
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"Angiogenesis simulation: {exp_name}",
-        description=(f"Cellular Potts angiogenesis run '{exp_name}'. "
+        title=f"Angiogenesis simulation: {exp_name}" + (" [FAILED]" if failed else ""),
+        description=(f"Cellular Potts angiogenesis {status_phrase}: '{exp_name}'. "
                      f"sim_time={sim_params.get('sim_time')} MCS. Scalar signals: "
                      + (", ".join(metric_columns) if metric_columns else "none indexed")),
         created=run_metadata.get('created_at') or run_metadata.get('timestamp'),
@@ -527,29 +833,74 @@ def create_omex_archive_from_zarr(
     manifest_entries: List[Dict[str, str]] = []
 
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # 1. simulation.sedml (master)
-        sedml_content = generate_sedml_document(
-            run_metadata=run_metadata, sim_params=sim_params,
-            zarr_archive_root=zarr_prefix_in_archive,
-            model_source="model/model_summary.json",
-            metric_columns=metric_columns)
-        zf.writestr('simulation.sedml', sedml_content)
-        manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
+        # 1. simulation.sedml (master) — ONLY for successful runs. A failed run omits
+        #    the executable SED-ML so a consumer cannot mistake it for a completed,
+        #    reproducible experiment (no uniformTimeCourse claiming the run finished).
+        if not failed:
+            sedml_content = generate_sedml_document(
+                run_metadata=run_metadata, sim_params=sim_params,
+                zarr_archive_root=zarr_prefix_in_archive,
+                model_source=model_primary_source,
+                metric_columns=metric_columns)
+            zf.writestr('simulation.sedml', sedml_content)
+            manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
 
         # 2. metadata.rdf — provenance
         zf.writestr('metadata.rdf', metadata_rdf)
         manifest_entries.append({'location': 'metadata.rdf', 'format': OMEX_METADATA_FORMAT})
 
-        # 3. model/model_summary.json — the model artifact model/@source resolves to
-        zf.writestr('model/model_summary.json', generate_model_summary(run_metadata, sim_params))
+        # 2b. status.json — unambiguous machine-readable run status. This is the
+        #     primary signal a consumer uses to tell a failed archive from a success.
+        status_doc = {
+            'status': status,
+            'simulation_success': not failed,
+            'executable_sedml_present': not failed,
+            'final_mcs': run_metadata.get('final_mcs') or run_metadata.get('final_step'),
+            'exp_name': exp_name,
+            'note': ('This run did NOT complete successfully. The archive preserves '
+                     'parameters, provenance, logs and any partial outputs for audit, '
+                     'but intentionally contains no executable SED-ML and asserts no '
+                     'reproducible experiment.' if failed else
+                     'Run completed successfully; simulation.sedml is the executable '
+                     'master describing the reproducible experiment.'),
+        }
+        zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
+        manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})
+
+        # 3. The model artifact (re-runnable, not just descriptive):
+        #    3a. native stock-CC3D project serialized from the live run (if captured)
+        for src_path, archive_loc in native_files:
+            zf.write(src_path, archive_loc)
+            manifest_entries.append({'location': archive_loc})  # format auto-typed
+        #    3b. the actual model source under model/src/ (pinned to live module
+        #        when source_provenance == 'live')
+        for src_path, archive_loc in model_source_files:
+            zf.write(src_path, archive_loc)
+            manifest_entries.append({'location': archive_loc, 'format': FORMAT_URIS['.py']})
+        #    3c. resolved parameters the re-run driver consumes
+        zf.writestr('model/run_params.json', json.dumps(sim_params, indent=2, default=str))
+        manifest_entries.append({'location': 'model/run_params.json', 'format': FORMAT_URIS['.json']})
+        #    3d. pinned environment descriptor (what to install to re-run)
+        zf.writestr('model/environment.json', generate_environment_manifest())
+        manifest_entries.append({'location': 'model/environment.json', 'format': FORMAT_URIS['.json']})
+        #    3e. self-contained re-run driver
+        zf.writestr('model/run_model.py', generate_run_model_script())
+        manifest_entries.append({'location': 'model/run_model.py', 'format': FORMAT_URIS['.py']})
+        #    3f. model_summary.json — human-readable index over the above
+        zf.writestr('model/model_summary.json',
+                    generate_model_summary(run_metadata, sim_params,
+                                           artifact_files=model_source_files,
+                                           native_primary=native_primary,
+                                           status=status,
+                                           source_provenance=source_provenance))
         manifest_entries.append({'location': 'model/model_summary.json', 'format': FORMAT_URIS['.json']})
 
-        # 4. metrics.csv — scalar signals indexed by the SED-ML
+        # 4. metrics.csv — scalar signals indexed by the SED-ML (success only)
         if metrics_csv:
             zf.writestr('metrics.csv', metrics_csv)
             manifest_entries.append({'location': 'metrics.csv', 'format': FORMAT_URIS['.csv']})
 
-        # 5. run_metadata.json — authoritative provenance
+        # 5. run_metadata.json — authoritative provenance (carries simulation_status)
         zf.writestr('run_metadata.json', json.dumps(run_metadata, indent=2, default=str))
         manifest_entries.append({'location': 'run_metadata.json'})
 
@@ -557,19 +908,26 @@ def create_omex_archive_from_zarr(
         zf.writestr('sim_params.json', json.dumps(sim_params, indent=2, default=str))
         manifest_entries.append({'location': 'sim_params.json'})
 
-        # 4. The Zarr store, packed under zarr/<exp_name>/
-        for file_path in sorted(zarr_store_path.rglob('*')):
-            if not file_path.is_file():
-                continue
-            rel = file_path.relative_to(zarr_store_path)
-            archive_loc = f"{zarr_prefix_in_archive}/{rel.as_posix()}"
-            zf.write(file_path, archive_loc)
-            manifest_entries.append({
-                'location': archive_loc,
-                'format': _archive_format_for(archive_loc),
-            })
+        # 7. Execution logs (stdout/stderr/errors) — typed like every other entry
+        for log_path in log_files:
+            archive_loc = f"logs/{log_path.name}"
+            zf.write(log_path, archive_loc)
+            manifest_entries.append({'location': archive_loc, 'format': FORMAT_URIS['.log']})
 
-        # 5. manifest.xml — must reference every entry above
+        # 8. The Zarr store (any partial outputs that exist), packed under zarr/<exp_name>/
+        if zarr_exists:
+            for file_path in sorted(zarr_store_path.rglob('*')):
+                if not file_path.is_file():
+                    continue
+                rel = file_path.relative_to(zarr_store_path)
+                archive_loc = f"{zarr_prefix_in_archive}/{rel.as_posix()}"
+                zf.write(file_path, archive_loc)
+                manifest_entries.append({
+                    'location': archive_loc,
+                    'format': _archive_format_for(archive_loc),
+                })
+
+        # 9. manifest.xml — must reference every entry above
         manifest_content = generate_omex_manifest(
             files=manifest_entries,
             sedml_location='simulation.sedml',
@@ -785,13 +1143,25 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
         creators=creators, license_uri=license_uri, citation=citation,
         keywords=keywords or ['angiogenesis', 'parameter scan', 'cellular Potts model', 'VEGF'])
 
+    # The comparison SED-ML sets model/@source = 'model/model_summary.json'
+    # (see generate_comparison_sedml_document). Bundle that file so the @source
+    # resolves to a real archive entry instead of dangling — mirroring the per-run
+    # archive, whose @source resolves to bundled model content. We bundle the
+    # descriptive summary here (the experiment-level archive compares combinations
+    # and intentionally does not embed per-run model source); the per-run archives
+    # at each scan point carry the re-runnable model artifact.
+    model_summary = generate_model_summary(
+        {'model_name': 'Angiogenesis', 'schema_version': '1.0'}, sim_params)
+
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('scan.sedml', sedml)
         zf.writestr('metadata.rdf', metadata_rdf)
         zf.writestr('scan_metadata.json', json.dumps(scan_metadata, indent=2, default=str))
+        zf.writestr('model/model_summary.json', model_summary)
         entries = [{'location': 'scan.sedml', 'format': FORMAT_URIS['.sedml']},
                    {'location': 'metadata.rdf', 'format': OMEX_METADATA_FORMAT},
-                   {'location': 'scan_metadata.json', 'format': FORMAT_URIS['.json']}]
+                   {'location': 'scan_metadata.json', 'format': FORMAT_URIS['.json']},
+                   {'location': 'model/model_summary.json', 'format': FORMAT_URIS['.json']}]
         for src, text in data_files.items():
             zf.writestr(src, text); entries.append({'location': src, 'format': FORMAT_URIS['.csv']})
         zf.writestr('manifest.xml', generate_omex_manifest(entries, sedml_location='scan.sedml'))
@@ -845,14 +1215,21 @@ def validate_omex_manifest(manifest_content: str, archive_files: List[str]) -> D
 
     manifest_locations = set()
     has_master = False
+    has_sedml = False
     for content in root.findall('.//{%s}content' % OMEX_MANIFEST_NAMESPACE):
         location = content.get('location')
         if location and location != '.':
             manifest_locations.add(location)
+        if location and location.endswith('.sedml'):
+            has_sedml = True
         if content.get('master') == 'true':
             has_master = True
 
-    if not has_master:
+    # A master entry is required only when the archive carries an executable
+    # SED-ML document. A failed-run archive deliberately omits the SED-ML (so a
+    # consumer cannot mistake it for a reproducible success) and therefore has no
+    # master — that is valid, not an error.
+    if has_sedml and not has_master:
         errors.append("Manifest has no master entry")
 
     archive_set = set(archive_files)

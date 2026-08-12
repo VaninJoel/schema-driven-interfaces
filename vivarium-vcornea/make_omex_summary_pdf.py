@@ -469,9 +469,11 @@ def build(omex: Path):
            "confidence intervals needs N replicates (recorded as a repeatedTask over a "
            "replicate range). Read the trends here as illustrative, not statistically "
            "estimated." if n_replicates <= 1 else
-           f"{n_replicates} stochastic realizations with identical parameters and "
-           "different seeds. Layer-wise means and spread across replicates become "
-           "meaningful; a single run would not support variance/CI claims."],
+           f"{n_replicates} stochastic realizations with identical parameters, each "
+           "assigned its own independently drawn random seed (recorded per replicate, "
+           "so a difference between them is stochastic rather than configured). "
+           "Layer-wise means and spread across replicates become meaningful; a single "
+           "run would not support variance/CI claims."],
           [f"<b>DataGenerators / Report</b>: {len(datagens)} generators, "
            f"{len(datasets)} reported data sets",
            "The signals the SED-ML actually exposes are listed below. Note the SED-ML "

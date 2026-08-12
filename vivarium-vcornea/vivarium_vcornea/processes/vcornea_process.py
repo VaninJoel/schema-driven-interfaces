@@ -46,7 +46,15 @@ class VCorneaProcess(Process):
         # OMEX provenance: who ran the experiment (set the parameters). Attribution,
         # not authentication. dict {given, family, email, orcid} or a plain name.
         'creator': None,
+        # Wall-clock ceiling per replicate. Previously hardcoded at 24h, which is
+        # far too long for a short exploratory sweep to fail fast and too short for
+        # the 183-day paper-replication protocol on slow hardware.
+        'run_timeout_seconds': 86400,
     }
+
+    # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a negative
+    # value is unambiguous. Each replicate's seed is resolved before launch.
+    AUTO_SEED = -1
 
     # Named scenarios surfaced in the GUI's preset dropdown. Each preset
     # supplies overrides on top of the schema defaults; unset keys keep their
@@ -1401,6 +1409,40 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Total number of MCS the simulation runs. Stored in `Parameters.py` (converted from days at the GUI->Parameters.py boundary).',
                 },
 
+                'random_seed': {
+                    '_default': -1,
+                    '_updater': 'set',
+                    '_emit': True,
+                    '_scope': 'wrapper',
+                    '_display_name': 'Random Seed',
+                    '_description': 'Seed for the Monte Carlo random number generator. '
+                                    'Leave at -1 to draw a seed automatically; the drawn '
+                                    'value is recorded with the run either way.',
+                    '_category': 'Simulation Control',
+                    '_subcategory': 'Reproducibility',
+                    '_unit': 'dimensionless',
+                    '_dimension': 'dimensionless',
+                    '_recommended_range': (-1, 2147483646),
+                    '_expert_level': 'intermediate',
+                    '_reference_paper': {'source': 'Not a model parameter; execution control.',
+                                         'value': -1},
+                    '_cbo_term': 'cbo:SystemQualities',
+                    '_model_context': 'Written into the CC3DML <Potts><RandomSeed> element of '
+                                      'the per-run project copy; the source project is unchanged.',
+                    '_conceptual_hint': (
+                        'The model is stochastic, so two runs with identical parameters '
+                        'diverge unless they share a seed. Leave at -1 for normal use: a '
+                        'fresh seed is drawn for every replicate and reported in the run '
+                        'metadata, archive and PDF report, so a reader can always tell '
+                        'whether a difference between two runs is stochastic or configured. '
+                        'Set a specific value only to reproduce one particular realization.'),
+                    '_implementation_pattern': (
+                        'Resolved per replicate by `_resolve_run_seed` and injected into the '
+                        'copied project by `_inject_random_seed_in_copy`; also written to the '
+                        'archived `Parameters.py` for the record (CC3D reads it from the XML).'),
+                    '_affects_output': ['trajectory_realization'],
+                },
+
                 # --- Function Control Parameters ---
                 'GrowthControl': {
                     '_default': True,
@@ -1818,7 +1860,21 @@ class VCorneaProcess(Process):
             run_metadata = self._create_run_metadata(sim_params, parameter_changes, run_name)
             run_metadata['replicate_id'] = replicate_id
             run_metadata['total_replicates'] = num_replicates
-            
+            # Task B: per-run back-reference so a sweep/replicate run's archive is not
+            # an orphan (parent experiment, swept-parameter point, replicate index).
+            run_metadata['run_reference'] = self._build_run_reference(
+                sim_params, run_name, replicate_id, num_replicates)
+
+            # Each replicate gets its OWN independently drawn seed (see
+            # _resolve_run_seed). Resolved before launch so no replicate can run
+            # under a seed nobody recorded, and stamped onto both the metadata and
+            # the Parameters.py archived beside the data.
+            run_seed, seed_origin = self._resolve_run_seed(sim_params, replicate_id)
+            run_metadata['random_seed'] = run_seed
+            run_metadata['random_seed_origin'] = seed_origin
+            replicate_params = dict(sim_params)
+            replicate_params['random_seed'] = run_seed
+
             # Keep the working directory inside the user's chosen output
             # directory — it's where they can inspect Parameters.py and the
             # in-progress CC3D state. cmd.exe handles mapped drive letters
@@ -1854,17 +1910,25 @@ class VCorneaProcess(Process):
                                ignore=ignore_files,
                                copy_function=shutil.copyfile)
                 self._redirect_outputs_in_copy(temp_project, run_output_dir)
+                self._inject_random_seed_in_copy(temp_project, run_seed)
                 sim_params_file = temp_project / "Simulation" / "Parameters.py"
-                self._write_parameters_file(sim_params_file, sim_params)
+                self._write_parameters_file(sim_params_file, replicate_params)
 
+                # Baseline for the generated-vs-collected audit (see
+                # _get_generated_files_list). BOTH locations are snapshotted: the
+                # steppable redirect sends outputs straight to run_output_dir, while
+                # anything written through a hardcoded path lands in the temp
+                # project. Snapshotting only the temp dir made "files generated"
+                # permanently empty and the audit meaningless.
                 temp_sim_dir = temp_project / "Simulation"
-                before_snapshot = self._take_directory_snapshot(temp_sim_dir)
+                before_snapshot = (self._take_directory_snapshot(temp_sim_dir)
+                                   | self._take_directory_snapshot(run_output_dir))
 
                 # Launch the simulation and get the process handle
                 process, stdout_log, stderr_log = self._run_cc3d_simulation(temp_project, run_output_dir)
-                
+
                 if process:
-                    # Store the handle and related info 
+                    # Store the handle and related info
                     running_processes.append({
                         'process': process,
                         'replicate_id': replicate_id,
@@ -1874,6 +1938,9 @@ class VCorneaProcess(Process):
                         'metadata': run_metadata,
                         'stdout_log': stdout_log,
                         'stderr_log': stderr_log,
+                        # Carried forward to Phase 3; previously computed and
+                        # dropped, which silently disabled the audit.
+                        'before_snapshot': before_snapshot,
                     })
                     print(f"  > Replicate {replicate_id} launched (PID: {process.pid}).")
                 else:
@@ -1901,16 +1968,22 @@ class VCorneaProcess(Process):
             """Monitor a single process until completion and return job with results."""
             process = job['process']
             
+            timeout_s = int(self.parameters.get('run_timeout_seconds', 86400) or 86400)
             try:
                 # Wait for this specific process to complete
-                exit_code = process.wait(timeout=86400)
+                exit_code = process.wait(timeout=timeout_s)
             except subprocess.TimeoutExpired:
-                print(f"  > TIMEOUT ERROR: Replicate {job['replicate_id']} exceeded the 24-hour time limit.")
+                print(f"  > TIMEOUT ERROR: Replicate {job['replicate_id']} exceeded the "
+                      f"{timeout_s}s ({timeout_s / 3600:.1f}h) limit.")
                 process.kill()  # Terminate the runaway process
                 exit_code = -9  # specific exit code for timeouts
+                job['timed_out'] = True
 
+            # Mirror of the Phase-1 baseline: both the temp project and the
+            # redirect destination, taken the moment the process exits.
             temp_sim_dir = job['temp_project'] / "Simulation"
-            after_snapshot = self._take_directory_snapshot(temp_sim_dir)
+            job['after_snapshot'] = (self._take_directory_snapshot(temp_sim_dir)
+                                     | self._take_directory_snapshot(job['output_dir']))
 
             job['exit_code'] = exit_code
             job['completed_at'] = time.time()
@@ -1975,19 +2048,23 @@ class VCorneaProcess(Process):
             
             print(f"  > Processing results for replicate {replicate_id}...")
 
-            # Get the before/after snapshots from the job
-            before_files = job.get('before_snapshot', set())
-            after_files = job.get('after_snapshot', set())
-            
             # Close log files
             job['stdout_log'].close()
             job['stderr_log'].close()
-            
-            # Take snapshots to track generated files
-            temp_sim_dir = temp_project / "Simulation"
-            before_files = set()  # We could take this earlier, but for now just track what exists
-            after_files = self._take_directory_snapshot(temp_sim_dir)
-            
+
+            # Before/after snapshots taken in Phases 1 and 2. These were previously
+            # read from the job dict (where they had never been stored) and then
+            # immediately overwritten with an empty baseline, so every file present
+            # at the end counted as "generated" and the audit could not actually
+            # distinguish a simulator that produced nothing from a wrapper that
+            # collected nothing.
+            before_files = job.get('before_snapshot', set())
+            after_files = job.get('after_snapshot')
+            if after_files is None:
+                temp_sim_dir = temp_project / "Simulation"
+                after_files = (self._take_directory_snapshot(temp_sim_dir)
+                               | self._take_directory_snapshot(run_output_dir))
+
             # Process based on exit code AND whether real output files were
             # produced. CC3D can exit 0 even when it crashed before writing
             # any data (e.g. UNC-cwd failures on Windows) — relying on the
@@ -2073,27 +2150,32 @@ class VCorneaProcess(Process):
             with open(run_output_dir / "run_metadata.json", 'w') as f:
                 json.dump(run_metadata, f, indent=2)
 
-            # Only generate the COMBINE/OMEX archive for successful replicates.
-            # Producing an .omex for a failed run is misleading provenance —
-            # the archive would be ~3 KB of stderr with no real outputs.
-            if run_metadata.get('simulation_success'):
-                try:
-                    from ..utils.omex_generator import create_omex_archive
-                    omex_path = create_omex_archive(
-                        run_output_dir=run_output_dir,
-                        run_metadata=run_metadata,
-                        sim_params=sim_params,
-                        include_model=True,   # bundle the CC3D project so model/@source resolves
-                        creator=self.parameters.get('creator'),  # experimenter (provenance); None -> omitted
-                    )
-                    run_metadata['omex_archive'] = str(omex_path.name)
-                    # Re-save metadata with OMEX info
-                    with open(run_output_dir / "run_metadata.json", 'w') as f:
-                        json.dump(run_metadata, f, indent=2)
-                    print(f"    - Generated OMEX archive: {omex_path.name}")
-                except Exception as e:
-                    print(f"    - Warning: Could not generate OMEX archive: {e}")
-                    run_metadata['omex_archive'] = None
+            # Always produce a typed COMBINE/OMEX archive — successful AND failed.
+            # A failed run gets an archive marked failed (no executable SED-ML, a
+            # machine-readable status), carrying params/provenance, logs and any
+            # partial outputs. This keeps the run's provenance honest about failure
+            # rather than leaving it as a loose directory: the original concern (an
+            # .omex for a failed run is misleading provenance) is addressed by making
+            # the archive explicitly NOT a reproducible success, not by skipping it.
+            run_succeeded = bool(run_metadata.get('simulation_success'))
+            try:
+                from ..utils.omex_generator import create_omex_archive
+                omex_path = create_omex_archive(
+                    run_output_dir=run_output_dir,
+                    run_metadata=run_metadata,
+                    sim_params=sim_params,
+                    include_model=True,   # bundle the CC3D project so model/@source resolves
+                    creator=self.parameters.get('creator'),  # experimenter (provenance); None -> omitted
+                    failed=not run_succeeded,
+                )
+                run_metadata['omex_archive'] = str(omex_path.name)
+                # Re-save metadata with OMEX info
+                with open(run_output_dir / "run_metadata.json", 'w') as f:
+                    json.dump(run_metadata, f, indent=2)
+                print(f"    - Generated {'FAILED ' if not run_succeeded else ''}OMEX archive: {omex_path.name}")
+            except Exception as e:
+                print(f"    - Warning: Could not generate OMEX archive: {e}")
+                run_metadata['omex_archive'] = None
 
             self._update_experiment_log(output_base, run_metadata)
             # Keep the working directory inside the run output dir for
@@ -2336,6 +2418,30 @@ class VCorneaProcess(Process):
         else:
             return f"{param}_{str(value)}"
 
+    def _build_run_reference(self, sim_params, run_name, replicate_id, num_replicates):
+        """Task B back-reference: stop a sweep/replicate run's archive from being an
+        orphan. Returns {parent_experiment_id, parameter_combination, replicate_index,
+        ...} or None for a single (non-sweep, single-replicate) run."""
+        scan_spec = self.parameters.get('parameter_scan')
+        scan_point = self.parameters.get('scan_point')
+        if scan_spec and scan_point is None:
+            scan_point = {p: sim_params.get(p) for p in scan_spec if p in sim_params}
+        is_sweep = bool(scan_spec)
+        is_replicated = bool(num_replicates and num_replicates > 1)
+        if not (is_sweep or is_replicated):
+            return None
+        parent = (self.parameters.get('parent_experiment_id')
+                  or self.parameters.get('parent_experiment') or run_name)
+        return {
+            'parent_experiment_id': parent,
+            'parameter_combination': scan_point or None,
+            'replicate_index': replicate_id,
+            'combination_index': self.parameters.get('combination_index'),
+            'total_combinations': self.parameters.get('total_combinations'),
+            'total_replicates': num_replicates,
+            'parameter_scan': scan_spec or None,
+        }
+
     def _create_run_metadata(self, sim_params, parameter_changes, run_name):
         """Create comprehensive metadata for this run."""
         metadata = {
@@ -2361,6 +2467,18 @@ class VCorneaProcess(Process):
             'files_generated': [],
             'healing_time': None
         }
+
+        # Run identity (requirement 2.5.1): a content hash of the parameter
+        # definitions in force plus the identity of the code that ran. Recorded
+        # separately from vivarium_wrapper_version above, which is hand-maintained
+        # and cannot detect drift on its own. Best-effort — provenance capture must
+        # never be able to fail a run.
+        try:
+            from ..utils.provenance import run_provenance
+            metadata['provenance'] = run_provenance(self.ports_schema())
+            metadata['schema_fingerprint'] = metadata['provenance']['schema_fingerprint']
+        except Exception as e:
+            metadata['provenance'] = {'error': f'provenance capture failed: {e}'}
 
         # Parameter-scan provenance (present only for sweep/batch runs). The GUI passes
         # the full scan space plus this run's point so the OMEX generator can (a) annotate
@@ -2422,6 +2540,73 @@ class VCorneaProcess(Process):
             print(f"Updated experiment log: {log_file}")
         except Exception as e:
             print(f"Warning: Could not update experiment log: {e}")
+
+    def _resolve_run_seed(self, sim_params, replicate_id):
+        """Return (seed, origin) for one replicate. Never returns the sentinel.
+
+        Seeds are drawn INDEPENDENTLY per replicate from the operating system's
+        entropy source, not derived by offsetting a shared base: deriving them
+        arithmetically would make replicate independence an assumption about how
+        the generator expands adjacent seeds rather than a property of the design.
+        The batch stays reproducible because every seed is recorded with its run.
+
+        Nothing prescribes a value. An operator who pins a seed is asking to
+        reproduce one specific realization, so the pinned value applies to the
+        first replicate; any further replicates must be distinct realizations or
+        they are not replicates, and draw their own.
+        """
+        import random as _random
+        try:
+            pinned = int(sim_params.get('random_seed', self.AUTO_SEED))
+        except (TypeError, ValueError):
+            pinned = self.AUTO_SEED
+        if pinned >= 0 and replicate_id == 1:
+            return pinned, 'explicit'
+        # 2**31-1 keeps the value inside the range CC3D's C++ RNG accepts.
+        return _random.SystemRandom().randrange(1, 2 ** 31 - 1), 'drawn'
+
+    def _inject_random_seed_in_copy(self, temp_project, seed):
+        """Set <RandomSeed> in the copied project's CC3DML so the run is replayable.
+
+        The decoupled pattern has no live spec object to configure, so the seed is
+        written into the <Potts> block of the COPY — the same targeted edit strategy
+        already used to redirect outputs, and applied only to the per-replicate
+        workspace so the validated source project is never touched. Without this
+        CC3D self-seeds and the realization cannot be identified afterwards.
+
+        Best-effort: a project whose XML cannot be located still runs, it just runs
+        unseeded, and the caller's recorded seed would then be wrong — so a failure
+        here is reported loudly rather than swallowed.
+        """
+        import re
+        xml_files = sorted((temp_project / "Simulation").glob("*.xml"))
+        if not xml_files:
+            print("  > [WARNING] no CC3DML file found; run will be UNSEEDED "
+                  "and the recorded seed will not describe it")
+            return False
+        for xml_path in xml_files:
+            try:
+                content = xml_path.read_text()
+            except Exception as e:
+                print(f"  > [WARNING] could not read {xml_path.name}: {e}")
+                continue
+            if '<Potts>' not in content:
+                continue
+            if re.search(r'<RandomSeed>.*?</RandomSeed>', content, flags=re.S):
+                content = re.sub(r'<RandomSeed>.*?</RandomSeed>',
+                                 f'<RandomSeed>{int(seed)}</RandomSeed>',
+                                 content, flags=re.S)
+            else:
+                content = content.replace(
+                    '<Potts>', f'<Potts>\n       <RandomSeed>{int(seed)}</RandomSeed>', 1)
+            try:
+                xml_path.write_text(content)
+                print(f"  > [OK] seeded {xml_path.name} with RandomSeed={int(seed)}")
+                return True
+            except Exception as e:
+                print(f"  > [WARNING] could not write seed into {xml_path.name}: {e}")
+        print("  > [WARNING] no <Potts> block found; run will be UNSEEDED")
+        return False
 
     def _redirect_outputs_in_copy(self, temp_project, external_output_dir):
         """Modify the copied vCornea steppables to redirect outputs to external directory."""

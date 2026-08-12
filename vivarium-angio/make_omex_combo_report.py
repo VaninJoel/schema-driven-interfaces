@@ -218,6 +218,67 @@ def read_provenance(omex):
             'keywords': [e.text for e in root.findall('.//' + DCT + 'subject') if e.text]}
 
 
+def read_run_identity(rep_dirs):
+    """Per-replicate stochastic and code identity, from each run's metadata.
+
+    The seed matters to a reader of the report, not only to a re-executor: within a
+    combination the replicates share a parameterization and differ ONLY in their
+    seed, so it is the seed that says whether a difference between two curves is
+    stochastic or configured. Reported alongside the schema fingerprint (which
+    parameter definitions were in force) and the code revision that produced the run.
+    """
+    rows = []
+    for d in rep_dirs:
+        try:
+            meta = json.loads((Path(d) / 'run_metadata.json').read_text())
+        except Exception:
+            continue
+        prov = meta.get('provenance') or {}
+        code = prov.get('code') or {}
+        params = meta.get('parameters') or {}
+        rows.append({
+            'replicate': Path(d).name,
+            'seed': meta.get('random_seed', params.get('random_seed')),
+            'origin': params.get('random_seed_origin'),
+            'fingerprint': prov.get('schema_fingerprint') or meta.get('schema_fingerprint'),
+            'commit': code.get('commit_short'),
+            'dirty': bool(code.get('dirty')),
+            'source': code.get('source'),
+        })
+    return rows
+
+
+def _run_identity_block(rep_dirs, H2, SUB, prows):
+    """Flowables for the run-identity table; empty list when nothing was recorded."""
+    ident = read_run_identity(rep_dirs)
+    if not any(r.get('seed') is not None for r in ident):
+        return []
+    rows = [["Replicate", "RNG seed", "Origin", "Schema fingerprint", "Code"]]
+    for r in ident:
+        if r.get('source') == 'git':
+            code_txt = (r.get('commit') or '?') + (" (modified)" if r['dirty'] else "")
+        elif r.get('source') == 'build_stamp':
+            code_txt = f"built {r.get('commit') or '?'}"
+        else:
+            code_txt = "not recorded"
+        rows.append([r['replicate'],
+                     str(r['seed']) if r['seed'] is not None else "not recorded",
+                     r.get('origin') or "—",
+                     r.get('fingerprint') or "not recorded",
+                     code_txt])
+    out = [Paragraph("Run Identity (stochastic realization &amp; code)", H2),
+           prows(rows, [1.25 * inch, 1.15 * inch, 0.85 * inch, 2.05 * inch, 1.45 * inch]),
+           Paragraph(
+               "Replicates within a combination share a parameterization and differ only in "
+               "the random number generator seed, so a difference between them is stochastic "
+               "rather than configured. Seeds marked <i>drawn</i> were generated independently "
+               "at launch and recorded afterwards; the software does not prescribe a seed. "
+               "The schema fingerprint identifies the parameter definitions in force when the "
+               "run was configured, and the code entry the source revision that executed it.",
+               SUB)]
+    return out
+
+
 # ----------------------------------------------------------------- plots
 def _metric_replicate_plot(metric, frames, tmpdir, fname):
     """One combo: per-replicate thin + across-replicate mean bold, for one metric."""
@@ -353,6 +414,8 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf):
         if prov.get('keywords'):
             pr.append(["Keywords", ", ".join(prov['keywords'])])
         S.append(prows(pr, [1.6 * inch, 5.15 * inch]))
+
+    S.extend(_run_identity_block(rep_dirs, H2, SUB, prows))
 
     if omex_paths:
         S.append(Paragraph("Per-replicate Archive Validation", H2))

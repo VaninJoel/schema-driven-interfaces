@@ -282,6 +282,67 @@ class WriterSteppable(SteppableBasePy):
         # We can do some final processing here if needed
         pass
 
+
+# =============================================================================
+# Native CC3D project export templates (Task E)
+# -----------------------------------------------------------------------------
+# A standalone, stock-CC3D-runnable project is serialized from the LIVE self.specs
+# of the executed AngiogenesisProcess (see export_model_export_dir). The Vivarium-
+# directed WriterSteppable is replaced by a CC3D-native frequency-based dumper so a
+# `cc3d.run_script` run produces output with NO vivarium import. Dynamics are
+# identical; output cadence/format is native (not bit-identical to the Zarr).
+# =============================================================================
+
+# Native output steppable substituted for the Vivarium WriterSteppable. Contains a
+# literal "{mcs:06d}" — do NOT str.format() this template.
+_NATIVE_DUMPER_STEPPABLE = '''"""Native CC3D output steppable for the exported angiogenesis project.
+
+SUBSTITUTES for the Vivarium-directed WriterSteppable used in the archived run:
+dumps a frequency-based snapshot of (cell type, cell id, VEGF field) to .npy under
+native_output/ so a standalone `cc3d.run_script` produces output WITHOUT vivarium.
+Dynamics are identical to the archived run; output cadence/format is native, so it
+is not bit-identical to the archived Zarr trajectory.
+"""
+import os
+import numpy as np
+from cc3d.core.PySteppables import SteppableBasePy
+
+
+class NativeDumperSteppable(SteppableBasePy):
+    def __init__(self, frequency=10):
+        SteppableBasePy.__init__(self, frequency)
+
+    def step(self, mcs):
+        out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "native_output")
+        os.makedirs(out, exist_ok=True)
+        arr = np.zeros((self.dim.x, self.dim.y, self.dim.z, 3))
+        vegf = self.field.VEGF
+        for x, y, z in self.every_pixel():
+            cell = self.cell_field[x, y, z]
+            if cell:
+                arr[x, y, z, 0] = cell.type
+                arr[x, y, z, 1] = cell.id
+            arr[x, y, z, 2] = vegf[x, y, z]
+        np.save(os.path.join(out, f"step_{mcs:06d}.npy"), arr)
+'''
+
+# Main project script. Absolute import works because cc3d.run_script puts the
+# project's Simulation/ dir on sys.path. {frequency} is filled by str.format().
+_NATIVE_MAIN_SCRIPT = '''from cc3d import CompuCellSetup
+from angiogenesisSteppables import NativeDumperSteppable
+
+CompuCellSetup.register_steppable(steppable=NativeDumperSteppable(frequency={frequency}))
+CompuCellSetup.run()
+'''
+
+_NATIVE_CC3D_DESCRIPTOR = '''<Simulation version="4.7.0">
+    <XMLScript Type="XMLScript">Simulation/angiogenesis.xml</XMLScript>
+    <PythonScript Type="Python">Simulation/angiogenesis.py</PythonScript>
+    <Resource Type="Python">Simulation/angiogenesisSteppables.py</Resource>
+</Simulation>
+'''
+
+
 class AngiogenesisProcess(Process):
     """
     Vivarium Process for angiogenesis simulation with comprehensive metadata.
@@ -299,7 +360,16 @@ class AngiogenesisProcess(Process):
         'veder': 0.3,
         'vesec': 0.3,
         'exp_name': 'vivarium_run',
+        # RNG seed handed to the CPM kernel. -1 means "draw one and record it";
+        # the orchestrator resolves it to a concrete value BEFORE launching, so a
+        # run is never executed under an unrecorded seed. See AUTO_SEED below.
+        'random_seed': -1,
     }
+
+    # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a
+    # negative value is unambiguous. The GUI/scheduler replaces it with a drawn
+    # seed and writes that value into the experiment specification.
+    AUTO_SEED = -1
 
     # Define reference papers as class constants for reusability
     REFERENCES = {
@@ -399,8 +469,19 @@ class AngiogenesisProcess(Process):
         super().__init__(parameters)
 
         self.specs = []
-        
-        simCore = PottsCore(dim_x=200, dim_y=200, dim_z=1, steps=10000, fluctuation_amplitude=5.0, neighbor_order=1, boundary_x="Periodic", boundary_y="Periodic")
+
+        # Resolve the RNG seed before building the model so the value that
+        # actually reaches the CPM kernel is the value recorded in metadata.
+        # A seed still unset at this point (direct API use rather than a GUI
+        # launch) is drawn here and written back onto self.parameters, so no
+        # run can execute under a seed nobody recorded.
+        self.random_seed = self._resolve_random_seed()
+
+        # random_seed is carried in PottsCore.spec_dict, so build_xml() emits it
+        # into the exported native CC3D project too — the seed travels with the
+        # re-runnable artifact rather than only with the metadata.
+        simCore = PottsCore(dim_x=200, dim_y=200, dim_z=1, steps=10000, fluctuation_amplitude=5.0, neighbor_order=1, boundary_x="Periodic", boundary_y="Periodic",
+                            random_seed=self.random_seed)
         self.specs.append(simCore)
 
         simMeta = Metadata(num_processors=1)
@@ -470,6 +551,31 @@ class AngiogenesisProcess(Process):
         self.core_sim.start()
         
         self.mcs = 0
+
+    def _resolve_random_seed(self):
+        """Return the concrete RNG seed for this run, drawing one if unset.
+
+        The scheduler normally assigns a seed per run (so the whole batch is
+        recorded before anything launches). This is the fallback for direct API
+        use: rather than let CC3D self-seed from an unrecorded source, draw a
+        seed here and write it back onto self.parameters so it is captured by
+        generate_experiment_metadata() and reaches the archive.
+        """
+        import random as _random
+        raw = self.parameters.get('random_seed', self.AUTO_SEED)
+        try:
+            seed = int(raw)
+        except (TypeError, ValueError):
+            seed = self.AUTO_SEED
+        if seed < 0:
+            # Drawn from the OS entropy source, not the module-level generator, so
+            # the value cannot be influenced by any earlier seeding of `random`.
+            # 2**31-1 keeps it inside the range CC3D's C++ RNG accepts across
+            # platforms.
+            seed = _random.SystemRandom().randrange(1, 2 ** 31 - 1)
+            self.parameters.setdefault('random_seed_origin', 'drawn')
+        self.parameters['random_seed'] = seed
+        return seed
 
     def ports_schema(self):
         """
@@ -1044,6 +1150,52 @@ class AngiogenesisProcess(Process):
                     '_parameter_type': 'control',
                 },
 
+                'random_seed': {
+                    '_default': AngiogenesisProcess.AUTO_SEED,
+                    '_updater': 'set',
+                    '_emit': True,
+
+                    '_display_name': 'Random Seed',
+                    '_description': 'Seed for the Monte Carlo random number generator. '
+                                    'Leave at -1 to draw a seed automatically; the drawn '
+                                    'value is recorded with the run either way.',
+                    '_long_description':
+                        'The Cellular Potts algorithm is stochastic, so two runs with identical '
+                        'parameters diverge unless they share a seed. Setting this value fixes '
+                        'the trajectory as far as the execution environment allows; -1 draws a '
+                        'fresh seed, which is then written into the experiment specification, '
+                        'the run metadata, and the archived SED-ML, so a reader can always tell '
+                        'which seed produced the data in front of them. When several replicates '
+                        'are requested, each receives a distinct seed derived from this one, so '
+                        'the ensemble as a whole is reproducible rather than merely repeatable.',
+
+                    '_category': 'Simulation Setup',
+                    '_subcategory': 'Reproducibility',
+                    '_expert_level': 'intermediate',
+
+                    '_unit': 'dimensionless',
+                    '_unit_long': 'Integer seed (-1 = draw automatically)',
+                    '_conversion_factor': None,
+
+                    '_mathematical_range': (-1, 2147483646),
+
+                    '_gui_hints': {
+                        'widget_type': 'spinbox',
+                    },
+
+                    '_affects_output': ['trajectory_realization'],
+                    '_related_parameters': [],
+
+                    '_biological_meaning':
+                        'Not a biological quantity. It selects which realization of the '
+                        'stochastic process is observed, and therefore determines whether a '
+                        'difference between two runs reflects a parameter change or ordinary '
+                        'run-to-run variability.',
+
+                    '_parameter_type': 'control',
+                    '_measurable': False,
+                },
+
                 'write_frequency': {
                     '_default': 10,
                     '_updater': 'set',
@@ -1216,6 +1368,110 @@ class AngiogenesisProcess(Process):
 
         return issues
 
+    def export_model_export_dir(self, dest_dir):
+        """Capture this run's model from the LIVE instance into <dest_dir>/model_export/.
+
+        Two artifacts, both resolved from the actual executed instance (never a
+        reconstruction or a build/lib shadow copy), consumed by the OMEX builder:
+
+          * native/  — a runnable stock-CC3D project serialized from the LIVE
+            ``self.specs`` via ``build_xml(*self.specs).getCC3DXMLElementString()``
+            (Task E). The Vivarium WriterSteppable is replaced by a native
+            frequency-based dumper so the project runs under ``cc3d.run_script``
+            with no vivarium import.
+          * live_source.json — the first-party Python source paths resolved with
+            ``inspect.getsourcefile(type(self))`` (Task D), pinning the embedded
+            source to the exact imported module that ran.
+
+        Best-effort: failures are logged and never propagate into the run. Returns
+        the model_export dir Path (created on success)."""
+        import inspect
+        import json as _json
+        from pathlib import Path as _Path
+
+        dest = _Path(dest_dir) / 'model_export'
+
+        # (a) Native CC3D project from the LIVE specs of this instance (Task E).
+        try:
+            from cc3d.core.PyCoreSpecs import build_xml
+            # The Potts spec carries the model's configured step ceiling (a large
+            # constant), not the length of THIS run — the run length is a Vivarium
+            # concern (how many times next_update was called). Exporting the ceiling
+            # verbatim produced a project that re-ran to 10,000 MCS regardless of an
+            # archived run of, say, 10 steps: same model and seed, wrong duration.
+            # Serialize the archived run's actual length instead, so the exported
+            # project reproduces the run rather than merely the model. The override
+            # is reverted immediately: self.specs belongs to the live simulation,
+            # which may still be stepping when export is called.
+            steps_override = self.mcs or int(self.parameters.get('sim_time', 0) or 0)
+            potts = next((s for s in self.specs if isinstance(s, PottsCore)), None)
+            prior_steps = getattr(potts, 'steps', None) if potts is not None else None
+            if potts is not None and steps_override > 0:
+                potts.steps = int(steps_override)
+            try:
+                cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
+            finally:
+                if potts is not None and prior_steps is not None:
+                    potts.steps = prior_steps
+            sim = dest / 'native' / 'Simulation'
+            sim.mkdir(parents=True, exist_ok=True)
+            freq = int(self.parameters.get('write_frequency', 10) or 10)
+            (sim / 'angiogenesis.xml').write_text(cc3dml)
+            (sim / 'angiogenesisSteppables.py').write_text(_NATIVE_DUMPER_STEPPABLE)
+            (sim / 'angiogenesis.py').write_text(_NATIVE_MAIN_SCRIPT.format(frequency=freq))
+            (dest / 'native' / 'angiogenesis.cc3d').write_text(_NATIVE_CC3D_DESCRIPTOR)
+        except Exception as e:
+            print(f"Warning: native CC3D project export failed: {e}")
+
+        # (b) Live source paths — pinned to the exact executed modules (Task D).
+        try:
+            files = []
+            proc_src = inspect.getsourcefile(type(self))
+            if proc_src:
+                files.append([str(_Path(proc_src).resolve()),
+                              'model/src/angiogenesis_process.py'])
+            try:
+                from vivarium_angio.composites import angiogenesis_composer as _cmod
+                comp_src = inspect.getsourcefile(_cmod)
+                if comp_src:
+                    files.append([str(_Path(comp_src).resolve()),
+                                  'model/src/angiogenesis_composer.py'])
+            except Exception:
+                pass
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / 'live_source.json').write_text(_json.dumps({
+                'primary': 'model/src/angiogenesis_process.py',
+                'resolved_via': 'inspect.getsourcefile(type(self))',
+                'files': files,
+            }, indent=2))
+        except Exception as e:
+            print(f"Warning: live model-source capture failed: {e}")
+
+        return dest
+
+    def _build_run_reference(self, params):
+        """Task B back-reference: stop a sweep run's archive from being an orphan.
+
+        Returns {parent_experiment_id, parameter_combination, replicate_index, ...}
+        derived from sweep/replicate provenance carried on the params, or None for a
+        single (non-sweep, non-replicate) run."""
+        scan = params.get('parameter_scan')
+        scan_point = params.get('scan_point')
+        replicate_id = params.get('replicate_id')
+        parent = (params.get('parent_experiment_id') or params.get('parent_experiment')
+                  or params.get('batch_id'))
+        if not (scan or scan_point or replicate_id is not None or parent):
+            return None
+        return {
+            'parent_experiment_id': parent,
+            'parameter_combination': scan_point or None,
+            'replicate_index': replicate_id,
+            'combination_index': params.get('combination_index'),
+            'total_combinations': params.get('total_combinations'),
+            'total_replicates': params.get('total_replicates'),
+            'parameter_scan': scan or None,
+        }
+
     def generate_experiment_metadata(self, params, run_info=None):
         """
         Generate comprehensive experiment metadata.
@@ -1253,7 +1509,32 @@ class AngiogenesisProcess(Process):
             'parameter_changes': param_changes,
             'validation': self.validate_parameters(params),
             'schema_version': '1.0',
+            # The seed actually handed to the CPM kernel (resolved in __init__,
+            # so this is never the -1 sentinel).
+            'random_seed': getattr(self, 'random_seed', params.get('random_seed')),
         }
+
+        # Run identity (requirement 2.5.1): a content hash of the parameter
+        # definitions in force, plus the identity of the code that ran. Recorded
+        # separately from the hand-maintained model/schema version strings above,
+        # which cannot detect drift on their own. Best-effort — provenance capture
+        # must never fail a run.
+        try:
+            from ..utils.provenance import run_provenance
+            metadata['provenance'] = run_provenance(schema)
+            metadata['schema_fingerprint'] = metadata['provenance']['schema_fingerprint']
+        except Exception as e:
+            metadata['provenance'] = {'error': f'provenance capture failed: {e}'}
+
+        # Surface sweep/replicate provenance at top level so the SED-ML scan notes
+        # (generate_sedml_document) can reference this run's place in the scan.
+        for key in ('parameter_scan', 'scan_point', 'combination_index',
+                    'total_combinations', 'replicate_id', 'total_replicates'):
+            if params.get(key) is not None:
+                metadata[key] = params[key]
+
+        # Task B: per-run back-reference (None for single runs).
+        metadata['run_reference'] = self._build_run_reference(params)
 
         if run_info:
             metadata.update(run_info)
@@ -1296,6 +1577,12 @@ class AngiogenesisProcess(Process):
                     'zarr_store_path': str(self.store),
                 },
             )
+            # Capture the model from the LIVE specs/class BEFORE teardown so the
+            # archive embeds a native CC3D project + source pinned to the executed
+            # module (Tasks D & E). create_omex_archive_from_zarr auto-discovers the
+            # model_export/ dir alongside the Zarr store.
+            from pathlib import Path as _Path
+            self.export_model_export_dir(_Path(self.store).parent)
             omex_path = create_omex_archive_from_zarr(
                 zarr_store_path=self.store,
                 run_metadata=run_metadata,

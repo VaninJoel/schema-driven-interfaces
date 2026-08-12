@@ -63,6 +63,12 @@ OMEX_METADATA_FORMAT = "http://identifiers.org/combine.specifications/omex-metad
 # KISAO:0000241 = Metropolis Monte Carlo algorithm (used for CPM/GGH models)
 KISAO_ALGORITHM_ID = "KISAO:0000241"
 
+# Algorithm parameter carrying the RNG seed, so the archived experiment description
+# states which stochastic realization the bundled data represents.
+# TODO(verify): confirm this term ID against the KiSAO release pinned by
+# biosimulators-utils before submission; it is referenced only here.
+KISAO_RANDOM_SEED_ID = "KISAO:0000488"
+
 # Symbol URN for the simulation independent variable (time)
 SEDML_SYMBOL_TIME = "urn:sedml:symbol:time"
 
@@ -383,6 +389,16 @@ def generate_sedml_document(
     algorithm = ET.SubElement(sim, 'algorithm')
     algorithm.set('kisaoID', KISAO_ALGORITHM_ID)
 
+    # The RNG seed is part of the executable description, not just a note: it
+    # identifies which realization of the stochastic process this archive holds.
+    # Omitted (rather than guessed) for runs that predate seed capture.
+    seed = sim_params.get('random_seed', run_metadata.get('random_seed'))
+    if seed is not None and str(seed) != '-1':
+        algo_params = ET.SubElement(algorithm, 'listOfAlgorithmParameters')
+        seed_param = ET.SubElement(algo_params, 'algorithmParameter')
+        seed_param.set('kisaoID', KISAO_RANDOM_SEED_ID)
+        seed_param.set('value', str(seed))
+
     # List of Tasks
     list_of_tasks = ET.SubElement(root, 'listOfTasks')
     task = ET.SubElement(list_of_tasks, 'task')
@@ -401,8 +417,18 @@ def generate_sedml_document(
         rep_notes = ET.SubElement(repeated_task, 'notes')
         rep_body = ET.SubElement(rep_notes, '{%s}body' % XHTML_NAMESPACE)
         rep_p = ET.SubElement(rep_body, '{%s}p' % XHTML_NAMESPACE)
-        rep_p.text = (f"This experiment was run {num_replicates} times with identical parameters "
-                      "but different random seeds. Each replicate produces independent stochastic outcomes.")
+        # Previously asserted "different random seeds" unconditionally, while nothing
+        # set or recorded a seed. Now stated only when the seeds were actually
+        # captured, and qualified honestly when they were not.
+        rep_p.text = (
+            f"This experiment was run {num_replicates} times with identical parameters. "
+            "Each replicate was assigned its own independently drawn random number "
+            "generator seed, recorded in that replicate's run metadata and archive, so "
+            "the replicates are independent stochastic realizations."
+            if seed is not None and str(seed) != '-1' else
+            f"This experiment was run {num_replicates} times with identical parameters. "
+            "Seeds were not recorded for this run, so the replicates should be compared "
+            "as a distribution rather than replayed individually.")
 
         # Define the range (list of replicates)
         list_of_ranges = ET.SubElement(repeated_task, 'listOfRanges')
@@ -771,6 +797,58 @@ def _collect_model_files(model_path):
     return files, primary
 
 
+def generate_environment_manifest():
+    """Pinned descriptor of the software environment that executed the run.
+
+    Requirement 2.5.4 asks for the computational context to be identifiable, not
+    merely for the run to be isolated. The archive already embeds a re-runnable
+    CC3D project; this records what is needed to execute it — the interpreter, the
+    platform, and the resolved versions of the packages the model and wrapper
+    depend on. They are NAMED rather than embedded as bytes, which is the honest
+    limit of a text archive.
+
+    Best-effort: a package that cannot be resolved is reported as 'unknown' rather
+    than omitted, so the gap is visible instead of silent.
+    """
+    import platform
+    import sys as _sys
+    pkgs = ['cc3d', 'vivarium-core', 'vivarium-vcornea', 'pandas', 'numpy',
+            'scipy', 'fastparquet', 'pyarrow', 'matplotlib', 'reportlab']
+    versions = {}
+    try:
+        from importlib.metadata import version as _version
+    except Exception:
+        _version = None
+    for name in pkgs:
+        v = None
+        if _version is not None:
+            try:
+                v = _version(name)
+            except Exception:
+                v = None
+        if v is None:
+            # conda-installed packages (notably CompuCell3D) may carry no
+            # importlib.metadata distribution record; fall back to the module's
+            # own __version__ so the most important dependency is not reported
+            # as 'unknown'.
+            try:
+                mod = __import__(name.replace('-', '_'))
+                v = getattr(mod, '__version__', None)
+            except Exception:
+                v = None
+        versions[name] = v or 'unknown'
+    return json.dumps({
+        'python_version': platform.python_version(),
+        'python_executable': _sys.executable,
+        'platform': platform.platform(),
+        'machine': platform.machine(),
+        'packages': versions,
+        'note': ('These packages must be installed to re-execute the CC3D project '
+                 'bundled under model/. They are named, not embedded; the archive '
+                 'carries the model and its parameters, not the runtime.'),
+    }, indent=2, default=str)
+
+
 def generate_omex_metadata_rdf(*, title, description=None, created=None, modified=None,
                                creators=None, license_uri=None, citation=None,
                                keywords=None, about='.'):
@@ -835,9 +913,17 @@ def create_omex_archive(
     citation: str = ("Vanin et al. (2025). V-Cornea: a computational model of the "
                      "corneal epithelium."),
     keywords: Optional[List[str]] = None,
+    failed: bool = False,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
+
+    Failed runs (`failed=True`): the same container and typed manifest, carrying
+    params/provenance, logs and any partial outputs that exist, but marked failed and
+    WITHOUT asserting a reproducible experiment — the executable SED-ML is omitted
+    (so a consumer cannot mistake it for a completed run), a machine-readable
+    status.json is added, run_metadata.simulation_status='failed', and the provenance
+    RDF states the failure.
 
     The archive structure follows OMEX conventions:
     - manifest.xml at root (required)
@@ -884,10 +970,14 @@ def create_omex_archive(
         if primary:
             model_source = primary
 
+    status = 'failed' if failed else 'success'
+
     output_files = [item.name for item in run_output_dir.iterdir()
                     if item.is_file() and item.suffix != '.omex']
 
-    sedml_content = generate_sedml_document(
+    # A failed run omits the executable SED-ML entirely so a consumer cannot mistake
+    # the archive for a completed, reproducible experiment.
+    sedml_content = None if failed else generate_sedml_document(
         run_metadata=run_metadata,
         sim_params=sim_params,
         output_files=output_files,
@@ -903,13 +993,15 @@ def create_omex_archive(
                 else [{'given': str(cr)}] if cr else [])
     cfg = run_metadata.get('simulation_config', {})
     kp = run_metadata.get('key_parameters', {})
+    status_phrase = ("FAILED run (incomplete; not a reproducible experiment). " if failed
+                     else "")
     auto_desc = description or (
-        f"CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
+        f"{status_phrase}CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
         f"injury={'yes' if cfg.get('has_injury') else 'no'}"
         f"{(' (' + str(cfg.get('injury_type')) + ')') if cfg.get('has_injury') else ''}. "
         f"Key parameters: {', '.join(f'{k}={v}' for k, v in kp.items())}.")
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"V-Cornea simulation: {run_name}",
+        title=f"V-Cornea simulation: {run_name}" + (" [FAILED]" if failed else ""),
         description=auto_desc,
         created=run_metadata.get('created_at'),
         modified=datetime.now().isoformat(),
@@ -922,13 +1014,40 @@ def create_omex_archive(
 
     manifest_entries = []
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # 1. SED-ML (master)
-        zf.writestr('simulation.sedml', sedml_content)
-        manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
+        # 1. SED-ML (master) — successful runs only. A failed archive omits it so a
+        #    consumer cannot mistake it for a completed, reproducible experiment.
+        if sedml_content is not None:
+            zf.writestr('simulation.sedml', sedml_content)
+            manifest_entries.append({'location': 'simulation.sedml', 'format': FORMAT_URIS['.sedml']})
 
         # 2. OMEX Metadata (provenance)
         zf.writestr('metadata.rdf', metadata_rdf)
         manifest_entries.append({'location': 'metadata.rdf', 'format': OMEX_METADATA_FORMAT})
+
+        # 2b. status.json — unambiguous machine-readable run status. Primary signal a
+        #     consumer uses to tell a failed archive from a success.
+        status_doc = {
+            'status': status,
+            'simulation_success': not failed,
+            'executable_sedml_present': not failed,
+            'run_name': run_name,
+            'error_message': run_metadata.get('error_message'),
+            'note': ('This run did NOT complete successfully. The archive preserves '
+                     'parameters, provenance, logs and any partial outputs for audit, '
+                     'but intentionally contains no executable SED-ML and asserts no '
+                     'reproducible experiment.' if failed else
+                     'Run completed successfully; simulation.sedml is the executable '
+                     'master describing the reproducible experiment.'),
+        }
+        zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
+        manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})
+
+        # 2c. environment.json — what is needed to re-execute the bundled project
+        #     (requirement 2.5.4). Written for failed runs too: knowing which
+        #     environment produced a failure is exactly what makes it diagnosable.
+        zf.writestr('environment.json', generate_environment_manifest())
+        manifest_entries.append({'location': 'environment.json',
+                                 'format': FORMAT_URIS['.json']})
 
         # 3. Output files
         for item in run_output_dir.iterdir():
@@ -1459,16 +1578,21 @@ def validate_omex_manifest(manifest_content: str, archive_files: List[str]) -> D
     # Collect locations from manifest
     manifest_locations = set()
     has_master = False
+    has_sedml = False
 
     for content in root.findall('.//{%s}content' % OMEX_MANIFEST_NAMESPACE):
         location = content.get('location')
         if location and location != '.':
             manifest_locations.add(location)
+        if location and location.endswith('.sedml'):
+            has_sedml = True
         if content.get('master') == 'true':
             has_master = True
 
-    # Check for master file
-    if not has_master:
+    # A master entry is required only when the archive carries an executable SED-ML.
+    # A failed-run archive deliberately omits the SED-ML (so it cannot be mistaken for
+    # a reproducible success) and therefore has no master — that is valid.
+    if has_sedml and not has_master:
         errors.append("No file marked as master='true'")
 
     # Check that all archive files are in manifest
