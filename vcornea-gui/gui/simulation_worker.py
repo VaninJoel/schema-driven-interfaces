@@ -104,6 +104,27 @@ class SimulationWorker(QObject):
         except Exception as e:
             print(f"  > Could not write cancelled.json for {self.exp_name}: {e}")
 
+    # Headroom between the per-replicate limit enforced inside VCorneaProcess and
+    # this outer wait. The two must NOT expire together: when a replicate times out
+    # the process still has to terminate it, collect whatever partial outputs exist,
+    # write the run metadata and build the failure-typed archive. Killing the whole
+    # batch at the same instant would destroy exactly the failure evidence that
+    # requirement 2.5.4 asks us to preserve.
+    _TIMEOUT_GRACE_S = 1800
+
+    def _outer_timeout(self):
+        """Wall-clock ceiling for the batch subprocess.
+
+        Derived from the same `run_timeout_seconds` the process applies per
+        replicate, so one setting governs both layers, plus grace for the process
+        to record the timeout rather than be killed mid-write.
+        """
+        try:
+            per_replicate = int(self.parameters.get('run_timeout_seconds', 86400) or 86400)
+        except (TypeError, ValueError):
+            per_replicate = 86400
+        return max(per_replicate, 1) + self._TIMEOUT_GRACE_S
+
     @pyqtSlot()
     def run(self):
         try:
@@ -128,7 +149,7 @@ class SimulationWorker(QObject):
                 text=True
             )
 
-            exit_code = self.process.wait(timeout=86400)
+            exit_code = self.process.wait(timeout=self._outer_timeout())
 
             self.stdout_log.close()
             self.stderr_log.close()
@@ -191,7 +212,15 @@ class SimulationWorker(QObject):
         except subprocess.TimeoutExpired:
             if self.process:
                 self.process.kill()
-            self.error.emit("Simulation timed out after 24 hours")
+            limit = self._outer_timeout()
+            self.error.emit(
+                f"Simulation timed out after {limit}s ({limit / 3600:.1f}h) and was "
+                f"terminated. This is the batch-level limit (per-replicate limit "
+                f"{self.parameters.get('run_timeout_seconds', 86400)}s plus "
+                f"{self._TIMEOUT_GRACE_S}s for result collection); the process did not "
+                f"report its own per-replicate timeout first, so it may have hung "
+                f"outside the simulation itself. Check "
+                f"{self.logs_dir / 'stderr.log'}.")
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
