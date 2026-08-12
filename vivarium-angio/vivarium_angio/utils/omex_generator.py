@@ -290,13 +290,26 @@ def generate_environment_manifest():
     versions = {}
     try:
         from importlib.metadata import version
-        for name in pkgs:
-            try:
-                versions[name] = version(name)
-            except Exception:
-                versions[name] = 'unknown'
     except Exception:
-        versions = {name: 'unknown' for name in pkgs}
+        version = None
+    for name in pkgs:
+        v = None
+        if version is not None:
+            try:
+                v = version(name)
+            except Exception:
+                v = None
+        if v is None:
+            # conda-installed packages (notably CompuCell3D) may carry no
+            # importlib.metadata distribution record; fall back to the module's
+            # own __version__ so the most important dependency is not reported
+            # as 'unknown'.
+            try:
+                mod = __import__(name.replace('-', '_'))
+                v = getattr(mod, '__version__', None)
+            except Exception:
+                v = None
+        versions[name] = v or 'unknown'
     return json.dumps({
         'python_version': platform.python_version(),
         'platform': platform.platform(),

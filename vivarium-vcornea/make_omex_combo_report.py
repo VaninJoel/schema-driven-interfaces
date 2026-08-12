@@ -396,6 +396,41 @@ def build_combo_report(combo_key, omex_paths, out_pdf):
         S.append(Paragraph("From metadata.rdf (COMBINE OMEX-Metadata). The creator is "
                            "attribution/provenance, not authentication.", SUB))
 
+    # Run identity — the seed is what separates two replicates of one combination,
+    # so a reader comparing curves needs it to tell stochastic variation from a
+    # configured difference. Read from each replicate archive's run_metadata.json.
+    ident = []
+    for o in omex_paths:
+        try:
+            with zipfile.ZipFile(o) as zf:
+                if 'run_metadata.json' not in zf.namelist():
+                    continue
+                m = json.loads(zf.read('run_metadata.json'))
+        except Exception:
+            continue
+        code = (m.get('provenance') or {}).get('code') or {}
+        ident.append([
+            Path(o).parent.name,
+            str(m.get('random_seed')) if m.get('random_seed') is not None else "not recorded",
+            m.get('random_seed_origin') or "&mdash;",
+            (m.get('schema_fingerprint')
+             or (m.get('provenance') or {}).get('schema_fingerprint') or "not recorded"),
+            ((code.get('describe') or code.get('commit_short') or '?')
+             + (" (modified)" if code.get('dirty') else ""))
+            if code.get('source') == 'git' else (code.get('source') or "not recorded"),
+        ])
+    if any(r[1] != "not recorded" for r in ident):
+        S.append(Paragraph("Run Identity (stochastic realization &amp; code)", H2))
+        S.append(prows([["Replicate", "RNG seed", "Origin", "Schema fingerprint", "Code"]] + ident,
+                       [1.15 * inch, 1.15 * inch, 0.8 * inch, 2.0 * inch, 1.65 * inch]))
+        S.append(Paragraph(
+            "Replicates of a combination share a parameterization and differ only in the "
+            "random number generator seed, so a difference between them is stochastic rather "
+            "than configured. Seeds marked <i>drawn</i> were generated independently at launch "
+            "and recorded afterwards; the software does not prescribe a seed. The schema "
+            "fingerprint identifies the parameter definitions in force when the run was "
+            "configured, and the code entry the source revision that executed it.", SUB))
+
     model_bundled = model.get('source') in names0
     # SED-ML readout (representative)
     S.append(Paragraph("Reading the SED-ML (representative replicate)", H2))
