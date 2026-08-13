@@ -104,6 +104,70 @@ class SimulationWorker(QObject):
         except Exception as e:
             print(f"  > Could not write cancelled.json for {self.exp_name}: {e}")
 
+        # Package the interrupted run. The wrapper process was just killed, so it
+        # never reached its own archiving step — without this a cancelled run is
+        # the ONLY outcome that leaves no archive, which is exactly the gap
+        # requirement 2.5.4 warns about when it names interrupted attempts
+        # alongside failed and timed-out ones.
+        self._generate_cancelled_archives()
+
+    def _generate_cancelled_archives(self):
+        """Write a status='cancelled' OMEX archive for each replicate directory.
+
+        Best-effort and deliberately quiet about missing pieces: a run cancelled
+        seconds after launch may have no replicate directories, no outputs and no
+        metadata, and the marker file alone is then the record. Whatever partial
+        outputs DO exist are preserved and marked interrupted, so they can never be
+        mistaken for a completed experiment.
+        """
+        try:
+            from vivarium_vcornea.utils.omex_generator import create_omex_archive
+            from vivarium_vcornea.utils.provenance import run_provenance
+        except Exception as e:
+            print(f"  > Cancelled-run archive skipped ({e})")
+            return
+
+        if not self.exp_dir.exists():
+            return
+        targets = sorted(d for d in self.exp_dir.iterdir()
+                         if d.is_dir() and d.name.startswith('replicate_'))
+        if not targets:
+            targets = [self.exp_dir]
+
+        from datetime import datetime as _dt
+        for target in targets:
+            try:
+                # Prefer metadata the process managed to write; otherwise synthesize
+                # enough to identify what was intended.
+                meta_path = target / 'run_metadata.json'
+                if meta_path.exists():
+                    metadata = json.loads(meta_path.read_text())
+                else:
+                    metadata = {
+                        'run_name': self.exp_dir.name,
+                        'created_at': _dt.now().isoformat(),
+                        'simulation_config': {},
+                        'key_parameters': {},
+                    }
+                metadata.update({
+                    'simulation_status': 'cancelled',
+                    'simulation_success': False,
+                    'cancelled_at': _dt.now().isoformat(),
+                    'error_message': 'Run interrupted by the operator before completion.',
+                    'creator': self.parameters.get('creator'),
+                })
+                metadata.setdefault('provenance', run_provenance())
+                create_omex_archive(
+                    run_output_dir=target,
+                    run_metadata=metadata,
+                    sim_params=self.parameters,
+                    include_model=False,   # the run never proved the project ran
+                    status='cancelled',
+                )
+                print(f"  > Cancelled-run archive written for {target.name}")
+            except Exception as e:
+                print(f"  > Could not archive cancelled run {target.name}: {e}")
+
     # Headroom between the per-replicate limit enforced inside VCorneaProcess and
     # this outer wait. The two must NOT expire together: when a replicate times out
     # the process still has to terminate it, collect whatever partial outputs exist,

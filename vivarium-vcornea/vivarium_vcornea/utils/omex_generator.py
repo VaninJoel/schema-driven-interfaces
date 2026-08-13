@@ -854,6 +854,26 @@ def generate_environment_manifest(provenance=None):
     }, indent=2, default=str)
 
 
+# The outcomes an archive can record. Cancellation is deliberately NOT folded into
+# 'failed': a reviewer reading a batch needs to distinguish a model that misbehaved
+# from a run an operator chose to stop, and only the first is evidence about the
+# model. Each carries its own reader-facing explanation.
+_ARCHIVE_STATUSES = {
+    'success': ('Run completed successfully; simulation.sedml is the executable '
+                'master describing the reproducible experiment.'),
+    'failed': ('This run did NOT complete successfully. The archive preserves '
+               'parameters, provenance, logs and any partial outputs for audit, '
+               'but intentionally contains no executable SED-ML and asserts no '
+               'reproducible experiment.'),
+    'cancelled': ('This run was interrupted by the operator before completion. It '
+                  'is not a failure of the model: no conclusion about model '
+                  'behaviour should be drawn from it. The archive preserves the '
+                  'intended parameters, provenance, logs and any partial outputs '
+                  'produced before the interruption, and contains no executable '
+                  'SED-ML.'),
+}
+
+
 def _provenance_block(provenance):
     """Compact, self-describing code/schema identity for embedding in JSON artifacts.
 
@@ -967,6 +987,7 @@ def create_omex_archive(
                      "corneal epithelium."),
     keywords: Optional[List[str]] = None,
     failed: bool = False,
+    status: Optional[str] = None,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
@@ -1023,7 +1044,17 @@ def create_omex_archive(
         if primary:
             model_source = primary
 
-    status = 'failed' if failed else 'success'
+    # Three outcomes, not two. `status` is authoritative when given; `failed` is
+    # retained for callers that predate cancellation being first class. An
+    # interrupted run is NOT a failure — the model did not misbehave, the operator
+    # stopped it — and requirement 2.5.4 names interrupted attempts alongside
+    # failed and timed-out ones as needing the same run identity.
+    status = status or ('failed' if failed else 'success')
+    if status not in _ARCHIVE_STATUSES:
+        raise ValueError(f"unknown archive status {status!r}; "
+                         f"expected one of {sorted(_ARCHIVE_STATUSES)}")
+    complete = status == 'success'
+    failed = not complete  # keep downstream conditionals honest
 
     output_files = [item.name for item in run_output_dir.iterdir()
                     if item.is_file() and item.suffix != '.omex']
@@ -1046,15 +1077,20 @@ def create_omex_archive(
                 else [{'given': str(cr)}] if cr else [])
     cfg = run_metadata.get('simulation_config', {})
     kp = run_metadata.get('key_parameters', {})
-    status_phrase = ("FAILED run (incomplete; not a reproducible experiment). " if failed
-                     else "")
+    status_phrase = {
+        'success': "",
+        'failed': "FAILED run (incomplete; not a reproducible experiment). ",
+        'cancelled': ("CANCELLED run (interrupted by the operator; incomplete and not "
+                      "evidence about model behaviour). "),
+    }[status]
+    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]"}[status]
     auto_desc = description or (
         f"{status_phrase}CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
         f"injury={'yes' if cfg.get('has_injury') else 'no'}"
         f"{(' (' + str(cfg.get('injury_type')) + ')') if cfg.get('has_injury') else ''}. "
         f"Key parameters: {', '.join(f'{k}={v}' for k, v in kp.items())}.")
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"V-Cornea simulation: {run_name}" + (" [FAILED]" if failed else ""),
+        title=f"V-Cornea simulation: {run_name}{status_tag}",
         description=auto_desc,
         created=run_metadata.get('created_at'),
         modified=datetime.now().isoformat(),
@@ -1082,16 +1118,16 @@ def create_omex_archive(
         #     consumer uses to tell a failed archive from a success.
         status_doc = {
             'status': status,
-            'simulation_success': not failed,
-            'executable_sedml_present': not failed,
+            'simulation_success': complete,
+            # Recorded separately from `status` so a consumer can act on the
+            # distinction without knowing the vocabulary: an interrupted run is
+            # incomplete but says nothing about the model.
+            'interrupted_by_operator': status == 'cancelled',
+            'executable_sedml_present': complete,
             'run_name': run_name,
             'error_message': run_metadata.get('error_message'),
-            'note': ('This run did NOT complete successfully. The archive preserves '
-                     'parameters, provenance, logs and any partial outputs for audit, '
-                     'but intentionally contains no executable SED-ML and asserts no '
-                     'reproducible experiment.' if failed else
-                     'Run completed successfully; simulation.sedml is the executable '
-                     'master describing the reproducible experiment.'),
+            'cancelled_at': run_metadata.get('cancelled_at'),
+            'note': _ARCHIVE_STATUSES[status],
         }
         zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
         manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})

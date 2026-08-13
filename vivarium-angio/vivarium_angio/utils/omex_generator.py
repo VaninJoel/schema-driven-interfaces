@@ -280,6 +280,26 @@ def _collect_model_export(model_export_dir):
     return native_files, live_source_files, native_primary
 
 
+# The outcomes an archive can record. Cancellation is deliberately NOT folded into
+# 'failed': a reviewer reading a batch needs to distinguish a model that misbehaved
+# from a run an operator chose to stop, and only the first is evidence about the
+# model. Each carries its own reader-facing explanation.
+_ARCHIVE_STATUSES = {
+    'success': ('Run completed successfully; simulation.sedml is the executable '
+                'master describing the reproducible experiment.'),
+    'failed': ('This run did NOT complete successfully. The archive preserves '
+               'parameters, provenance, logs and any partial outputs for audit, '
+               'but intentionally contains no executable SED-ML and asserts no '
+               'reproducible experiment.'),
+    'cancelled': ('This run was interrupted by the operator before completion. It '
+                  'is not a failure of the model: no conclusion about model '
+                  'behaviour should be drawn from it. The archive preserves the '
+                  'intended parameters, provenance, logs and any partial outputs '
+                  'produced before the interruption, and contains no executable '
+                  'SED-ML.'),
+}
+
+
 def _provenance_block(provenance):
     """Compact, self-describing code/schema identity for embedding in JSON artifacts.
 
@@ -784,6 +804,7 @@ def create_omex_archive_from_zarr(
     logs_dir: Optional[Union[str, Path]] = None,
     failed: bool = False,
     model_export_dir: Optional[Union[str, Path]] = None,
+    status: Optional[str] = None,
 ) -> Path:
     """Package a run into an OMEX archive (successful OR failed).
 
@@ -816,11 +837,22 @@ def create_omex_archive_from_zarr(
 
     Returns the created .omex Path.
     """
+    # Three outcomes, not two. `status` is authoritative when given; `failed` is
+    # retained for callers that predate cancellation being first class. An
+    # interrupted run is NOT a failure — the model did not misbehave, the operator
+    # stopped it — and requirement 2.5.4 names interrupted attempts alongside
+    # failed and timed-out ones as needing the same run identity.
+    status = status or ('failed' if failed else 'success')
+    if status not in _ARCHIVE_STATUSES:
+        raise ValueError(f"unknown archive status {status!r}; "
+                         f"expected one of {sorted(_ARCHIVE_STATUSES)}")
+    complete = status == 'success'
+    failed = not complete  # keep downstream conditionals honest
+
     zarr_store_path = Path(zarr_store_path).resolve()
     zarr_exists = zarr_store_path.exists()
-    if not zarr_exists and not failed:
+    if not zarr_exists and complete:
         raise FileNotFoundError(f"Zarr store not found: {zarr_store_path}")
-    status = 'failed' if failed else 'success'
 
     # Execution logs live alongside the Zarr store under <exp_dir>/logs by default
     # (see angio-gui SimulationWorker). Collect any *.log files best-effort.
@@ -875,10 +907,15 @@ def create_omex_archive_from_zarr(
     # OMEX Metadata (provenance) — the description states the run status explicitly.
     cr = creator or run_metadata.get('creator')
     creators = ([cr] if isinstance(cr, dict) else [{'given': str(cr)}] if cr else [])
-    status_phrase = ("FAILED run (incomplete; not a reproducible experiment)" if failed
-                     else "completed run")
+    status_phrase = {
+        'success': "completed run",
+        'failed': "FAILED run (incomplete; not a reproducible experiment)",
+        'cancelled': ("CANCELLED run (interrupted by the operator; incomplete and not "
+                      "evidence about model behaviour)"),
+    }[status]
+    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]"}[status]
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"Angiogenesis simulation: {exp_name}" + (" [FAILED]" if failed else ""),
+        title=f"Angiogenesis simulation: {exp_name}{status_tag}",
         description=(f"Cellular Potts angiogenesis {status_phrase}: '{exp_name}'. "
                      f"sim_time={sim_params.get('sim_time')} MCS. Scalar signals: "
                      + (", ".join(metric_columns) if metric_columns else "none indexed")),
@@ -912,16 +949,16 @@ def create_omex_archive_from_zarr(
         #     primary signal a consumer uses to tell a failed archive from a success.
         status_doc = {
             'status': status,
-            'simulation_success': not failed,
-            'executable_sedml_present': not failed,
+            'simulation_success': complete,
+            # Recorded separately from `status` so a consumer can act on the
+            # distinction without knowing the vocabulary: an interrupted run is
+            # incomplete but says nothing about the model.
+            'interrupted_by_operator': status == 'cancelled',
+            'executable_sedml_present': complete,
             'final_mcs': run_metadata.get('final_mcs') or run_metadata.get('final_step'),
             'exp_name': exp_name,
-            'note': ('This run did NOT complete successfully. The archive preserves '
-                     'parameters, provenance, logs and any partial outputs for audit, '
-                     'but intentionally contains no executable SED-ML and asserts no '
-                     'reproducible experiment.' if failed else
-                     'Run completed successfully; simulation.sedml is the executable '
-                     'master describing the reproducible experiment.'),
+            'cancelled_at': run_metadata.get('cancelled_at'),
+            'note': _ARCHIVE_STATUSES[status],
         }
         zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
         manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})

@@ -1788,13 +1788,32 @@ batch_sweep_20251106_143052/
         )
 
         if reply == QMessageBox.Yes:
-            # Try to terminate all running threads
-            for thread, worker in self.simulation_threads:
-                if thread.isRunning():
-                    thread.quit()
-                    thread.wait(1000)  # Wait up to 1 second
+            self.statusBar().showMessage("Cancelling — terminating CC3D subprocesses...")
+            QApplication.processEvents()
 
-            self.statusBar().showMessage("Batch cancelled")
+            killed = 0
+            for thread, worker in self.simulation_threads:
+                if not thread.isRunning():
+                    continue
+                # Kill the subprocess TREE first. thread.quit() alone does nothing
+                # while the worker is blocked in subprocess.wait(), which is why
+                # cancelling used to leave CC3D running to completion.
+                try:
+                    worker.cancel()
+                    killed += 1
+                except Exception as e:
+                    print(f"  > Warning: failed to cancel worker "
+                          f"{getattr(worker, 'exp_name', '?')}: {e}")
+                # With the child gone, the blocking wait returns and the thread's
+                # event loop can exit cleanly.
+                thread.quit()
+                thread.wait(2000)
+                if thread.isRunning():
+                    thread.terminate()
+                    thread.wait(1000)
+
+            self.statusBar().showMessage(
+                f"Batch cancelled ({killed} subprocess tree(s) terminated)", 5000)
             self.finalize_batch(was_cancelled=True)
 
     def finalize_batch(self, was_cancelled=False):
