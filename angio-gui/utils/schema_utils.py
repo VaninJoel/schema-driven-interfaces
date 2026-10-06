@@ -441,24 +441,51 @@ def validate_parameter_value(schema: Dict, param_name: str, value: Any) -> List[
     param_info = schema['inputs'][param_name]
     issues = []
 
-    # Type checking
+    # Type checking. int and float are interchangeable for numeric parameters
+    # (a preset of 10.0 for an int default of 10 is not a type error); bool is
+    # its own type and never numeric.
     expected_type = type(param_info['_default'])
-    if not isinstance(value, expected_type):
+    numeric = (int, float)
+    if isinstance(param_info['_default'], bool) or isinstance(value, bool):
+        type_ok = isinstance(value, bool) and isinstance(param_info['_default'], bool)
+    elif isinstance(param_info['_default'], numeric):
+        type_ok = isinstance(value, numeric)
+    else:
+        type_ok = isinstance(value, expected_type)
+    if not type_ok:
         issues.append({
             'severity': 'ERROR',
             'message': f'Expected {expected_type.__name__}, got {type(value).__name__}'
         })
         return issues  # Stop further validation if type is wrong
 
+    # String parameters: declared pattern / length (e.g. experiment names that
+    # become folder names).
+    if isinstance(value, str):
+        import re as _re
+        pattern = param_info.get('_validation_pattern')
+        if pattern and not _re.match(pattern, value):
+            issues.append({
+                'severity': 'ERROR',
+                'message': f'Value {value!r} does not match the allowed pattern {pattern}'
+            })
+        max_len = param_info.get('_max_length')
+        if max_len and len(value) > max_len:
+            issues.append({
+                'severity': 'ERROR',
+                'message': f'Value is {len(value)} characters; at most {max_len} allowed'
+            })
+        return issues
+
     # Physiological range check
     if '_physiological_range' in param_info:
         min_val, max_val = param_info['_physiological_range']
         if value < min_val or value > max_val:
-            ref = param_info.get('_reference_paper', {}).get('source', 'N/A')
+            # The evidence behind the RANGE, not the citation of the default value.
             issues.append({
                 'severity': 'WARNING',
                 'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                'reference': ref
+                'reference': format_range_evidence(param_info, 'physiological', fmt='markdown')
             })
 
     # Mathematical stability check
@@ -657,6 +684,120 @@ def _load_angio_references():
 
 
 _REFERENCE_REGISTRIES = (_load_angio_references,)
+
+
+# ---------------------------------------------------------------------------
+# Descriptor rendering shared by the parameter dialogs (both GUIs carry the
+# same code so the two models present a parameter the same way).
+# ---------------------------------------------------------------------------
+
+ONTOLOGY_PREFIXES = {
+    'CBO': 'Cell Behavior Ontology',
+    'GO': 'Gene Ontology',
+    'CHEBI': 'ChEBI',
+    'PATO': 'Phenotype And Trait Ontology',
+    'UO': 'Units of Measurement Ontology',
+}
+
+
+def format_ontology_term(term) -> str:
+    """'CBO:0000016' -> 'CBO:0000016 (Cell Behavior Ontology)'; lists are joined."""
+    if not term:
+        return ''
+    terms = term if isinstance(term, (list, tuple)) else [term]
+    out = []
+    for t in terms:
+        t = str(t)
+        prefix = t.split(':', 1)[0].upper() if ':' in t else ''
+        name = ONTOLOGY_PREFIXES.get(prefix)
+        out.append(f"{t} ({name})" if name else t)
+    return '; '.join(out)
+
+
+def format_locator(locator) -> str:
+    """{'table': 'Table 1', 'equation': None, 'page': 47} -> 'Table 1, p. 47'."""
+    if not isinstance(locator, dict):
+        return ''
+    parts = [str(locator[k]) for k in ('table', 'equation') if locator.get(k)]
+    if locator.get('page'):
+        parts.append(f"p. {locator['page']}")
+    return ', '.join(parts)
+
+
+def default_provenance_lines(ref) -> list:
+    """(label, html) pairs describing where the default value came from."""
+    if not isinstance(ref, dict):
+        return []
+    lines = [('Source', str(ref.get('source') or 'not recorded'))]
+    if ref.get('title'):
+        lines.append(('Title', f"<i>{ref['title']}</i>"))
+    jy = ', '.join(str(ref[k]) for k in ('journal', 'year') if ref.get(k))
+    if jy:
+        lines.append(('Published', jy))
+    if ref.get('doi'):
+        lines.append(('DOI', f"<a href='https://doi.org/{ref['doi']}'>{ref['doi']}</a>"))
+    if 'value' in ref and ref.get('value') is not None:
+        lines.append(('Value there', str(ref['value'])))
+    loc = format_locator(ref.get('locator'))
+    if not loc:   # pre-migration shape
+        loc = ', '.join(str(ref[k]) for k in ('equation', 'page') if ref.get(k))
+    lines.append(('Locator', loc or 'not recorded'))
+    notes = ref.get('notes') or ref.get('detail')
+    if notes:
+        lines.append(('Notes', str(notes)))
+    return lines
+
+
+def literature_lines(keys, resolve_ref=None) -> list:
+    """Resolved citations for `_literature` keys (html strings)."""
+    resolve_ref = resolve_ref or _resolve_reference
+    out = []
+    for key in keys or []:
+        if isinstance(key, dict):              # inline citation
+            r = key
+        else:
+            r = resolve_ref(key) or {}
+        cite = r.get('cite') or r.get('source') or r.get('title') or f"[ref {key}]"
+        if r.get('title') and r.get('source') and r.get('title') not in cite:
+            cite += f" — <i>{r['title']}</i>"
+        if r.get('doi'):
+            cite += f" &middot; <a href='https://doi.org/{r['doi']}'>doi:{r['doi']}</a>"
+        out.append(cite)
+    return out
+
+
+def evidence_basis_lines(param_info) -> list:
+    """(label, text) pairs for how the value was established."""
+    lines = []
+    fm = param_info.get('_fitting_method')
+    if fm:
+        lines.append(('How the value was set', str(fm).replace('_', ' ')))
+    if param_info.get('_measurable') is not None:
+        lines.append(('Directly measurable', 'yes' if param_info['_measurable'] else 'no'))
+    if param_info.get('_experimental_assay'):
+        lines.append(('Experimental assay', str(param_info['_experimental_assay'])))
+    pt = param_info.get('_parameter_type')
+    if pt:
+        lines.append(('Parameter type', str(pt).replace('_', ' ')))
+    if param_info.get('_scope'):
+        lines.append(('Scope', 'model parameter' if param_info['_scope'] == 'model'
+                      else f"{param_info['_scope']} parameter"))
+    return lines
+
+
+def expected_behavior_lines(param_info) -> list:
+    """(label, text) pairs for the qualitative regimes a parameter produces."""
+    eff = param_info.get('_expected_behavior') or param_info.get('_visual_effects')
+    if not isinstance(eff, dict):
+        return []
+    lines = []
+    if eff.get('low_value'):
+        lines.append(('Low values', str(eff['low_value'])))
+    if eff.get('high_value'):
+        lines.append(('High values', str(eff['high_value'])))
+    if eff.get('threshold') is not None:
+        lines.append(('Approximate transition', f"{eff['threshold']} {param_info.get('_unit', '')}".strip()))
+    return lines
 
 
 def extract_parameter_documentation(schema: Dict, output_format: str = 'markdown') -> str:

@@ -47,6 +47,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
+    format_ontology_term,
+    default_provenance_lines,
+    literature_lines,
+    evidence_basis_lines,
+    expected_behavior_lines,
     get_parameter_structure,
     get_display_name_mapping,
     get_model_defaults,
@@ -63,6 +68,24 @@ from schema_utils import (
 # from widgets.collapsible_group import CollapsibleGroup
 # from widgets.validation_indicator import ValidationIndicator
 # from widgets.reference_display import ReferenceDisplay
+
+
+
+def _int_from_text(text):
+    """Parse an operator-typed integer, accepting an integral float spelling.
+
+    Presets and saved files legitimately carry 10.0 for an int parameter; the
+    round trip through a QLineEdit must not turn that into a type error (or,
+    worse, store the raw string). A genuinely fractional value still raises.
+    """
+    text = str(text).strip()
+    try:
+        return int(text)
+    except ValueError:
+        f = float(text)
+        if f.is_integer():
+            return int(f)
+        raise ValueError(f"{text!r} is not an integer")
 
 
 class ClickableLabel(QLabel):
@@ -438,7 +461,12 @@ class ParameterInfoDialog(QDialog):
         html += f"<li><span class='label'>Parameter Name:</span> <code>{param_name}</code></li>"
         html += f"<li><span class='label'>Category:</span> {param_info.get('_category', 'N/A')}</li>"
         html += f"<li><span class='label'>Subcategory:</span> {param_info.get('_subcategory', 'N/A')}</li>"
+        html += f"<li><span class='label'>Unit (as documented):</span> {param_info.get('_unit', 'dimensionless')}</li>"
         html += f"<li><span class='label'>Expertise Level:</span> {param_info.get('_expert_level', 'N/A').title()}</li>"
+        if param_info.get('_unit_long'):
+            html += f"<li><span class='label'>Unit, spelled out:</span> {param_info['_unit_long']}</li>"
+        if param_info.get('_ontology_term'):
+            html += f"<li><span class='label'>Ontology term:</span> {format_ontology_term(param_info['_ontology_term'])}</li>"
         html += "</ul>"
 
         # --- Units & Conversion (learner panel) ---
@@ -493,27 +521,17 @@ class ParameterInfoDialog(QDialog):
                              f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
             html += "</ul>"
 
-        # Reference information
-        if '_reference_paper' in param_info:
-            ref = param_info['_reference_paper']
-            html += "<h3>Paper References</h3>"
-            html += f"<div class='info-item'><span class='label'>Source:</span> {ref.get('source', 'N/A')}</div>"
-            if ref.get('detail'):
-                html += f"<div class='info-item'>{ref['detail']}</div>"
-            if ref.get('title'):
-                html += f"<div class='info-item'><i>{ref['title']}</i></div>"
-            if ref.get('doi'):
-                html += f"<div class='info-item'><span class='label'>DOI:</span> <a href='https://doi.org/{ref['doi']}'>{ref['doi']}</a></div>"
-            if ref.get('journal'):
-                html += f"<div class='info-item'><span class='label'>Journal:</span> {ref['journal']}</div>"
-            if ref.get('year'):
-                html += f"<div class='info-item'><span class='label'>Year:</span> {ref['year']}</div>"
-            if ref.get('equation'):
-                html += f"<div class='info-item'><span class='label'>Equation:</span> {ref['equation']}</div>"
-            if ref.get('page'):
-                html += f"<div class='info-item'><span class='label'>Page:</span> {ref['page']}</div>"
-            if ref.get('notes'):
-                html += f"<div class='info-item'><span class='label'>Notes:</span> {ref['notes']}</div>"
+        # Where the default value came from, with its locator (table / equation / page)
+        if param_info.get('_reference_paper'):
+            html += "<h3>Default Value Provenance</h3>"
+            for label, text in default_provenance_lines(param_info['_reference_paper']):
+                html += f"<div class='info-item'><span class='label'>{label}:</span> {text}</div>"
+        basis = evidence_basis_lines(param_info)
+        if basis:
+            html += "<h3>Evidence Basis</h3><ul>"
+            for label, text in basis:
+                html += f"<li><span class='label'>{label}:</span> {text}</li>"
+            html += "</ul>"
 
         # Literature (external cited works behind the parameter's value). Entries are
         # paper reference numbers resolved against the bibliography (references.py) so
@@ -646,18 +664,16 @@ class ParameterInfoDialog(QDialog):
                 html += f"<li><span class='label'>{display_name}:</span> {desc}</li>"
             html += "</ul>"
 
-        # Visual effects
-        if '_expected_behavior' in param_info:
-            html += "<h3>Visual Effects</h3><ul>"
-            effects = param_info['_expected_behavior']
-            if 'low_value' in effects:
-                html += f"<li><span class='label'>Low values:</span> {effects['low_value']}</li>"
-            if 'high_value' in effects:
-                html += f"<li><span class='label'>High values:</span> {effects['high_value']}</li>"
+        # Expected behaviour as the value changes (low / high regimes, transition)
+        behavior = expected_behavior_lines(param_info)
+        if behavior:
+            html += "<h3>Expected Behavior</h3><ul>"
+            for label, text in behavior:
+                html += f"<li><span class='label'>{label}:</span> {text}</li>"
             html += "</ul>"
 
         # Presets
-        if '_presets' in param_info:
+        if param_info.get('_presets'):
             html += "<h3>Available Presets</h3><ul>"
             for preset_name, preset_value in param_info['_presets'].items():
                 html += f"<li><span class='label'>{preset_name}:</span> {preset_value}</li>"
@@ -1691,7 +1707,7 @@ class VCorneaMainWindow(QMainWindow):
             # Try to convert to expected type
             try:
                 if expected_type == int:
-                    converted_val = int(val_str)
+                    converted_val = _int_from_text(val_str)
                 elif expected_type == float:
                     converted_val = float(val_str)
                 elif expected_type == bool:
@@ -2750,8 +2766,16 @@ class VCorneaMainWindow(QMainWindow):
         an auto-generated `default_run_<ts>` while the batch dir carried the
         user-supplied name.
         """
-        cleaned = text.strip() or 'vcornea_run'
+        # The name becomes a folder name and the archive stem: keep it to the
+        # same character set the angio schema enforces (_validation_pattern
+        # ^[a-zA-Z0-9_-]+$), replacing anything else so '1,2,3' or 'a b' cannot
+        # produce odd directories.
+        import re as _re
+        cleaned = _re.sub(r'[^a-zA-Z0-9_-]+', '_', text.strip()).strip('_')[:50] or 'vcornea_run'
         self.current_params['exp_name'] = cleaned
+        if cleaned != text:
+            self.exp_name_input.setToolTip(
+                f"Only letters, digits, '_' and '-' are kept (max 50): the run will be named '{cleaned}'.")
 
     def _update_creator(self):
         """Build the OMEX creator dict from the operator name/email fields and store
