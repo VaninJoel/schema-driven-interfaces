@@ -148,15 +148,37 @@ def _params(rep_dir):
         return {}
 
 
+# Execution-control / provenance keys the worker stamps onto every run's
+# parameters. They differ between runs by design (seeds, indices) or are not
+# model parameters at all, so they must never be inferred as swept.
+_NON_MODEL_PARAM_KEYS = frozenset((
+    'exp_name', 'store_path', 'creator', 'random_seed', 'random_seed_origin',
+    '_schema_fingerprint', 'parameter_scan', 'scan_point', 'combination_index',
+    'total_combinations', 'replicate_id', 'total_replicates',
+    'parent_experiment_id',
+))
+
+
 def derive_scan(combos):
-    """Return (scan_spec, combo_label_map). Swept params = those that vary across combos."""
-    first = next(iter(combos.values()))[0]
-    base = _params(first)
+    """Return (scan_spec, combo_label_map).
+
+    The recorded `parameter_scan` (stamped by the GUI on every sweep run) is
+    authoritative when present. The cross-combo diff is only a fallback for
+    pre-provenance runs, and skips execution-control keys — otherwise per-run
+    values like random_seed (or the dict-valued scan_point) read as swept.
+    """
     cparams = {c: _params(dirs[0]) for c, dirs in combos.items()}
-    swept = sorted(k for k in base if k not in ('exp_name', 'store_path')
-                   and len({str(cparams[c].get(k)) for c in combos}) > 1)
-    scan_spec = {k: sorted({cparams[c][k] for c in combos}) for k in swept}
-    labels = {c: (", ".join(f"{k}={cparams[c][k]}" for k in swept) or c) for c in combos}
+    first = next(iter(cparams.values()))
+    recorded = first.get('parameter_scan')
+    if recorded and all(p.get('parameter_scan') == recorded for p in cparams.values()):
+        swept = sorted(recorded)
+        scan_spec = {k: sorted(recorded[k]) for k in swept}
+    else:
+        swept = sorted(k for k in first if k not in _NON_MODEL_PARAM_KEYS
+                       and len({str(cparams[c].get(k)) for c in combos}) > 1)
+        scan_spec = {k: sorted({cparams[c][k] for c in combos}) for k in swept}
+    labels = {c: (", ".join(f"{k}={cparams[c].get(k)}" for k in swept) or c)
+              for c in combos}
     return scan_spec, labels
 
 
