@@ -45,6 +45,8 @@ from simulation_worker import SimulationWorker
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
+    format_range_evidence,
+    RANGE_TIERS,
     get_parameter_structure,
     get_display_name_mapping,
     get_model_defaults,
@@ -183,12 +185,11 @@ class ValidationInfoDialog(QDialog):
             # Show ranges with each sweep value checked
             if '_physiological_range' in param_info:
                 r = param_info['_physiological_range']
-                ref = param_info.get('_reference_paper', {}).get('source', 'Literature')
 
                 html += f"""
                 <div class="range-item">
                     <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Values observed in biological systems (Source: {ref})</small><br>
+                    <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -206,7 +207,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Suggested values for typical simulations</small><br>
+                    <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -224,7 +225,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Model stability limits - simulation may crash outside this range</small><br>
+                    <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -242,14 +243,13 @@ class ValidationInfoDialog(QDialog):
 
             if '_physiological_range' in param_info and is_numeric:
                 r = param_info['_physiological_range']
-                ref = param_info.get('_reference_paper', {}).get('source', 'Literature')
                 in_range = r[0] <= current_value <= r[1]
                 status = "✓" if in_range else "✗"
 
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Values observed in biological systems (Source: {ref})</small>
+                    <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
 
@@ -261,7 +261,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Suggested values for typical simulations</small>
+                    <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
 
@@ -273,7 +273,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Model stability limits - simulation may crash outside this range</small>
+                    <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
 
@@ -487,12 +487,10 @@ class ParameterInfoDialog(QDialog):
         # Validation ranges (shown in physical + simulation units)
         if any(k in param_info for k in ('_physiological_range', '_recommended_range', '_mathematical_range')):
             html += "<h3>Valid Ranges</h3><ul>"
-            if '_physiological_range' in param_info:
-                html += f"<li><span class='label'>Physiological Range:</span> {_fmt_range(param_info['_physiological_range'])}</li>"
-            if '_recommended_range' in param_info:
-                html += f"<li><span class='label'>Recommended Range:</span> {_fmt_range(param_info['_recommended_range'])} <i>(exploratory, not physiological)</i></li>"
-            if '_mathematical_range' in param_info:
-                html += f"<li><span class='label'>Mathematical Range:</span> {_fmt_range(param_info['_mathematical_range'])} (model stability)</li>"
+            for key, tier, label in RANGE_TIERS:
+                if key in param_info:
+                    html += (f"<li><span class='label'>{label}:</span> {_fmt_range(param_info[key])}"
+                             f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
             html += "</ul>"
 
         # Reference information
@@ -649,9 +647,9 @@ class ParameterInfoDialog(QDialog):
             html += "</ul>"
 
         # Visual effects
-        if '_visual_effects' in param_info:
+        if '_expected_behavior' in param_info:
             html += "<h3>Visual Effects</h3><ul>"
-            effects = param_info['_visual_effects']
+            effects = param_info['_expected_behavior']
             if 'low_value' in effects:
                 html += f"<li><span class='label'>Low values:</span> {effects['low_value']}</li>"
             if 'high_value' in effects:

@@ -106,11 +106,31 @@ def step_create_archive(tmpdir: Path) -> Path:
     print("\n[1/4] Creating OMEX archive from synthetic Zarr store...")
     store = make_fake_zarr_store(tmpdir)
     run_metadata, sim_params = make_metadata(store)
+    # Parameter audit from the live schema, as the GUI main window / finish() do.
+    # Constructing AngiogenesisProcess starts a CC3D service (known limitation);
+    # skipped with a note when cc3d is unavailable so the archive path still runs.
+    parameter_audit = None
+    try:
+        import contextlib, io
+        from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
+        from parameter_audit import build_parameter_audit
+        with contextlib.redirect_stdout(io.StringIO()):
+            schema = AngiogenesisProcess().ports_schema()
+        parameter_audit = build_parameter_audit(schema, sim_params)
+        print(f"  note  parameter audit built: {parameter_audit['summary']['n_parameters']} parameters")
+    except Exception as e:
+        print(f"  note  parameter audit skipped ({type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''})")
     omex_path = create_omex_archive_from_zarr(
         zarr_store_path=store,
         run_metadata=run_metadata,
         sim_params=sim_params,
+        parameter_audit=parameter_audit,
     )
+    if parameter_audit:
+        with zipfile.ZipFile(omex_path) as zf:
+            assert 'model/parameter_audit.json' in zf.namelist(), 'parameter_audit.json missing'
+            assert 'model/parameter_audit.json' in zf.read('manifest.xml').decode(), 'not in manifest'
+        print("  PASS  model/parameter_audit.json bundled and listed in manifest.xml")
     print(f"  PASS  archive written: {omex_path.name} ({omex_path.stat().st_size} bytes)")
     return omex_path
 

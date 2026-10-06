@@ -988,6 +988,7 @@ def create_omex_archive(
     keywords: Optional[List[str]] = None,
     failed: bool = False,
     status: Optional[str] = None,
+    parameter_audit: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
@@ -1139,6 +1140,17 @@ def create_omex_archive(
                     generate_environment_manifest(run_metadata.get('provenance')))
         manifest_entries.append({'location': 'environment.json',
                                  'format': FORMAT_URIS['.json']})
+
+        # 2d. parameter_audit.json — the schema's documentation of every executed
+        #     value: default vs. run value, position against the admissible /
+        #     evidence-supported / recommended ranges, and the evidence (basis,
+        #     citation, locator) behind each bound and default. Built by the caller
+        #     that holds the live schema (see utils/parameter_audit.py).
+        if parameter_audit:
+            zf.writestr('parameter_audit.json',
+                        json.dumps(parameter_audit, indent=2, default=str))
+            manifest_entries.append({'location': 'parameter_audit.json',
+                                     'format': FORMAT_URIS['.json']})
 
         # 3. Output files
         for item in run_output_dir.iterdir():

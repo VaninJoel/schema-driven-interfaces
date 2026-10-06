@@ -9,6 +9,7 @@ This worker leverages the Integrated Architecture pattern:
 """
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer
+import json
 import subprocess
 import sys
 import tempfile
@@ -30,7 +31,7 @@ class SimulationWorker(QObject):
     finished = pyqtSignal(dict)      # {exp_name, store_path, final_step}
     error = pyqtSignal(str)          # Error message
 
-    def __init__(self, parameters, output_dir='experiments'):
+    def __init__(self, parameters, output_dir='experiments', parameter_audit=None):
         """
         Initialize simulation worker.
 
@@ -46,6 +47,10 @@ class SimulationWorker(QObject):
         """
         super().__init__()
         self.parameters = parameters
+        # Built by the main window, which holds the live schema (this worker and
+        # its subprocess do not): what the schema documents about every value in
+        # `parameters`. Stored into the archive and alongside run_metadata.json.
+        self.parameter_audit = parameter_audit
         self.output_dir = Path(output_dir)
         self.exp_name = parameters.get('exp_name', 'unnamed_run')
         self.sim_time = parameters.get('sim_time', 100.0)
@@ -577,6 +582,7 @@ except Exception as e:
                 # Run identity: which realization, which parameter definitions,
                 # which code. Consumed by the SED-ML writer and the PDF report.
                 'random_seed': self.parameters.get('random_seed'),
+                'parameter_credibility': (self.parameter_audit or {}).get('summary'),
                 'provenance': self._collect_provenance(),
                 'duration_seconds': (round(time.time() - self._started_at, 3)
                                      if self._started_at else None),
@@ -596,7 +602,14 @@ except Exception as e:
                 logs_dir=self.logs_dir,                   # stdout/stderr captured by this worker
                 failed=failed,
                 status=status,
+                parameter_audit=self.parameter_audit,
             )
+            if self.parameter_audit:
+                try:
+                    (self.exp_dir / 'parameter_audit.json').write_text(
+                        json.dumps(self.parameter_audit, indent=2, default=str))
+                except Exception as e:
+                    print(f"Warning: could not write parameter_audit.json: {e}")
             resolved = status or ('failed' if failed else 'success')
             print(f"Generated {'' if resolved == 'success' else resolved.upper() + ' '}"
                   f"OMEX archive: {omex_path}")

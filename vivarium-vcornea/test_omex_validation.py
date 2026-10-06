@@ -97,11 +97,28 @@ def make_synthetic_run(tmpdir: Path, num_replicates: int = 1) -> tuple[dict, dic
 def step_create_archive(tmpdir: Path) -> Path:
     print("\n[1/4] Creating OMEX archive from synthetic outputs...")
     run_metadata, sim_params = make_synthetic_run(tmpdir, num_replicates=3)
+    # Parameter audit from the live schema, as the process does for a real run.
+    # Skipped (with a note) when the CC3D project cannot be located, so the
+    # archive path itself is still exercised on a bare checkout.
+    parameter_audit = None
+    try:
+        from vivarium_vcornea.processes.vcornea_process import VCorneaProcess
+        from parameter_audit import build_parameter_audit
+        parameter_audit = build_parameter_audit(VCorneaProcess().ports_schema(), sim_params)
+        print(f"  note  parameter audit built: {parameter_audit['summary']['n_parameters']} parameters")
+    except Exception as e:
+        print(f"  note  parameter audit skipped ({type(e).__name__}: {str(e).splitlines()[0]})")
     omex_path = create_omex_archive(
         run_output_dir=tmpdir,
         run_metadata=run_metadata,
         sim_params=sim_params,
+        parameter_audit=parameter_audit,
     )
+    if parameter_audit:
+        with zipfile.ZipFile(omex_path) as zf:
+            assert 'parameter_audit.json' in zf.namelist(), 'parameter_audit.json missing from archive'
+            assert 'parameter_audit.json' in zf.read('manifest.xml').decode(), 'parameter_audit.json not in manifest'
+        print("  PASS  parameter_audit.json bundled and listed in manifest.xml")
     print(f"  PASS  archive written: {omex_path.name} ({omex_path.stat().st_size} bytes)")
     return omex_path
 

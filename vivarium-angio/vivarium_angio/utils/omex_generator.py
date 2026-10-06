@@ -805,6 +805,7 @@ def create_omex_archive_from_zarr(
     failed: bool = False,
     model_export_dir: Optional[Union[str, Path]] = None,
     status: Optional[str] = None,
+    parameter_audit: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Package a run into an OMEX archive (successful OR failed).
 
@@ -980,6 +981,16 @@ def create_omex_archive_from_zarr(
         zf.writestr('model/environment.json',
                     generate_environment_manifest(run_metadata.get('provenance')))
         manifest_entries.append({'location': 'model/environment.json', 'format': FORMAT_URIS['.json']})
+
+        #    3d'. parameter_audit.json — what the schema documents about every
+        #    executed value (default vs. run value, position against the
+        #    admissible / evidence-supported / recommended ranges, and the
+        #    evidence behind each bound). Built where the live schema exists
+        #    (GUI main window or Process.finish) — see utils/parameter_audit.py.
+        if parameter_audit:
+            zf.writestr('model/parameter_audit.json',
+                        json.dumps(parameter_audit, indent=2, default=str))
+            manifest_entries.append({'location': 'model/parameter_audit.json', 'format': FORMAT_URIS['.json']})
         #    3e. self-contained re-run driver
         zf.writestr('model/run_model.py', generate_run_model_script())
         manifest_entries.append({'location': 'model/run_model.py', 'format': FORMAT_URIS['.py']})
