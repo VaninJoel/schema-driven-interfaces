@@ -295,7 +295,7 @@ def get_parameter_relationships(schema: Dict, param_name: str) -> Dict[str, List
 
     return {
         'related': param_info.get('_related_parameters', []),
-        'depends_on': param_info.get('_depends_on', []),
+        'depends_on': param_info.get('_depends_on_display', []),
         'affects': param_info.get('_affects_output', []),
     }
 
@@ -546,6 +546,125 @@ def schema_to_json_serializable(schema: Dict) -> Dict:
     return remove_non_serializable(schema_copy)
 
 
+# ---------------------------------------------------------------------------
+# Range evidence (docs/parameter_descriptor_format.md, group 4)
+#
+# Each range tier is a (min, max) tuple; the justification for each tier lives
+# beside it in `_range_evidence`:
+#     {'physiological': {'basis': 'literature', 'refs': [key, ...],
+#                        'locator': {'table':..., 'equation':..., 'page':...},
+#                        'note': '...'}, 'recommended': {...}, 'mathematical': {...}}
+# These helpers are the single place that turns that structure into text, so
+# every documentation surface (info dialog, validation dialog, generated
+# markdown) presents the same thing. A tier without a recorded entry is
+# reported as such — never dressed up with the default value's citation.
+# ---------------------------------------------------------------------------
+
+RANGE_TIERS = (
+    # (schema key, tier name, human label)
+    ('_physiological_range', 'physiological', 'Physiological Range'),
+    ('_recommended_range', 'recommended', 'Recommended Range'),
+    ('_mathematical_range', 'mathematical', 'Mathematical Range'),
+)
+
+RANGE_TIER_MEANING = {
+    'physiological': 'values the evidence supports; outside is an extrapolation',
+    'recommended': 'values advised for this model\'s context of use',
+    'mathematical': 'values the implementation accepts; outside is an error',
+}
+
+RANGE_BASIS_LABELS = {
+    'numerical_stability': 'numerical stability of the implementation',
+    'literature': 'published evidence',
+    'calibration': 'calibration against reference data',
+    'expert_judgement': 'modeler judgement',
+    'exploratory': 'exploratory, not evidence-based',
+}
+
+
+def _format_locator(locator) -> str:
+    if not isinstance(locator, dict):
+        return ''
+    parts = [str(locator[k]) for k in ('table', 'equation') if locator.get(k)]
+    if locator.get('page'):
+        parts.append(f"p. {locator['page']}")
+    return ', '.join(parts)
+
+
+def _resolve_reference(key) -> Dict[str, Any]:
+    """Look a `_literature`/`refs` key up in whatever registry this GUI's model ships."""
+    for loader in _REFERENCE_REGISTRIES:
+        try:
+            registry = loader()
+        except Exception:
+            continue
+        if registry and key in registry:
+            return registry[key]
+    return {}
+
+
+def get_range_evidence(param_info: Dict, tier: str,
+                       resolve_ref=None) -> Dict[str, Any]:
+    """Normalised evidence record for one range tier.
+
+    Returns a dict with keys: declared (bool), basis, basis_label, refs
+    (list of {'key', 'cite', 'doi'}), locator (str), note (str), meaning (str).
+    `declared` is False when the schema carries no `_range_evidence` entry for
+    the tier; callers should then say so rather than infer a source.
+    """
+    resolve_ref = resolve_ref or _resolve_reference
+    meaning = RANGE_TIER_MEANING.get(tier, '')
+    entry = (param_info.get('_range_evidence') or {}).get(tier)
+    if not isinstance(entry, dict):
+        return {'declared': False, 'basis': None, 'basis_label': None,
+                'refs': [], 'locator': '', 'note': None, 'meaning': meaning}
+    refs = []
+    for key in entry.get('refs') or []:
+        r = resolve_ref(key) or {}
+        cite = r.get('cite') or r.get('source') or r.get('title') or str(key)
+        refs.append({'key': key, 'cite': cite, 'doi': r.get('doi')})
+    basis = entry.get('basis')
+    return {'declared': True, 'basis': basis,
+            'basis_label': RANGE_BASIS_LABELS.get(basis, basis or 'unspecified'),
+            'refs': refs, 'locator': _format_locator(entry.get('locator')),
+            'note': entry.get('note'), 'meaning': meaning}
+
+
+def format_range_evidence(param_info: Dict, tier: str, fmt: str = 'html',
+                          resolve_ref=None) -> str:
+    """One-line provenance statement for a range tier, as HTML or Markdown."""
+    ev = get_range_evidence(param_info, tier, resolve_ref)
+    link = (lambda doi: f"<a href='https://doi.org/{doi}'>doi:{doi}</a>") if fmt == 'html' \
+        else (lambda doi: f"[doi:{doi}](https://doi.org/{doi})")
+    if not ev['declared']:
+        return f"{ev['meaning'].capitalize()}. Evidence for this range is not recorded in the schema."
+    bits = [f"Basis: {ev['basis_label']}"]
+    if ev['refs']:
+        cites = []
+        for r in ev['refs']:
+            c = r['cite']
+            if r['doi']:
+                c += f" ({link(r['doi'])})"
+            cites.append(c)
+        src = '; '.join(cites)
+        if ev['locator']:
+            src += f" — {ev['locator']}"
+        bits.append(f"Source: {src}")
+    elif ev['locator']:
+        bits.append(f"Locator: {ev['locator']}")
+    if ev['note']:
+        bits.append(ev['note'])
+    return '. '.join(b.rstrip('.') for b in bits) + '.'
+
+
+def _load_vcornea_references():
+    from vivarium_vcornea.utils.references import REFERENCES
+    return REFERENCES
+
+
+_REFERENCE_REGISTRIES = (_load_vcornea_references,)
+
+
 def extract_parameter_documentation(schema: Dict, output_format: str = 'markdown') -> str:
     """
     Generate documentation from schema.
@@ -579,9 +698,11 @@ def extract_parameter_documentation(schema: Dict, output_format: str = 'markdown
                 # Add details
                 if '_unit' in param_info:
                     doc += f"- **Unit**: {param_info['_unit']}\n"
-                if '_physiological_range' in param_info:
-                    r = param_info['_physiological_range']
-                    doc += f"- **Physiological Range**: [{r[0]}, {r[1]}]\n"
+                for key, tier, label in RANGE_TIERS:
+                    if key in param_info:
+                        r = param_info[key]
+                        doc += f"- **{label}**: [{r[0]}, {r[1]}]\n"
+                        doc += f"  - {format_range_evidence(param_info, tier, fmt='markdown')}\n"
                 if '_default' in param_info:
                     doc += f"- **Default**: {param_info['_default']}\n"
 

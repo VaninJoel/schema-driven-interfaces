@@ -148,15 +148,37 @@ def _params(rep_dir):
         return {}
 
 
+# Execution-control / provenance keys the worker stamps onto every run's
+# parameters. They differ between runs by design (seeds, indices) or are not
+# model parameters at all, so they must never be inferred as swept.
+_NON_MODEL_PARAM_KEYS = frozenset((
+    'exp_name', 'store_path', 'creator', 'random_seed', 'random_seed_origin',
+    '_schema_fingerprint', 'parameter_scan', 'scan_point', 'combination_index',
+    'total_combinations', 'replicate_id', 'total_replicates',
+    'parent_experiment_id',
+))
+
+
 def derive_scan(combos):
-    """Return (scan_spec, combo_label_map). Swept params = those that vary across combos."""
-    first = next(iter(combos.values()))[0]
-    base = _params(first)
+    """Return (scan_spec, combo_label_map).
+
+    The recorded `parameter_scan` (stamped by the GUI on every sweep run) is
+    authoritative when present. The cross-combo diff is only a fallback for
+    pre-provenance runs, and skips execution-control keys — otherwise per-run
+    values like random_seed (or the dict-valued scan_point) read as swept.
+    """
     cparams = {c: _params(dirs[0]) for c, dirs in combos.items()}
-    swept = sorted(k for k in base if k not in ('exp_name', 'store_path')
-                   and len({str(cparams[c].get(k)) for c in combos}) > 1)
-    scan_spec = {k: sorted({cparams[c][k] for c in combos}) for k in swept}
-    labels = {c: (", ".join(f"{k}={cparams[c][k]}" for k in swept) or c) for c in combos}
+    first = next(iter(cparams.values()))
+    recorded = first.get('parameter_scan')
+    if recorded and all(p.get('parameter_scan') == recorded for p in cparams.values()):
+        swept = sorted(recorded)
+        scan_spec = {k: sorted(recorded[k]) for k in swept}
+    else:
+        swept = sorted(k for k in first if k not in _NON_MODEL_PARAM_KEYS
+                       and len({str(cparams[c].get(k)) for c in combos}) > 1)
+        scan_spec = {k: sorted({cparams[c][k] for c in combos}) for k in swept}
+    labels = {c: (", ".join(f"{k}={cparams[c].get(k)}" for k in swept) or c)
+              for c in combos}
     return scan_spec, labels
 
 
@@ -246,6 +268,56 @@ def read_run_identity(rep_dirs):
             'source': code.get('source'),
         })
     return rows
+
+
+def _parameter_credibility_block(audit_sources, H2, SUB, prows):
+    """Flowables for the parameter-credibility section; [] when no audit exists.
+
+    Reads parameter_audit.json (run dir or .omex) written by the run from its
+    live schema. One table of the parameters an auditor must look at: changed
+    from default, or sitting outside a documented range. Everything else is
+    summarised in a line, so a report stays short when the run stayed inside
+    its documented evidence.
+    """
+    try:
+        import parameter_audit as _pa  # utils dir is on sys.path
+    except Exception:
+        return []
+    audits = [a for a in (_pa.load_parameter_audit(s) for s in audit_sources) if a]
+    if not audits:
+        return []
+    audit = audits[0]                       # replicates share a parameterization
+    s = audit.get('summary') or {}
+    out = [Paragraph("Parameter Credibility (run values against the schema's documented evidence)", H2),
+           Paragraph(_pa.audit_summary_line(audit) + ".", SUB)]
+    header, rows = _pa.audit_table_rows(audit, include='attention')
+    if rows:
+        def _fmt(v):
+            return f"{v:g}" if isinstance(v, float) else str(v)
+        data = [header] + [[r[0], _fmt(r[1]), _fmt(r[2]), r[3], r[4], r[5]] for r in rows]
+        out.append(prows(data, [1.85 * inch, 0.7 * inch, 0.7 * inch, 0.7 * inch,
+                                1.4 * inch, 1.4 * inch]))
+    else:
+        out.append(Paragraph("Every parameter ran at its documented default and inside "
+                             "every documented range.", SUB))
+    out.append(Paragraph(
+        "<i>Credibility</i> places each executed value against the three range tiers the "
+        "schema documents: the implementation-admissible range (outside = inadmissible), the "
+        "evidence-supported range (outside = extrapolation beyond the documented evidence) and "
+        "the recommended range for this model's context of use. The evidence column names the "
+        "basis and citation the schema records for the supported range; "
+        "<i>not recorded</i> means the bound exists but its justification has not been "
+        "documented, which is itself an audit finding. Numeric parameters without any documented range "
+        "are listed as unassessable; switches and categories are not range-assessed. Full detail for every parameter is in "
+        "parameter_audit.json inside the archive.", SUB))
+    if len(audits) > 1:
+        diff = [k for k, e in audit['parameters'].items()
+                if e.get('parameter_type') != 'control'
+                and any(a['parameters'].get(k, {}).get('value') != e['value'] for a in audits[1:])]
+        if diff:
+            out.append(Paragraph("Replicates differ in: " + ", ".join(diff) +
+                                 " (replicates of one combination should share every model parameter).", SUB))
+    return out
 
 
 def _run_identity_block(rep_dirs, H2, SUB, prows):
@@ -416,6 +488,7 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf):
         S.append(prows(pr, [1.6 * inch, 5.15 * inch]))
 
     S.extend(_run_identity_block(rep_dirs, H2, SUB, prows))
+    S.extend(_parameter_credibility_block(list(rep_dirs) + list(omex_paths or []), H2, SUB, prows))
 
     if omex_paths:
         S.append(Paragraph("Per-replicate Archive Validation", H2))

@@ -9,6 +9,7 @@ This worker leverages the Integrated Architecture pattern:
 """
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer
+import json
 import subprocess
 import sys
 import tempfile
@@ -30,7 +31,7 @@ class SimulationWorker(QObject):
     finished = pyqtSignal(dict)      # {exp_name, store_path, final_step}
     error = pyqtSignal(str)          # Error message
 
-    def __init__(self, parameters, output_dir='experiments'):
+    def __init__(self, parameters, output_dir='experiments', parameter_audit=None):
         """
         Initialize simulation worker.
 
@@ -46,6 +47,10 @@ class SimulationWorker(QObject):
         """
         super().__init__()
         self.parameters = parameters
+        # Built by the main window, which holds the live schema (this worker and
+        # its subprocess do not): what the schema documents about every value in
+        # `parameters`. Stored into the archive and alongside run_metadata.json.
+        self.parameter_audit = parameter_audit
         self.output_dir = Path(output_dir)
         self.exp_name = parameters.get('exp_name', 'unnamed_run')
         self.sim_time = parameters.get('sim_time', 100.0)
@@ -60,10 +65,76 @@ class SimulationWorker(QObject):
         self.process = None
         self.temp_script = None
         self.monitoring = False
+        self._cancelled = False  # set by cancel(); suppresses the normal result path
         # Wall-clock start, stamped when run() begins. Recorded with the run so a
         # reviewer can distinguish a run that finished quickly from one that was
         # cut short, and so batch cost is auditable.
         self._started_at = None
+
+    @pyqtSlot()
+    def cancel(self):
+        """Kill the entire subprocess tree spawned by this worker.
+
+        Cancelling previously called only QThread.quit(), which does nothing while
+        the worker is blocked inside subprocess.wait(): the CC3D simulation kept
+        running to completion, consuming CPU, while the interface reported the
+        batch as cancelled. Killing only our direct child is not enough either —
+        it is a Python interpreter whose CC3D grandchildren survive it on Windows.
+        psutil handles the tree cross-platform; taskkill /T and process.kill() are
+        the fallbacks.
+
+        A cancellation marker and a status='cancelled' archive are then written so
+        an interrupted attempt is recorded rather than silently absent.
+        """
+        self._cancelled = True
+        was_running = self.process is not None and self.process.poll() is None
+        if was_running:
+            pid = self.process.pid
+            killed = False
+            try:
+                import psutil
+                try:
+                    parent = psutil.Process(pid)
+                    for child in parent.children(recursive=True):
+                        try:
+                            child.kill()
+                        except psutil.NoSuchProcess:
+                            pass
+                    parent.kill()
+                    killed = True
+                except psutil.NoSuchProcess:
+                    killed = True
+            except ImportError:
+                pass
+            if not killed and sys.platform == 'win32':
+                try:
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
+                                   capture_output=True, timeout=10)
+                    killed = True
+                except Exception:
+                    pass
+            if not killed:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+
+        self.monitoring = False
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            self.exp_dir.mkdir(parents=True, exist_ok=True)
+            (self.exp_dir / 'cancelled.json').write_text(_json.dumps({
+                'exp_name': self.exp_name,
+                'status': 'cancelled',
+                'cancelled_at': _dt.now().isoformat(),
+                'was_running_at_cancel': was_running,
+                'reason': 'User clicked Cancel in the GUI',
+            }, indent=2))
+        except Exception as e:
+            print(f"  > Could not write cancelled.json for {self.exp_name}: {e}")
+
+        self._generate_omex_archive(self._get_final_step(), status='cancelled')
 
     @pyqtSlot()
     def run(self):
@@ -131,6 +202,13 @@ class SimulationWorker(QObject):
             # failed (no executable SED-ML, status.json=failed) carrying params,
             # provenance, logs and any partial Zarr outputs, instead of being left
             # as a loose directory.
+            # If the operator cancelled, cancel() already killed the process tree
+            # and wrote the cancellation marker and archive. Emitting a failure
+            # here would re-report the interruption as a model failure and
+            # overwrite the cancelled archive with a failed one.
+            if self._cancelled:
+                return
+
             run_succeeded = (exit_code == 0 and self.zarr_path.exists())
             self._generate_omex_archive(final_step, failed=not run_succeeded)
 
@@ -459,7 +537,7 @@ except Exception as e:
             'parameter_scan': scan or None,
         }
 
-    def _generate_omex_archive(self, final_step, failed=False):
+    def _generate_omex_archive(self, final_step, failed=False, status=None):
         """Package the run into a COMBINE/OMEX archive sibling to the Zarr store.
 
         Standards-compliant provenance is always-on: every run — successful or
@@ -497,11 +575,14 @@ except Exception as e:
                 'final_step': final_step,
                 'final_mcs': final_step,
                 'zarr_store_path': str(self.zarr_path),
-                'simulation_status': 'failed' if failed else 'success',
+                'simulation_status': status or ('failed' if failed else 'success'),
+                'cancelled_at': (time.strftime('%Y-%m-%dT%H:%M:%S')
+                                 if status == 'cancelled' else None),
                 'run_reference': self._build_run_reference(),  # Task B (None for single runs)
                 # Run identity: which realization, which parameter definitions,
                 # which code. Consumed by the SED-ML writer and the PDF report.
                 'random_seed': self.parameters.get('random_seed'),
+                'parameter_credibility': (self.parameter_audit or {}).get('summary'),
                 'provenance': self._collect_provenance(),
                 'duration_seconds': (round(time.time() - self._started_at, 3)
                                      if self._started_at else None),
@@ -520,8 +601,18 @@ except Exception as e:
                 creator=self.parameters.get('creator'),  # experimenter (provenance), if set
                 logs_dir=self.logs_dir,                   # stdout/stderr captured by this worker
                 failed=failed,
+                status=status,
+                parameter_audit=self.parameter_audit,
             )
-            print(f"Generated {'FAILED ' if failed else ''}OMEX archive: {omex_path}")
+            if self.parameter_audit:
+                try:
+                    (self.exp_dir / 'parameter_audit.json').write_text(
+                        json.dumps(self.parameter_audit, indent=2, default=str))
+                except Exception as e:
+                    print(f"Warning: could not write parameter_audit.json: {e}")
+            resolved = status or ('failed' if failed else 'success')
+            print(f"Generated {'' if resolved == 'success' else resolved.upper() + ' '}"
+                  f"OMEX archive: {omex_path}")
         except Exception as e:
             print(f"Warning: Could not generate OMEX archive: {e}")
 

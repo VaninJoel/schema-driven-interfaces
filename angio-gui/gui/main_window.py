@@ -36,6 +36,8 @@ from simulation_worker import SimulationWorker
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
+    format_range_evidence,
+    RANGE_TIERS,
     get_parameter_structure,
     get_display_name_mapping,
     get_model_defaults,
@@ -173,12 +175,11 @@ class ValidationInfoDialog(QDialog):
             # Show ranges with each sweep value checked
             if '_physiological_range' in param_info:
                 r = param_info['_physiological_range']
-                ref = param_info.get('_reference_paper', {}).get('source', 'Literature')
 
                 html += f"""
                 <div class="range-item">
                     <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Values observed in biological systems (Source: {ref})</small><br>
+                    <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -196,7 +197,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Suggested values for typical simulations</small><br>
+                    <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -214,7 +215,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Model stability limits - simulation may crash outside this range</small><br>
+                    <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
 
@@ -232,14 +233,13 @@ class ValidationInfoDialog(QDialog):
 
             if '_physiological_range' in param_info and is_numeric:
                 r = param_info['_physiological_range']
-                ref = param_info.get('_reference_paper', {}).get('source', 'Literature')
                 in_range = r[0] <= current_value <= r[1]
                 status = "✓" if in_range else "✗"
 
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Values observed in biological systems (Source: {ref})</small>
+                    <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
 
@@ -251,7 +251,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Suggested values for typical simulations</small>
+                    <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
 
@@ -263,7 +263,7 @@ class ValidationInfoDialog(QDialog):
                 html += f"""
                 <div class="range-item">
                     <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
-                    <small>Model stability limits - simulation may crash outside this range</small>
+                    <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
 
@@ -379,17 +379,14 @@ class ParameterInfoDialog(QDialog):
         html += "</ul>"
 
         # Validation ranges
-        if '_physiological_range' in param_info or '_recommended_range' in param_info:
+        if any(key in param_info for key, _, _ in RANGE_TIERS):
             html += "<h3>Valid Ranges</h3><ul>"
-            if '_physiological_range' in param_info:
-                r = param_info['_physiological_range']
-                html += f"<li><span class='label'>Physiological Range:</span> [{r[0]}, {r[1]}]</li>"
-            if '_recommended_range' in param_info:
-                r = param_info['_recommended_range']
-                html += f"<li><span class='label'>Recommended Range:</span> [{r[0]}, {r[1]}]</li>"
-            if '_mathematical_range' in param_info:
-                r = param_info['_mathematical_range']
-                html += f"<li><span class='label'>Mathematical Range:</span> [{r[0]}, {r[1]}] (model stability)</li>"
+            unit = param_info.get('_unit', '')
+            for key, tier, label in RANGE_TIERS:
+                if key in param_info:
+                    r = param_info[key]
+                    html += (f"<li><span class='label'>{label}:</span> [{r[0]}, {r[1]}] {unit}"
+                             f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
             html += "</ul>"
 
         # Reference information
@@ -439,9 +436,9 @@ class ParameterInfoDialog(QDialog):
             html += "</ul>"
 
         # Visual effects
-        if '_visual_effects' in param_info:
+        if '_expected_behavior' in param_info:
             html += "<h3>Visual Effects</h3><ul>"
-            effects = param_info['_visual_effects']
+            effects = param_info['_expected_behavior']
             if 'low_value' in effects:
                 html += f"<li><span class='label'>Low values:</span> {effects['low_value']}</li>"
             if 'high_value' in effects:
@@ -1194,6 +1191,28 @@ class AngiogenesisMainWindow(QMainWindow):
             self._loading_preset = False  # Clear flag on error
             QMessageBox.critical(self, "Error", f"Failed to load preset: {str(e)}")
 
+    def _build_parameter_audit(self, params):
+        """What the schema documents about every value in `params`, for the run's audit bundle.
+
+        Built here because this window holds the live schema; the worker and its
+        subprocess do not (see simulation_worker._generate_omex_archive).
+        """
+        try:
+            project_root = Path(__file__).resolve().parents[2]
+            audit_path = (project_root / 'vivarium-angio' / 'vivarium_angio'
+                          / 'utils' / 'parameter_audit.py')
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location('angio_parameter_audit', str(audit_path))
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            from vivarium_angio.utils.references import REFERENCES as _refs
+            return mod.build_parameter_audit(
+                self.schema, params, schema_fingerprint=self.schema_fingerprint,
+                resolve_ref=lambda k: _refs.get(k, {}))
+        except Exception as e:
+            print(f"Warning: could not build parameter audit: {e}")
+            return None
+
     def show_parameter_info(self, param_name: str):
         """Display detailed parameter information in a pop-up dialog."""
         param_info = get_full_parameter_info(self.schema, param_name)
@@ -1788,13 +1807,32 @@ batch_sweep_20251106_143052/
         )
 
         if reply == QMessageBox.Yes:
-            # Try to terminate all running threads
-            for thread, worker in self.simulation_threads:
-                if thread.isRunning():
-                    thread.quit()
-                    thread.wait(1000)  # Wait up to 1 second
+            self.statusBar().showMessage("Cancelling — terminating CC3D subprocesses...")
+            QApplication.processEvents()
 
-            self.statusBar().showMessage("Batch cancelled")
+            killed = 0
+            for thread, worker in self.simulation_threads:
+                if not thread.isRunning():
+                    continue
+                # Kill the subprocess TREE first. thread.quit() alone does nothing
+                # while the worker is blocked in subprocess.wait(), which is why
+                # cancelling used to leave CC3D running to completion.
+                try:
+                    worker.cancel()
+                    killed += 1
+                except Exception as e:
+                    print(f"  > Warning: failed to cancel worker "
+                          f"{getattr(worker, 'exp_name', '?')}: {e}")
+                # With the child gone, the blocking wait returns and the thread's
+                # event loop can exit cleanly.
+                thread.quit()
+                thread.wait(2000)
+                if thread.isRunning():
+                    thread.terminate()
+                    thread.wait(1000)
+
+            self.statusBar().showMessage(
+                f"Batch cancelled ({killed} subprocess tree(s) terminated)", 5000)
             self.finalize_batch(was_cancelled=True)
 
     def finalize_batch(self, was_cancelled=False):
@@ -2062,7 +2100,8 @@ batch_sweep_20251106_143052/
                 print(f"Launching simulation {run_counter}/{self.total_combinations}: {exp_name}")
 
                 # Create worker and thread
-                worker = SimulationWorker(params_copy, str(self.batch_output_folder))
+                worker = SimulationWorker(params_copy, str(self.batch_output_folder),
+                                          parameter_audit=self._build_parameter_audit(params_copy))
                 thread = QThread()
                 worker.moveToThread(thread)
 
@@ -2089,7 +2128,9 @@ batch_sweep_20251106_143052/
         self.progress_bar.setValue(0)
 
         # Create worker and thread (convert Path to string for compatibility)
-        self.worker = SimulationWorker(self.current_params.copy(), str(self.output_dir))
+        single_params = self.current_params.copy()
+        self.worker = SimulationWorker(single_params, str(self.output_dir),
+                                       parameter_audit=self._build_parameter_audit(single_params))
         self.worker_thread = QThread()
 
         # Move worker to thread
@@ -2494,4 +2535,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main()

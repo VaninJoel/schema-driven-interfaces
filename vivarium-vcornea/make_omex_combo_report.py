@@ -251,6 +251,56 @@ def make_thickness_plots(reps, tmpdir):
 
 
 # --------------------------------------------------------------- report
+def _parameter_credibility_block(audit_sources, H2, SUB, prows):
+    """Flowables for the parameter-credibility section; [] when no audit exists.
+
+    Reads parameter_audit.json (run dir or .omex) written by the run from its
+    live schema. One table of the parameters an auditor must look at: changed
+    from default, or sitting outside a documented range. Everything else is
+    summarised in a line, so a report stays short when the run stayed inside
+    its documented evidence.
+    """
+    try:
+        import parameter_audit as _pa  # utils dir is on sys.path
+    except Exception:
+        return []
+    audits = [a for a in (_pa.load_parameter_audit(s) for s in audit_sources) if a]
+    if not audits:
+        return []
+    audit = audits[0]                       # replicates share a parameterization
+    s = audit.get('summary') or {}
+    out = [Paragraph("Parameter Credibility (run values against the schema's documented evidence)", H2),
+           Paragraph(_pa.audit_summary_line(audit) + ".", SUB)]
+    header, rows = _pa.audit_table_rows(audit, include='attention')
+    if rows:
+        def _fmt(v):
+            return f"{v:g}" if isinstance(v, float) else str(v)
+        data = [header] + [[r[0], _fmt(r[1]), _fmt(r[2]), r[3], r[4], r[5]] for r in rows]
+        out.append(prows(data, [1.85 * inch, 0.7 * inch, 0.7 * inch, 0.7 * inch,
+                                1.4 * inch, 1.4 * inch]))
+    else:
+        out.append(Paragraph("Every parameter ran at its documented default and inside "
+                             "every documented range.", SUB))
+    out.append(Paragraph(
+        "<i>Credibility</i> places each executed value against the three range tiers the "
+        "schema documents: the implementation-admissible range (outside = inadmissible), the "
+        "evidence-supported range (outside = extrapolation beyond the documented evidence) and "
+        "the recommended range for this model's context of use. The evidence column names the "
+        "basis and citation the schema records for the supported range; "
+        "<i>not recorded</i> means the bound exists but its justification has not been "
+        "documented, which is itself an audit finding. Numeric parameters without any documented range "
+        "are listed as unassessable; switches and categories are not range-assessed. Full detail for every parameter is in "
+        "parameter_audit.json inside the archive.", SUB))
+    if len(audits) > 1:
+        diff = [k for k, e in audit['parameters'].items()
+                if e.get('parameter_type') != 'control'
+                and any(a['parameters'].get(k, {}).get('value') != e['value'] for a in audits[1:])]
+        if diff:
+            out.append(Paragraph("Replicates differ in: " + ", ".join(diff) +
+                                 " (replicates of one combination should share every model parameter).", SUB))
+    return out
+
+
 def build_combo_report(combo_key, omex_paths, out_pdf):
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='omex_combo_'))
@@ -430,6 +480,8 @@ def build_combo_report(combo_key, omex_paths, out_pdf):
             "and recorded afterwards; the software does not prescribe a seed. The schema "
             "fingerprint identifies the parameter definitions in force when the run was "
             "configured, and the code entry the source revision that executed it.", SUB))
+
+    S.extend(_parameter_credibility_block(list(omex_paths), H2, SUB, prows))
 
     model_bundled = model.get('source') in names0
     # SED-ML readout (representative)

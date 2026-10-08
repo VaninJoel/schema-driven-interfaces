@@ -65,8 +65,9 @@ KISAO_ALGORITHM_ID = "KISAO:0000241"
 
 # Algorithm parameter carrying the RNG seed, so the archived experiment description
 # states which stochastic realization the bundled data represents.
-# TODO(verify): confirm this term ID against the KiSAO release pinned by
-# biosimulators-utils before submission; it is referenced only here.
+# KISAO:0000488 is "seed" (synonym "random seed"), defined as the parameter that
+# "allows one to reproduce their results while running the same algorithm on the
+# same computer" — verified against the KiSAO ontology via EBI OLS.
 KISAO_RANDOM_SEED_ID = "KISAO:0000488"
 
 # Symbol URN for the simulation independent variable (time)
@@ -797,7 +798,7 @@ def _collect_model_files(model_path):
     return files, primary
 
 
-def generate_environment_manifest():
+def generate_environment_manifest(provenance=None):
     """Pinned descriptor of the software environment that executed the run.
 
     Requirement 2.5.4 asks for the computational context to be identifiable, not
@@ -843,20 +844,78 @@ def generate_environment_manifest():
         'platform': platform.platform(),
         'machine': platform.machine(),
         'packages': versions,
+        # Which revision of the wrapper produced this run. Belongs here as much as
+        # the third-party versions do: "what you need to reproduce this" is the
+        # packages AND the source revision that drove them.
+        'code': _provenance_block(provenance),
         'note': ('These packages must be installed to re-execute the CC3D project '
                  'bundled under model/. They are named, not embedded; the archive '
                  'carries the model and its parameters, not the runtime.'),
     }, indent=2, default=str)
 
 
+# The outcomes an archive can record. Cancellation is deliberately NOT folded into
+# 'failed': a reviewer reading a batch needs to distinguish a model that misbehaved
+# from a run an operator chose to stop, and only the first is evidence about the
+# model. Each carries its own reader-facing explanation.
+_ARCHIVE_STATUSES = {
+    'success': ('Run completed successfully; simulation.sedml is the executable '
+                'master describing the reproducible experiment.'),
+    'failed': ('This run did NOT complete successfully. The archive preserves '
+               'parameters, provenance, logs and any partial outputs for audit, '
+               'but intentionally contains no executable SED-ML and asserts no '
+               'reproducible experiment.'),
+    'cancelled': ('This run was interrupted by the operator before completion. It '
+                  'is not a failure of the model: no conclusion about model '
+                  'behaviour should be drawn from it. The archive preserves the '
+                  'intended parameters, provenance, logs and any partial outputs '
+                  'produced before the interruption, and contains no executable '
+                  'SED-ML.'),
+}
+
+
+def _provenance_block(provenance):
+    """Compact, self-describing code/schema identity for embedding in JSON artifacts.
+
+    Returns None when nothing was captured, so a consumer can distinguish "not
+    recorded" from "recorded as unknown".
+    """
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    if not (code or prov.get('schema_fingerprint')):
+        return None
+    return {
+        'code_revision': code.get('describe') or code.get('commit_short'),
+        'commit': code.get('commit'),
+        'commit_url': code.get('commit_url'),
+        'working_tree_modified': code.get('dirty'),
+        'revision_retrievable': code.get('commit_on_remote'),
+        'identity_source': code.get('source'),
+        'schema_fingerprint': prov.get('schema_fingerprint'),
+        'note': ('code_revision identifies the source revision that produced this '
+                 'archive; schema_fingerprint identifies the parameter definitions '
+                 'the run was configured under. A modified working tree or an '
+                 'unretrievable revision is reported rather than hidden.'),
+    }
+
+
 def generate_omex_metadata_rdf(*, title, description=None, created=None, modified=None,
                                creators=None, license_uri=None, citation=None,
-                               keywords=None, about='.'):
+                               keywords=None, about='.', provenance=None):
     """Build an OMEX-Metadata RDF/XML document (Dublin Core terms + vCard creators).
 
     Records the run's provenance: title, description, creator(s) (the person
     RESPONSIBLE for the parameter choices), created/modified dates, license, and a
     bibliographic citation. This is attribution/provenance — not authentication.
+
+    Code and schema identity are emitted here as well as in run_metadata.json,
+    because this is the standards-native location: a COMBINE-aware reader inspects
+    metadata.rdf, and should not have to parse an application-specific JSON file to
+    learn which revision produced the archive. Mapping:
+
+        dcterms:hasVersion  -> the code revision (release-anchored where tagged)
+        dcterms:source      -> a retrievable link to that revision
+        dcterms:conformsTo  -> the schema fingerprint the run was configured under
     """
     RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     DCT = "http://purl.org/dc/terms/"
@@ -897,6 +956,20 @@ def generate_omex_metadata_rdf(*, title, description=None, created=None, modifie
         add('bibliographicCitation', citation)
     for kw in (keywords or []):
         add('subject', kw)
+
+    prov = provenance or {}
+    code = prov.get('code') or {}
+    version = code.get('describe') or code.get('commit_short') or code.get('commit')
+    if version:
+        # Flagged when the tree did not match the revision, so the version string
+        # is never read as a complete description of what ran.
+        add('hasVersion', f"{version} (modified working tree)" if code.get('dirty') else version)
+    if code.get('commit_url'):
+        # Emitted only when the guard confirmed the revision is retrievable; see
+        # provenance.code_provenance.
+        add('source', code['commit_url'])
+    if prov.get('schema_fingerprint'):
+        add('conformsTo', prov['schema_fingerprint'])
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
 
 
@@ -914,6 +987,8 @@ def create_omex_archive(
                      "corneal epithelium."),
     keywords: Optional[List[str]] = None,
     failed: bool = False,
+    status: Optional[str] = None,
+    parameter_audit: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
@@ -970,7 +1045,17 @@ def create_omex_archive(
         if primary:
             model_source = primary
 
-    status = 'failed' if failed else 'success'
+    # Three outcomes, not two. `status` is authoritative when given; `failed` is
+    # retained for callers that predate cancellation being first class. An
+    # interrupted run is NOT a failure — the model did not misbehave, the operator
+    # stopped it — and requirement 2.5.4 names interrupted attempts alongside
+    # failed and timed-out ones as needing the same run identity.
+    status = status or ('failed' if failed else 'success')
+    if status not in _ARCHIVE_STATUSES:
+        raise ValueError(f"unknown archive status {status!r}; "
+                         f"expected one of {sorted(_ARCHIVE_STATUSES)}")
+    complete = status == 'success'
+    failed = not complete  # keep downstream conditionals honest
 
     output_files = [item.name for item in run_output_dir.iterdir()
                     if item.is_file() and item.suffix != '.omex']
@@ -993,15 +1078,20 @@ def create_omex_archive(
                 else [{'given': str(cr)}] if cr else [])
     cfg = run_metadata.get('simulation_config', {})
     kp = run_metadata.get('key_parameters', {})
-    status_phrase = ("FAILED run (incomplete; not a reproducible experiment). " if failed
-                     else "")
+    status_phrase = {
+        'success': "",
+        'failed': "FAILED run (incomplete; not a reproducible experiment). ",
+        'cancelled': ("CANCELLED run (interrupted by the operator; incomplete and not "
+                      "evidence about model behaviour). "),
+    }[status]
+    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]"}[status]
     auto_desc = description or (
         f"{status_phrase}CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
         f"injury={'yes' if cfg.get('has_injury') else 'no'}"
         f"{(' (' + str(cfg.get('injury_type')) + ')') if cfg.get('has_injury') else ''}. "
         f"Key parameters: {', '.join(f'{k}={v}' for k, v in kp.items())}.")
     metadata_rdf = generate_omex_metadata_rdf(
-        title=f"V-Cornea simulation: {run_name}" + (" [FAILED]" if failed else ""),
+        title=f"V-Cornea simulation: {run_name}{status_tag}",
         description=auto_desc,
         created=run_metadata.get('created_at'),
         modified=datetime.now().isoformat(),
@@ -1010,6 +1100,7 @@ def create_omex_archive(
         citation=citation,
         keywords=keywords or ['CompuCell3D', 'cornea', 'epithelium',
                               'agent-based model', 'wound healing'],
+        provenance=run_metadata.get('provenance'),
     )
 
     manifest_entries = []
@@ -1028,16 +1119,16 @@ def create_omex_archive(
         #     consumer uses to tell a failed archive from a success.
         status_doc = {
             'status': status,
-            'simulation_success': not failed,
-            'executable_sedml_present': not failed,
+            'simulation_success': complete,
+            # Recorded separately from `status` so a consumer can act on the
+            # distinction without knowing the vocabulary: an interrupted run is
+            # incomplete but says nothing about the model.
+            'interrupted_by_operator': status == 'cancelled',
+            'executable_sedml_present': complete,
             'run_name': run_name,
             'error_message': run_metadata.get('error_message'),
-            'note': ('This run did NOT complete successfully. The archive preserves '
-                     'parameters, provenance, logs and any partial outputs for audit, '
-                     'but intentionally contains no executable SED-ML and asserts no '
-                     'reproducible experiment.' if failed else
-                     'Run completed successfully; simulation.sedml is the executable '
-                     'master describing the reproducible experiment.'),
+            'cancelled_at': run_metadata.get('cancelled_at'),
+            'note': _ARCHIVE_STATUSES[status],
         }
         zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
         manifest_entries.append({'location': 'status.json', 'format': FORMAT_URIS['.json']})
@@ -1045,9 +1136,21 @@ def create_omex_archive(
         # 2c. environment.json — what is needed to re-execute the bundled project
         #     (requirement 2.5.4). Written for failed runs too: knowing which
         #     environment produced a failure is exactly what makes it diagnosable.
-        zf.writestr('environment.json', generate_environment_manifest())
+        zf.writestr('environment.json',
+                    generate_environment_manifest(run_metadata.get('provenance')))
         manifest_entries.append({'location': 'environment.json',
                                  'format': FORMAT_URIS['.json']})
+
+        # 2d. parameter_audit.json — the schema's documentation of every executed
+        #     value: default vs. run value, position against the admissible /
+        #     evidence-supported / recommended ranges, and the evidence (basis,
+        #     citation, locator) behind each bound and default. Built by the caller
+        #     that holds the live schema (see utils/parameter_audit.py).
+        if parameter_audit:
+            zf.writestr('parameter_audit.json',
+                        json.dumps(parameter_audit, indent=2, default=str))
+            manifest_entries.append({'location': 'parameter_audit.json',
+                                     'format': FORMAT_URIS['.json']})
 
         # 3. Output files
         for item in run_output_dir.iterdir():
@@ -1439,10 +1542,25 @@ def create_experiment_scan_archive(
             scan_spec=scan_spec, combinations=combinations, run_name=run_name,
             sim_params=sim_params, num_replicates=num_replicates)
 
+    # Code identity of the tooling that assembled this experiment-level archive.
+    # Only the code half is captured: the schema fingerprint is a property of a
+    # configured run and lives in the per-point archives. Imported defensively
+    # because this module is also loaded by file path, where relative imports have
+    # no package context.
+    try:
+        try:
+            from .provenance import code_provenance
+        except ImportError:
+            from provenance import code_provenance
+        scan_provenance = {'code': code_provenance()}
+    except Exception:
+        scan_provenance = None
+
     scan_metadata = {
         'run_name': run_name,
         'created_at': datetime.now().isoformat(),
         'vivarium_wrapper_version': '1.0.0',
+        'provenance': _provenance_block(scan_provenance),
         'archive_type': 'experiment_scan',
         'comparison': bool(summaries),
         'parameter_scan': scan_spec,
@@ -1468,6 +1586,7 @@ def create_experiment_scan_archive(
         citation=citation,
         keywords=keywords or ['CompuCell3D', 'cornea', 'parameter scan',
                               'agent-based model', 'wound healing'],
+        provenance=scan_provenance,
     )
 
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:

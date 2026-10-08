@@ -343,6 +343,8 @@ _NATIVE_CC3D_DESCRIPTOR = '''<Simulation version="4.7.0">
 '''
 
 
+from ..utils.references import REFERENCES
+
 class AngiogenesisProcess(Process):
     """
     Vivarium Process for angiogenesis simulation with comprehensive metadata.
@@ -372,30 +374,9 @@ class AngiogenesisProcess(Process):
     AUTO_SEED = -1
 
     # Define reference papers as class constants for reusability
-    REFERENCES = {
-        'merks2006': {
-            'source': 'Merks et al., 2006',
-            'title': 'Cell elongation is key to in silico replication of in vitro vasculogenesis and subsequent remodeling',
-            'doi': '10.1016/j.ydbio.2005.10.003',
-            'url': 'https://doi.org/10.1016/j.ydbio.2005.10.003',
-            'journal': 'Developmental Biology',
-            'year': 2006,
-        },
-        'merks2008': {
-            'source': 'Merks & Glazier, 2008',
-            'title': 'A cell-centered approach to developmental biology',
-            'doi': '10.1016/j.physa.2007.11.053',
-            'url': 'https://doi.org/10.1016/j.physa.2007.11.053',
-            'journal': 'Physica A',
-            'year': 2008,
-        },
-        'model_specific': {
-            'source': 'This Model',
-            'title': 'Parameters determined for this specific model implementation',
-            'doi': None,
-            'url': None,
-        }
-    }
+    # Bibliography lives in utils/references.py so the GUI, the OMEX writer and
+    # the schema resolve citation keys against one registry.
+    REFERENCES = REFERENCES
 
     # Define parameter presets from literature
     PRESETS = {
@@ -621,7 +602,17 @@ class AngiogenesisProcess(Process):
                     # === VALIDATION RANGES ===
                     '_physiological_range': (2.0, 16.0),
                     '_recommended_range': (2.0, 8.0),
-                    '_mathematical_range': (0.0, 100.0),  # Model stable range
+                    '_mathematical_range': (0.0, 100.0),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': 'numerical_stability', 'refs': [], 'locator': None, 'note': 'Model stable range'},
+
+                        'physiological': {'basis': 'literature', 'refs': ['merks2006'], 'locator': {'table': 'Table 1', 'equation': None, 'page': 47}, 'note': 'J values 2-16 span the reference study (Table 1) and its aggregation experiments (8-16).'},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 10.0,  # Warn if exceeds this
 
                     # === SCIENTIFIC DOCUMENTATION ===
@@ -629,10 +620,10 @@ class AngiogenesisProcess(Process):
                         **self.REFERENCES['merks2006'],
                         'value': 2.0,
                         'notes': 'Default value from Table 1',
-                        'equation': 'H_adhesion term in Eq. 1',
-                        'page': 47,
+
+                        'locator': {'table': 'Table 1', 'equation': 'H_adhesion term in Eq. 1', 'page': 47},
                     },
-                    '_cbo_term': 'CBO:0000015',  # Cell-cell adhesion
+                    '_ontology_term': 'CBO:0000015',  # Cell-cell adhesion
                     '_model_context': 'Contact energy term in Cellular Potts Model Hamiltonian. Appears in energy calculation: ΔH = Σ J(τ,τ\')(1-δ) for cell boundary modifications.',
 
                     # === RELATIONSHIPS ===
@@ -668,6 +659,14 @@ class AngiogenesisProcess(Process):
                     '_parameter_type': 'biophysical',  # biophysical | kinetic | geometric | control
                     '_measurable': False,  # Can this be directly measured experimentally?
                     '_fitting_method': 'literature_based',  # literature_based | fitted | estimated
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'energy',
+
+                    '_literature': ['merks2006'],
                 },
 
                 'jem': {
@@ -690,16 +689,26 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (2.0, 16.0),
                     '_recommended_range': (2.0, 10.0),
                     '_mathematical_range': (0.0, 100.0),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': 'literature', 'refs': ['merks2006'], 'locator': {'table': 'Table 1', 'equation': None, 'page': 47}, 'note': 'J values 2-16 span the reference study (Table 1) and its aggregation experiments (8-16).'},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 12.0,
 
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 2.0,
                         'notes': 'Default value. Higher values (8-16) tested for aggregation studies',
-                        'equation': 'H_adhesion term in Eq. 1',
-                        'page': 47,
+
+                        'locator': {'table': None, 'equation': 'H_adhesion term in Eq. 1', 'page': 47},
                     },
-                    '_cbo_term': 'CBO:0000016',  # Cell-matrix adhesion
+                    '_ontology_term': 'CBO:0000016',  # Cell-matrix adhesion
                     '_model_context': 'EC-Medium contact energy in CPM Hamiltonian. Critical parameter controlling aggregation vs network formation.',
 
                     '_related_parameters': ['jee'],
@@ -729,7 +738,7 @@ class AngiogenesisProcess(Process):
 
                     '_biological_meaning': 'Represents cell-matrix adhesion strength. In vivo, this corresponds to integrin-mediated adhesion to extracellular matrix. High values simulate conditions where cells prefer cell-cell contact over matrix contact, leading to aggregation.',
 
-                    '_visual_effects': {
+                    '_expected_behavior': {
                         'low_value': 'Cells form connected networks',
                         'high_value': 'Cells aggregate into separate compact clusters',
                         'threshold': 6.0,  # Approximate transition point
@@ -738,6 +747,14 @@ class AngiogenesisProcess(Process):
                     '_parameter_type': 'biophysical',
                     '_measurable': False,
                     '_fitting_method': 'literature_based',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'energy',
+
+                    '_literature': ['merks2006'],
                 },
 
                 # =====================================================================
@@ -764,16 +781,26 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (0, 1000),
                     '_recommended_range': (100, 800),
                     '_mathematical_range': (0, 5000),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 1200,
 
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 500.0,
                         'notes': 'Moderate chemotaxis strength',
-                        'equation': 'λ in chemotaxis term (Eq. 3)',
-                        'page': 48,
+
+                        'locator': {'table': None, 'equation': 'λ in chemotaxis term (Eq. 3)', 'page': 48},
                     },
-                    '_cbo_term': 'CBO:0000072',  # Chemotaxis
+                    '_ontology_term': 'CBO:0000072',  # Chemotaxis
                     '_model_context': 'Chemotaxis Hamiltonian term: H_chem = -λ_chem * Σ_membrane VEGF(x). Drives cell migration toward VEGF sources.',
 
                     '_related_parameters': ['vedir', 'vesec', 'lsc'],
@@ -804,7 +831,7 @@ class AngiogenesisProcess(Process):
 
                     '_biological_meaning': 'Represents the sensitivity of endothelial cells to VEGF gradients. In vivo, this reflects VEGF receptor density and downstream signaling pathway strength.',
 
-                    '_visual_effects': {
+                    '_expected_behavior': {
                         'low_value': 'Random cell migration, isotropic network',
                         'high_value': 'Directed sprouting toward VEGF sources, anisotropic network',
                     },
@@ -813,6 +840,14 @@ class AngiogenesisProcess(Process):
                     '_measurable': True,  # Can be estimated from cell migration assays
                     '_fitting_method': 'literature_based',
                     '_experimental_assay': 'Transwell chemotaxis assay, under-agarose assay',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'energy',
+
+                    '_literature': ['merks2006'],
                 },
 
                 'lsc': {
@@ -836,14 +871,24 @@ class AngiogenesisProcess(Process):
                     '_recommended_range': (0.0, 0.1),
                     '_mathematical_range': (0.0, 1.0),
 
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
+
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 0.1,
                         'notes': 'Binary choice: 0 (linear) or 0.1 (saturating)',
-                        'equation': 'Saturation term in Eq. 3',
-                        'page': 48,
+
+                        'locator': {'table': None, 'equation': 'Saturation term in Eq. 3', 'page': 48},
                     },
-                    '_cbo_term': 'CBO:0000072',  # Chemotaxis (same as lchem)
+                    '_ontology_term': 'CBO:0000072',  # Chemotaxis (same as lchem)
                     '_model_context': 'Saturation parameter in chemotaxis term. Determines if cells respond linearly or with saturation to VEGF concentration.',
 
                     '_related_parameters': ['lchem'],
@@ -869,6 +914,16 @@ class AngiogenesisProcess(Process):
                     '_measurable': True,
                     '_fitting_method': 'literature_based',
                     '_hidden_basic': True,  # Hide from basic users (advanced concept)
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'dimensionless',
+
+                    '_literature': ['merks2006'],
+
+                    '_dependencies': {},
                 },
 
                 # =====================================================================
@@ -895,16 +950,26 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (0.1, 2.0),
                     '_recommended_range': (0.5, 1.5),
                     '_mathematical_range': (0.0, 10.0),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 3.0,
 
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 1.0,
                         'notes': 'Moderate diffusion rate',
-                        'equation': 'D in reaction-diffusion PDE (Eq. 2)',
-                        'page': 48,
+
+                        'locator': {'table': None, 'equation': 'D in reaction-diffusion PDE (Eq. 2)', 'page': 48},
                     },
-                    '_cbo_term': 'CBO:0000090',  # Molecular diffusion
+                    '_ontology_term': 'CBO:0000090',  # Molecular diffusion
                     '_model_context': 'Diffusion term in VEGF field PDE: ∂C/∂t = D∇²C + production - decay. Solved using DiffusionSolverFE.',
 
                     '_related_parameters': ['veder', 'vesec', 'lchem'],
@@ -933,7 +998,7 @@ class AngiogenesisProcess(Process):
 
                     '_biological_meaning': 'Represents VEGF diffusion through tissue/medium. In vivo, VEGF diffusion is restricted by ECM binding and sequestration. Higher values simulate more fluid environments.',
 
-                    '_visual_effects': {
+                    '_expected_behavior': {
                         'low_value': 'Steep local gradients, localized sprouting',
                         'high_value': 'Shallow global gradients, diffuse sprouting pattern',
                     },
@@ -942,6 +1007,14 @@ class AngiogenesisProcess(Process):
                     '_measurable': True,
                     '_fitting_method': 'literature_based',
                     '_experimental_assay': 'Fluorescence recovery after photobleaching (FRAP)',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'diffusivity',
+
+                    '_literature': ['merks2006'],
                 },
 
                 'veder': {
@@ -964,16 +1037,26 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (0.1, 0.5),
                     '_recommended_range': (0.2, 0.4),
                     '_mathematical_range': (0.0, 2.0),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 0.8,
 
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 0.3,
                         'notes': 'Moderate decay rate',
-                        'equation': 'k in reaction-diffusion PDE (Eq. 2)',
-                        'page': 48,
+
+                        'locator': {'table': None, 'equation': 'k in reaction-diffusion PDE (Eq. 2)', 'page': 48},
                     },
-                    '_cbo_term': 'CBO:0000091',  # Molecular degradation
+                    '_ontology_term': 'CBO:0000091',  # Molecular degradation
                     '_model_context': 'Decay term in VEGF field PDE. Combined with diffusion, determines gradient spatial scale.',
 
                     '_related_parameters': ['vedir', 'vesec'],
@@ -1001,7 +1084,7 @@ class AngiogenesisProcess(Process):
 
                     '_biological_meaning': 'Represents VEGF half-life in tissue. In vivo, VEGF is rapidly cleared by receptor binding and proteolysis. Higher values simulate more efficient clearance.',
 
-                    '_visual_effects': {
+                    '_expected_behavior': {
                         'low_value': 'Long-range gradients, distant cell response',
                         'high_value': 'Short-range gradients, localized cell response',
                     },
@@ -1010,6 +1093,14 @@ class AngiogenesisProcess(Process):
                     '_measurable': True,
                     '_fitting_method': 'literature_based',
                     '_experimental_assay': 'ELISA time course, radiolabeled VEGF clearance',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'rate',
+
+                    '_literature': ['merks2006'],
                 },
 
                 'vesec': {
@@ -1032,16 +1123,26 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (0.1, 0.5),
                     '_recommended_range': (0.2, 0.4),
                     '_mathematical_range': (0.0, 2.0),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_warning_threshold': 0.8,
 
                     '_reference_paper': {
                         **self.REFERENCES['merks2006'],
                         'value': 0.3,
                         'notes': 'Moderate secretion rate',
-                        'equation': 'S in reaction-diffusion PDE (Eq. 2)',
-                        'page': 48,
+
+                        'locator': {'table': None, 'equation': 'S in reaction-diffusion PDE (Eq. 2)', 'page': 48},
                     },
-                    '_cbo_term': 'CBO:0000092',  # Molecular secretion
+                    '_ontology_term': 'CBO:0000092',  # Molecular secretion
                     '_model_context': 'Source term in VEGF field PDE. ECs secrete VEGF, creating gradients that guide chemotaxis.',
 
                     '_related_parameters': ['vedir', 'veder', 'lchem'],
@@ -1069,7 +1170,7 @@ class AngiogenesisProcess(Process):
 
                     '_biological_meaning': 'Represents VEGF production rate by endothelial cells. In vivo, ECs can produce VEGF in response to hypoxia or autocrine loops during sprouting.',
 
-                    '_visual_effects': {
+                    '_expected_behavior': {
                         'low_value': 'Weak gradients, slow sprouting',
                         'high_value': 'Strong gradients, rapid sprouting, autocrine amplification',
                     },
@@ -1078,6 +1179,14 @@ class AngiogenesisProcess(Process):
                     '_measurable': True,
                     '_fitting_method': 'literature_based',
                     '_experimental_assay': 'VEGF ELISA from conditioned media',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'rate',
+
+                    '_literature': ['merks2006'],
                 },
 
                 # =====================================================================
@@ -1110,6 +1219,32 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'control',
                     '_auto_generate': True,  # Can be auto-generated from parameters
+
+                    '_range_evidence': {
+
+                        'mathematical': None,
+
+                        'physiological': None,
+
+                        'recommended': None,
+
+                    },
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': None,
+
+                    '_fitting_method': None,
+
+                    '_related_parameters': [],
+
+                    '_affects_output': [],
+
+                    '_literature': [],
+
+                    '_dependencies': {},
                 },
 
                 'sim_time': {
@@ -1132,6 +1267,16 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (10, 1000),
                     '_recommended_range': (50, 500),
 
+                    '_range_evidence': {
+
+                        'mathematical': None,
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
+
                     '_presets': {
                         'quick_test': 50,
                         'standard': 100,
@@ -1148,6 +1293,20 @@ class AngiogenesisProcess(Process):
                     '_performance_impact': 'high',  # Directly affects runtime
 
                     '_parameter_type': 'control',
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'time',
+
+                    '_fitting_method': None,
+
+                    '_related_parameters': [],
+
+                    '_literature': [],
+
+                    '_dependencies': {},
                 },
 
                 'random_seed': {
@@ -1179,6 +1338,16 @@ class AngiogenesisProcess(Process):
 
                     '_mathematical_range': (-1, 2147483646),
 
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': None,
+
+                        'recommended': None,
+
+                    },
+
                     '_gui_hints': {
                         'widget_type': 'spinbox',
                     },
@@ -1194,6 +1363,18 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'control',
                     '_measurable': False,
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_dimension': 'dimensionless',
+
+                    '_fitting_method': None,
+
+                    '_literature': [],
+
+                    '_dependencies': {},
                 },
 
                 'write_frequency': {
@@ -1211,6 +1392,16 @@ class AngiogenesisProcess(Process):
                     '_physiological_range': (5, 100),
                     '_recommended_range': (10, 50),
                     '_mathematical_range': (1, 1000),
+
+                    '_range_evidence': {
+
+                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+
+                    },
                     '_gui_hints': {
                         'widget_type': 'spinbox',
                         'slider_step': 5,
@@ -1223,6 +1414,24 @@ class AngiogenesisProcess(Process):
                         'low_resolution': 20,
                         'minimal_io': 50,
                     },
+
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+
+                    '_scope': 'model',
+
+                    '_parameter_type': 'control',
+
+                    '_dimension': 'time',
+
+                    '_fitting_method': None,
+
+                    '_related_parameters': [],
+
+                    '_affects_output': [],
+
+                    '_literature': [],
+
+                    '_dependencies': {},
                 },
             },
 
@@ -1237,12 +1446,40 @@ class AngiogenesisProcess(Process):
                     '_emit': True,
                     '_description': 'Current simulation timestep (MCS)',
                     '_unit': 'MCS',
+                    '_range_evidence': {
+                        'mathematical': None,
+                        'physiological': None,
+                        'recommended': None,
+                    },
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+                    '_scope': 'model',
+                    '_parameter_type': None,
+                    '_dimension': 'time',
+                    '_fitting_method': None,
+                    '_related_parameters': [],
+                    '_affects_output': [],
+                    '_literature': [],
+                    '_dependencies': {},
                 },
                 'experiment_metadata': {
                     '_default': {},
                     '_updater': 'set',
                     '_emit': True,
                     '_description': 'Complete experiment metadata including parameters, timestamps, and validation results',
+                    '_range_evidence': {
+                        'mathematical': None,
+                        'physiological': None,
+                        'recommended': None,
+                    },
+                    # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
+                    '_scope': 'model',
+                    '_parameter_type': None,
+                    '_dimension': None,
+                    '_fitting_method': None,
+                    '_related_parameters': [],
+                    '_affects_output': [],
+                    '_literature': [],
+                    '_dependencies': {},
                 },
             }
         }
@@ -1583,10 +1820,19 @@ class AngiogenesisProcess(Process):
             # model_export/ dir alongside the Zarr store.
             from pathlib import Path as _Path
             self.export_model_export_dir(_Path(self.store).parent)
+            parameter_audit = None
+            try:
+                from ..utils.parameter_audit import build_parameter_audit
+                parameter_audit = build_parameter_audit(
+                    self.ports_schema(), dict(self.parameters),
+                    schema_fingerprint=run_metadata.get('schema_fingerprint'))
+            except Exception as e:
+                print(f"Warning: Could not build parameter audit: {e}")
             omex_path = create_omex_archive_from_zarr(
                 zarr_store_path=self.store,
                 run_metadata=run_metadata,
                 sim_params=dict(self.parameters),
+                parameter_audit=parameter_audit,
             )
             print(f"Generated OMEX archive: {omex_path}")
         except Exception as e:
