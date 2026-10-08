@@ -91,37 +91,97 @@ def test_save_then_load_round_trips_parameters(window, exc_guard, tmp_path):
     QTest.mouseClick(buttons['Load Parameters'], Qt.LeftButton); settle(50)
 
 
-import pytest
 
-
-@pytest.mark.xfail(strict=True, reason="readiness audit 3.3: batch launch has no concurrency cap; "
-                                       "a 2x2 sweep with 12 replicates starts 48 workers at once")
-def test_batch_fan_out_is_capped(gui, window, exc_guard):
-    """Launching a sweep must not start more workers than a cap (cores - 1 or similar).
-
-    Documents the gap found by the random sessions: with replicates raised and a
-    few sweep lists typed in, the Run button spawned 72 threads simultaneously.
-    Flip this to a passing test when the scheduler/queue lands.
-    """
-    import os
+def _prepare_sweep(gui, window, replicates):
+    """Two swept parameters x `replicates`: enough runs to exceed any small cap."""
     from PyQt5.QtCore import Qt
     from PyQt5.QtTest import QTest
-    from PyQt5.QtWidgets import QLineEdit, QSpinBox
+    from PyQt5.QtWidgets import QLineEdit
     from harness import schema_parameters, settle
     window.expertise_combo.setCurrentText('Advanced'); settle()
     numeric = [n for n, i in schema_parameters(window).items()
-               if isinstance(i.get('_default'), float) and isinstance(window.param_widgets.get(n, {}).get('input'), QLineEdit)]
+               if isinstance(i.get('_default'), float)
+               and isinstance(window.param_widgets.get(n, {}).get('input'), QLineEdit)]
     for n in numeric[:2]:
         w = window.param_widgets[n]['input']; d = window.schema['inputs'][n]['_default']
-        w.clear(); QTest.keyClicks(w, f"{d},{d * 1.1:g}"); QTest.keyClick(w, Qt.Key_Return)
-    spins = [s for s in window.findChildren(QSpinBox) if s.isVisible()]
-    for s in spins:
-        if 'replic' in (s.toolTip() + s.objectName() + str(s.prefix()) + str(s.suffix())).lower() or s.maximum() >= 10:
-            s.setValue(min(12, s.maximum()))
-    gui.main_window.SimulationWorker.instances.clear()
-    QTest.mouseClick(window.run_button, Qt.LeftButton); settle(300)
-    launched = len(gui.main_window.SimulationWorker.instances)
-    cap = max(1, (os.cpu_count() or 2) - 1)
-    peak_threads = len(getattr(window, 'simulation_threads', []) or [])
-    assert launched > cap, f"test set-up did not create enough runs ({launched})"
-    assert peak_threads <= cap, f"{peak_threads} worker threads alive at once for {launched} runs; cap would be {cap}"
+        w.clear(); QTest.keyClicks(w, f"{d:g},{d * 1.1:g}"); QTest.keyClick(w, Qt.Key_Return)
+    window.replicate_spinbox.setValue(replicates)
+    FW = gui.main_window.SimulationWorker
+    FW.instances.clear(); FW.active = 0; FW.peak_active = 0
+    return FW
+
+
+def test_batch_concurrency_cap_is_respected(gui, window, exc_guard):
+    """Readiness audit 3.3: a sweep runs at most `Max simultaneous runs` at once,
+    queued runs start as slots free, and every run still completes."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from harness import settle
+    FW = _prepare_sweep(gui, window, replicates=3)
+    FW.delay_s = 0.05
+    cap = 2
+    window.concurrency_spinbox.setValue(cap)
+    QTest.mouseClick(window.run_button, Qt.LeftButton)
+    total = window.total_combinations
+    assert total >= 4, f"set-up produced only {total} runs"   # V-Cornea runs replicates inside one process
+    # the launcher must not have started everything up front
+    assert len(FW.instances) <= cap, f"{len(FW.instances)} workers created immediately with cap {cap}"
+    for _ in range(400):
+        settle(25)
+        if window.completed_combinations >= total and window.run_button.isEnabled():
+            break
+    assert window.completed_combinations == total, f"{window.completed_combinations}/{total} completed"
+    assert len(FW.instances) == total
+    assert FW.peak_active <= cap, f"{FW.peak_active} runs executed at once; cap was {cap}"
+    assert FW.peak_active >= 2, "cap of 2 never reached; concurrency not exercised"
+    assert window.run_button.isEnabled() and not window.cancel_button.isVisible()
+
+
+def test_cancel_drops_queued_runs(gui, window, exc_guard):
+    """Cancelling a capped batch stops the queue: nothing queued is ever started."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from harness import settle
+    FW = _prepare_sweep(gui, window, replicates=3)
+    FW.delay_s = 0.4
+    window.concurrency_spinbox.setValue(1)
+    QTest.mouseClick(window.run_button, Qt.LeftButton)
+    total = window.total_combinations
+    settle(50)
+    started_before_cancel = len(FW.instances)
+    assert started_before_cancel == 1
+    QTest.mouseClick(window.cancel_button, Qt.LeftButton)   # QMessageBox.question -> Yes
+    settle(800)
+    assert window.is_cancelled
+    assert len(FW.instances) == started_before_cancel, "a queued run started after Cancel"
+    assert not window._pending_runs
+    assert window.run_button.isEnabled(), "Run button not restored after cancel"
+    FW.delay_s = 0.0
+
+
+def test_cancel_declined_keeps_the_batch_alive(gui, window, exc_guard, monkeypatch):
+    """Answering 'No' to the cancel prompt must not poison the batch (angio used to
+    set is_cancelled before asking, so the batch could never finalize)."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QMessageBox
+    from harness import settle
+    FW = _prepare_sweep(gui, window, replicates=2)
+    FW.delay_s = 0.1
+    window.concurrency_spinbox.setValue(1)
+    monkeypatch.setattr(QMessageBox, 'question', staticmethod(lambda *a, **k: QMessageBox.No))
+    QTest.mouseClick(window.run_button, Qt.LeftButton)   # confirmation also answers No...
+    if not window.simulation_threads:                     # ...so re-arm with Yes for the launch only
+        monkeypatch.setattr(QMessageBox, 'question', staticmethod(lambda *a, **k: QMessageBox.Yes))
+        QTest.mouseClick(window.run_button, Qt.LeftButton)
+        monkeypatch.setattr(QMessageBox, 'question', staticmethod(lambda *a, **k: QMessageBox.No))
+    total = window.total_combinations
+    settle(30)
+    QTest.mouseClick(window.cancel_button, Qt.LeftButton)   # declined
+    assert not window.is_cancelled
+    for _ in range(400):
+        settle(25)
+        if window.completed_combinations >= total and window.run_button.isEnabled():
+            break
+    assert window.completed_combinations == total, "batch did not finish after a declined cancel"
+    FW.delay_s = 0.0

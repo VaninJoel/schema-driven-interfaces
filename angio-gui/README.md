@@ -215,10 +215,9 @@ Angio-GUI implements the **Integrated Architecture** pattern described in our me
 - Task directives: `write`, `skip_write` (extensible to dynamic steering)
 - Encapsulated simulation logic independent of GUI
 
-#### **3. Scheduler & Execution (`gui/scheduler.py`, `worker.py`)**
-- `Scheduler`: Task definition, parameter management, queue coordination
-- `SimulationWorker`: Subprocess-based execution for process isolation
-- Supports concurrent execution with resource management
+#### **3. Batch queue & Execution (`gui/main_window.py`, `gui/simulation_worker.py`)**
+- Batch queue (in `AngiogenesisMainWindow.launch_batch_simulation` / `_start_queued_runs`): expands sweeps × replicates into runs, stamps each with its seed, scan point and schema fingerprint, and starts at most **Max simultaneous runs** at a time (default: CPU cores − 1, adjustable in the Batch panel and remembered between sessions); the rest queue and start as slots free. Cancel stops running processes and discards the queue.
+- `SimulationWorker`: subprocess-based execution for process isolation; one CC3D process per run
 - Real-time progress tracking via Zarr store monitoring
 
 #### **4. GUI Layer (`gui/`)**

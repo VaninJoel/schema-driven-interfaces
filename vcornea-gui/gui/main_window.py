@@ -1268,6 +1268,24 @@ class VCorneaMainWindow(QMainWindow):
         replicate_layout.addStretch()
         batch_layout.addLayout(replicate_layout)
 
+        # Concurrency cap. Each run is a CC3D process; starting a whole sweep at
+        # once starves the workstation (readiness audit 3.3). Runs beyond the cap
+        # wait in a queue and start as slots free up; the batch result is the same.
+        concurrency_layout = QHBoxLayout()
+        concurrency_label = QLabel("Max simultaneous runs:")
+        concurrency_label.setToolTip("How many simulations may execute at the same time; the rest queue.")
+        self.concurrency_spinbox = QSpinBox()
+        self.concurrency_spinbox.setRange(1, 64)
+        self.concurrency_spinbox.setValue(
+            getattr(self, '_saved_max_concurrent', None) or self.default_max_concurrent_runs())
+        self.concurrency_spinbox.setToolTip(
+            "Default is one less than the number of CPU cores. Each run is a separate "
+            "CompuCell3D process; queued runs start automatically as others finish.")
+        concurrency_layout.addWidget(concurrency_label)
+        concurrency_layout.addWidget(self.concurrency_spinbox)
+        concurrency_layout.addStretch()
+        batch_layout.addLayout(concurrency_layout)
+
         batch_group.setLayout(batch_layout)
         layout.addWidget(batch_group)
 
@@ -1866,7 +1884,8 @@ class VCorneaMainWindow(QMainWindow):
             "Cancel Batch",
             f"Cancel all running simulations?\n\n"
             f"Completed: {self.completed_combinations}/{self.total_combinations}\n"
-            f"Running: {len([t for t, w in self.simulation_threads if t.isRunning()])}\n\n"
+            f"Running: {len([t for t, w in self.simulation_threads if t.isRunning()])}\n"
+            f"Queued (not started): {len(getattr(self, '_pending_runs', []))}\n\n"
             f"This will terminate the CC3D subprocesses immediately.",
             QMessageBox.Yes | QMessageBox.No
         )
@@ -1875,6 +1894,10 @@ class VCorneaMainWindow(QMainWindow):
             return
 
         self.is_cancelled = True
+        queued = len(getattr(self, '_pending_runs', []))
+        self._pending_runs = []       # never start what has not started
+        if queued:
+            print(f"  > {queued} queued run(s) will not be started")
         self.statusBar().showMessage("Cancelling — terminating CC3D subprocesses...")
         QApplication.processEvents()
 
@@ -2227,6 +2250,9 @@ class VCorneaMainWindow(QMainWindow):
 
         replicates = self.replicate_spinbox.value()
         self.simulation_threads = []
+        self._pending_runs = []      # (exp_name, params) not yet started
+        self._active_runs = 0
+        self._launched_runs = 0
 
         # Status message
         if len(self.parameter_combinations) > 1 or replicates > 1:
@@ -2282,25 +2308,69 @@ class VCorneaMainWindow(QMainWindow):
 
             print(f"Launching simulation {run_counter}/{len(self.parameter_combinations)}: {exp_name} ({replicates} replicate{'s' if replicates > 1 else ''})")
 
-            # Create worker and thread
-            worker = SimulationWorker(params_copy, str(self.batch_output_folder))
-            thread = QThread()
-            worker.moveToThread(thread)
+            self._pending_runs.append((exp_name, params_copy))
 
-            # Connect signals
-            thread.started.connect(worker.run)
-            worker.finished.connect(self.on_batch_simulation_finished)
-            worker.error.connect(self.on_batch_simulation_error)
-            worker.finished.connect(thread.quit)
-            worker.finished.connect(worker.deleteLater)
-            thread.finished.connect(thread.deleteLater)
+        self._start_queued_runs()
 
-            # Start thread
-            thread.start()
-            self.simulation_threads.append((thread, worker))
+    # ------------------------------------------------------------------
+    # Batch queue: at most `concurrency_spinbox` runs execute at once
+    # ------------------------------------------------------------------
+    @staticmethod
+    def default_max_concurrent_runs():
+        import os
+        return max(1, (os.cpu_count() or 2) - 1)
 
-            # Small delay between launches to avoid race conditions
-            QApplication.processEvents()
+    def max_concurrent_runs(self):
+        try:
+            return max(1, int(self.concurrency_spinbox.value()))
+        except Exception:
+            return self.default_max_concurrent_runs()
+
+    def _start_queued_runs(self):
+        """Start pending runs until the concurrency cap is reached."""
+        cap = self.max_concurrent_runs()
+        while self._pending_runs and self._active_runs < cap and not self.is_cancelled:
+            exp_name, params_copy = self._pending_runs.pop(0)
+            self._start_run(exp_name, params_copy)
+        self._update_batch_status()
+
+    def _update_batch_status(self, note=None):
+        if not hasattr(self, 'total_combinations'):
+            return
+        msg = (f"Completed {self.completed_combinations}/{self.total_combinations}"
+               f" \u00b7 running {self._active_runs}"
+               f" \u00b7 queued {len(self._pending_runs)}"
+               f" (max {self.max_concurrent_runs()} at once)")
+        if note:
+            msg += f" \u00b7 {note}"
+        self.statusBar().showMessage(msg)
+
+    def _release_run_slot(self):
+        """A run finished or failed: free its slot and start the next queued run."""
+        self._active_runs = max(0, self._active_runs - 1)
+        self._start_queued_runs()
+
+    def _start_run(self, exp_name, params_copy):
+        """Create the worker + thread for one run and start it (the old loop body)."""
+        self._launched_runs += 1
+        print(f"Launching simulation {self._launched_runs}/{self.total_combinations}: {exp_name}"
+              f"  [running {self._active_runs + 1}, queued {len(self._pending_runs)}]")
+        worker = self._make_worker(params_copy)
+        thread = QThread()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self.on_batch_simulation_finished)
+        worker.error.connect(self.on_batch_simulation_error)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._active_runs += 1
+        thread.start()
+        self.simulation_threads.append((thread, worker))
+        QApplication.processEvents()
+
+    def _make_worker(self, params_copy):
+        return SimulationWorker(params_copy, str(self.batch_output_folder))
 
     def launch_simulation(self, metadata):
         """Actually launch the simulation in a worker thread."""
@@ -2415,6 +2485,7 @@ class VCorneaMainWindow(QMainWindow):
             return
 
         self.completed_combinations += 1
+        self._release_run_slot()
         self._batch_succeeded = getattr(self, '_batch_succeeded', 0) + 1
         exp_name = results.get('exp_name', 'unknown')
 
@@ -2436,6 +2507,7 @@ class VCorneaMainWindow(QMainWindow):
             return
 
         self.completed_combinations += 1
+        self._release_run_slot()
         self._batch_failed = getattr(self, '_batch_failed', 0) + 1
 
         # Update progress (count as completed even though it failed)
@@ -2616,6 +2688,11 @@ class VCorneaMainWindow(QMainWindow):
                 self.setGeometry(geom['x'], geom['y'], geom['width'], geom['height'])
 
             # Load last experiment name (will be applied to current_params after init_ui)
+            if 'max_concurrent_runs' in settings:
+                try:   # applied when the control is built (settings load before the UI)
+                    self._saved_max_concurrent = int(settings['max_concurrent_runs'])
+                except (TypeError, ValueError):
+                    pass
             if 'last_exp_name' in settings:
                 self._saved_exp_name = settings['last_exp_name']
 
@@ -2630,6 +2707,7 @@ class VCorneaMainWindow(QMainWindow):
             # Collect current settings
             settings = {
                 'output_dir': str(self.output_dir),
+                'max_concurrent_runs': self.max_concurrent_runs(),
                 'window_geometry': {
                     'x': self.geometry().x(),
                     'y': self.geometry().y(),
