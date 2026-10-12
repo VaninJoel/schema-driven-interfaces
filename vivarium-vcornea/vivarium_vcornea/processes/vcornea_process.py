@@ -181,15 +181,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the four published per-type '
+                             'values (2–5) by roughly a factor of five in each direction; far above it membrane fluctuations '
+                             'freeze and cells stop moving, far below it cells lose shape control (S3 Text §S3.3, §S3.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3 (surface constraint)', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-") for any λ. The published set is 2.0 for stem/basal '
+                         'and 5.0 for wing/superficial: the two non-dividing, flattened types are held more rigidly so '
+                         'the stratified sheet keeps its shape while proliferative layers stay deformable enough to '
+                         'rearrange and divide. Arbitrary CPM energy units (S3 Text §S3.3); the paper treats mechanical '
+                         'coefficients phenomenologically and calibrates them to tissue-level observables (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AreaEnergy',
                     '_model_context': 'Parameter λs (Eq. 23) for SurfaceConstraint Hamiltonian term.',
@@ -198,10 +211,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitSTEM_TargetSurface'], # Simplified dependencies
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
                 'InitSTEM_TargetSurface': {
@@ -217,26 +230,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (10, 30),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'Perimeter in voxel edges (1 voxel = 2 µm). The band spans compact to strongly flattened shapes '
+                             'for a 25-voxel (100 µm²) cell: ≈18 is circular, ≈30–40 is a squamous 4–6:1 section. Anchored to '
+                             'the 10–30 µm cell-diameter range of De Paiva et al. 2006 and the layer morphologies in '
+                             "Sterenczak et al. 2021; the exact bounds are the modeler's envelope around those, not a "
+                             'measured perimeter distribution.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 18.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3', 'page': None},
+                        'notes': 'S8 Table cites Sterenczak et al. 2021 (in-vivo confocal morphology of the human corneal '
+                         'epithelium) for cell shape. Values rise from stem (18) through basal (20) to wing/superficial '
+                         '(25 voxel edges = 36–50 µm perimeter) to reproduce the columnar-to-squamous flattening '
+                         'described in §1.2.2. With all four target volumes at 25 voxels, a larger target perimeter '
+                         'forces a flatter cell: a 25-voxel circle has perimeter ≈17.7, so 25 implies a roughly 3:1 '
+                         'aspect ratio.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SurfaceArea',
                     '_model_context': 'Parameter S_target (Eq. 23) for SurfaceConstraint Hamiltonian term.',
                     '_conceptual_hint': "Target surface is the cell's preferred perimeter (a length in 2D); with the surface coefficient λs it regularizes cell shape. Higher targets permit more elongated or ruffled membranes; the constraint keeps cells compact. It shapes cells rather than sizing them — that is target volume's job.",
                     '_implementation_pattern': "Applied as `cell.targetSurface = self.InitSTEM_TargetSurface` in `ConstraintInitializerSteppable.start()`; the SurfaceConstraint plugin regularizes each stem cell's perimeter toward this value. From `Parameters.py`.",
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitSTEM_LambdaSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -254,15 +283,33 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the published values (2–5) by '
+                             'roughly a factor of five. Because λv enters the pressure that km_density (125) was fitted '
+                             'against, values outside the band shift the contact-inhibition set-point even with km_density '
+                             'unchanged (S1 Text §S1.3–S1.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {
+                            'table': 'S8 Table',
+                            'equation': 'S1 Text §S1.3 (effective pressure); S3 Text §S3.3',
+                            'page': None,
+                        },
+                        'notes': 'S8 Table lists no literature source ("-"). 2.0 for stem/basal/wing, 5.0 for superficial. λv is '
+                         'not only a shape stiffness: S1 Text §S1.3 derives the effective pressure P = λv·(V − V_target)² '
+                         'that feeds the density-inhibition Hill term (Eq. 2), so λv also scales how fast crowding shuts '
+                         'proliferation off. km_density = 125 was fitted with these λv values fixed; change one and the '
+                         'other no longer holds.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:VolumeEnergy',
                     '_model_context': 'Parameter λv (Eq. 22) for VolumeConstraint Hamiltonian term and Pressure calculation (Eq. 6).',
@@ -271,10 +318,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitSTEM_TargetVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 89],
                     '_dependencies': {},
                 },
                 'InitSTEM_TargetVolume': {
@@ -290,26 +337,41 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel^2); displays in µm²'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': 'S1 Text §S1.6', 'page': None},
+                            'note': '15–40 voxels = 60–160 µm² (equivalent diameters ≈ 9–14 µm): the small-cell end of the 10–30 µm '
+                             'range in De Paiva et al. 2006. The upper bound is kept below the 50-voxel mitosis threshold so '
+                             'a target volume can never trigger division by itself; a 30 µm cell (≈177 voxels) is '
+                             'deliberately excluded for that reason.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': '§2.4.2; S1 Text §S1.6', 'page': 11},
+                        'notes': '25 voxels = 100 µm² at 2 µm/voxel (§2.2). S8 Table cites De Paiva et al. 2006, who report human '
+                         'corneal epithelial cell diameters of 10–30 µm with the smallest cells being the '
+                         'stem/progenitor-like fraction; a 100 µm² section corresponds to an ≈11 µm diameter, i.e. the '
+                         'small end of that range. Stem and basal cells are initialised at this volume and divide when '
+                         'they reach 2× (50 voxels, 200 µm²; §2.4.2, S1 Text §S1.6), so target volume also sets the '
+                         'division pace.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Volume',
                     '_model_context': 'Parameter V_target (Eq. 22, 8) for VolumeConstraint and Growth. Represents TargetVolume state variable.',
                     '_conceptual_hint': 'Target volume and the volume coefficient λv together set how strongly a cell holds its size. Raising it makes cells larger (fewer per layer → thicker, fewer-celled epithelium); lowering it packs more, smaller cells. Because mitosis triggers at 2× the initial volume, target volume also paces division. Keep it within the 10–30 µm cell-diameter envelope or emergent thickness and turnover drift from the calibrated targets.',
                     '_implementation_pattern': 'Applied per cell in `ConstraintInitializerSteppable.start()` as `cell.targetVolume = self.InitSTEM_TargetVolume` for each stem cell; the CPM VolumeConstraint plugin then relaxes the cell toward this area each MCS. Stored in `Parameters.py` (pixels) and imported via `from Parameters import *`.',
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49, 48],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitSTEM_LambdaVolume', 'GrowthControl'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -327,25 +389,42 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM pressure units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [89],
+                            'locator': {'table': None, 'equation': 'S1 Text §S1.5', 'page': None},
+                            'note': "The fitting sweep covered 10–200 and selected 125. The 50–300 band is the modeler's exploration "
+                             'window around that optimum, not a measured range; values are in the arbitrary pressure units of '
+                             'S1 Text §S1.3 and shift if λv changes.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 125,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S8 Table', 'equation': 'Eq. 2; S1 Text §S1.2–S1.5', 'page': 11},
+                        'notes': 'Fitted by the iterative multi-objective sweep of S1 Text §S1.5: km_EGF swept 1.0–10.0 and '
+                         'km_density 10.0–200.0 against three constraints — (i) complete turnover in 7–14 days and '
+                         'recovery 3–5 days after injury [90, 7], (ii) 5–7 cell layers, (iii) stable thickness 54 ± 5 µm '
+                         '[alghamdi2023]. The Hill exponent n = 4 was fixed from MAPK/ERK ultrasensitivity (Huang & '
+                         'Ferrell 1996) and contact-inhibition measurements (Puliafito et al. 2012); n = 1–2 gave leaky '
+                         'proliferation that failed the constraints (§2.4.1, p. 11). The same value (125, arbitrary '
+                         'pressure units) was selected for stem and basal cells; the paper does not split them. Pressure '
+                         'is P = λv·(V − V_target)² (S1 Text §S1.3), so this threshold is only meaningful together with '
+                         'the λv it was fitted against (2.0 for stem and basal).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Parameter Km_density (Eq. 4) affecting Growth behavior sensitivity to crowding.',
                     '_related_parameters': ['InitSTEM_LambdaVolume', 'InitSTEM_TargetVolume', 'GrowthControl'],
                     '_conceptual_hint': 'Half-max effective pressure for contact inhibition (inverse n=4 Hill): the crowding level that halves growth. Higher tolerates more crowding before stopping; lower inhibits earlier. 125 (arbitrary pressure units) was fitted so steady-state density gives 5–7 layers.',
                     '_implementation_pattern': 'Consumed by `GrowthSteppable` in the density-inhibition Hill term (Eq. 2) for stem cells. From `Parameters.py`.',
-                    '_literature': [89],  # paper ref numbers -> references.py
+                    '_literature': [88, 89, 30, 90, 7, 'alghamdi2023'],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'fitted',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -363,25 +442,43 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'normalized/arbitrary concentration; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [90, 7, 'alghamdi2023'],
+                            'locator': {'table': None, 'equation': 'S1 Text §S1.5', 'page': None},
+                            'note': 'Exactly the window swept during fitting (1.0–10.0 normalised EGF units); the optimum was 3.5. '
+                             'Outside it the paper reports nothing.',
+                        },
                     },
                     '_expert_level': 'basic',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 3.5,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S8 Table', 'equation': 'Eq. 1; S1 Text §S1.1, §S1.5', 'page': 11},
+                        'notes': 'Fitted by the iterative multi-objective sweep of S1 Text §S1.5: km_EGF swept 1.0–10.0 and '
+                         'km_density 10.0–200.0 against three constraints — (i) complete turnover in 7–14 days and '
+                         'recovery 3–5 days after injury [90, 7], (ii) 5–7 cell layers, (iii) stable thickness 54 ± 5 µm '
+                         '[alghamdi2023]. The Hill exponent n = 4 was fixed from MAPK/ERK ultrasensitivity (Huang & '
+                         'Ferrell 1996) and contact-inhibition measurements (Puliafito et al. 2012); n = 1–2 gave leaky '
+                         'proliferation that failed the constraints (§2.4.1, p. 11). The stem value 3.5 is half the basal '
+                         '(7.0) value: stem cells are made twice as EGF-sensitive so proliferation concentrates in the '
+                         'limbal niche without any spatial hard-coding, and basal cells ramp up mainly when a breached '
+                         'barrier lets EGF in (Table 1: "calibrated so epithelial thickness and limbal–peripheral density '
+                         'gradients remain physiological while maintaining 7–14 day renewal"). Units are the normalised '
+                         'EGF field in which the tear source is 1.0.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Parameter Km_EGF (Eq. 1) affecting Growth behavior sensitivity to EGF.',
                     '_related_parameters': ['EGF_ScreteAmount', 'EGF_GlobalDecay', 'GrowthControl'],
                     '_conceptual_hint': 'The EGF level at which stem-cell growth runs at half maximum (midpoint of the n=4 Hill switch). Lower km = more EGF-sensitive. Stem km (3.5) sits below basal (7.0), so stem cells switch on at lower EGF, keeping the limbus proliferative. Fitted to hit physiological thickness and turnover (S1 Text §S1.5).',
                     '_implementation_pattern': 'Consumed by `GrowthSteppable` in the EGF-dependent Hill growth term (Eq. 1) for stem cells; declared class-level in ConstraintInitializerSteppable and copied into GrowthSteppable. From `Parameters.py`.',
-                    '_literature': [88],  # paper ref numbers -> references.py
+                    '_literature': [88, 89, 54, 55, 90, 7, 'alghamdi2023'],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'fitted',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -399,25 +496,39 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'exploratory range (dimensionless)'},
+                        'recommended': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'vCornea_v2Steppables.py 570–584', 'page': None},
+                            'note': 'β is a convex weight: G_EGF = β·Hill(EGF) + (1 − β). Values outside [0, 1] make the growth '
+                             'factor negative or above the Hill maximum, which the growth update does not guard against. Only '
+                             'β = 1 has been run in the paper.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
-                        'source': 'Vanin et al., 2025',
-                        'value': 1.0,
-                        'locator': {'table': None, 'equation': 'S1 Text Eq. S7', 'page': None},
-                        'notes': 'Implicit β parameter for Hill function combining EGF dependence with baseline (paper sets β=1 → fully EGF-dependent).',
+                        'source': 'Vanin et al., 2025 — paper_version source (not in the paper text)',
+                        'value': 1,
+                        'locator': {
+                            'table': None,
+                            'equation': 'vCornea_v2Steppables.py lines 582–584 (G_EGF = β·Hill + (1−β))',
+                            'page': None,
+                        },
+                        'notes': 'Not a parameter of the published model: the paper writes G_EGF as a pure Hill function (Eq. 1; '
+                         'S1 Text §S1.1). β is an implementation-only blend between EGF-gated and EGF-independent growth; '
+                         'β = 1 reproduces Eq. 1 exactly, which is the only value the paper used. Defined in '
+                         'Parameters.py line 8.',
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Modulates the impact of G_EGF term in Growth behavior (Eq. 1, S1 Text S1.1).',
                     '_related_parameters': ['EGF_STEM_HalfMaxValue', 'GrowthControl'],
                     '_conceptual_hint': 'Dimensionless blend (β) between EGF-gated and baseline growth: G_EGF = β·Hill(EGF) + (1−β). β=1 (paper) makes stem growth fully EGF-dependent; β=0 makes it EGF-independent. Usually left at 1; lower it to probe EGF-independent proliferation.',
                     '_implementation_pattern': 'Read by `GrowthSteppable`; the beta factor blends EGF-dependence with a baseline in the stem growth term. From `Parameters.py`.',
-                    '_literature': [88],  # paper ref numbers -> references.py
+                    '_literature': [88, 89],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -435,14 +546,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured value exists for a CPM chemotaxis coefficient. The band keeps stem λ below the '
+                             'basal λ (1000) at its top; above that stem cells would migrate out of the niche and the limbal '
+                             'stem pool is lost (Eq. 4 converts them to basal on losing LIMB contact).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 100.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table; S7 Table', 'equation': 'Eq. 7; S3 Text §S3.4', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-"). Chemotaxis coefficient toward the Movement-Bias '
+                         'field (a short-range chemoattractant secreted by the EpBM, S7 Table). Set an order of magnitude '
+                         'below the basal value (1000) so stem cells remain in the limbal niche while their basal progeny '
+                         "are driven centripetally — the model's stand-in for the laminin/fibronectin guidance and "
+                         'centripetal flow in §1.2.3 (Lobo et al. 2016; Richardson et al. 2017). Arbitrary CPM energy '
+                         'units.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Chemotaxis',
                     '_model_context': 'Parameter λc (Eq. 24) for Chemotaxis_MBias Hamiltonian term influencing Movement.',
@@ -451,10 +576,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['MovementBiasScreteAmount', 'MovementBiasUptake'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 61, 62, 63, 64, 65],
                     '_dependencies': {},
                 },
 
@@ -473,15 +598,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the four published per-type '
+                             'values (2–5) by roughly a factor of five in each direction; far above it membrane fluctuations '
+                             'freeze and cells stop moving, far below it cells lose shape control (S3 Text §S3.3, §S3.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3 (surface constraint)', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-") for any λ. The published set is 2.0 for stem/basal '
+                         'and 5.0 for wing/superficial: the two non-dividing, flattened types are held more rigidly so '
+                         'the stratified sheet keeps its shape while proliferative layers stay deformable enough to '
+                         'rearrange and divide. Arbitrary CPM energy units (S3 Text §S3.3); the paper treats mechanical '
+                         'coefficients phenomenologically and calibrates them to tissue-level observables (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AreaEnergy',
                     '_model_context': 'Parameter λs (Eq. 23) for SurfaceConstraint Hamiltonian term.',
@@ -490,10 +628,10 @@ class VCorneaProcess(Process):
                      '_related_parameters': ['InitBASAL_TargetSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                },
                 'InitBASAL_TargetSurface': {
@@ -509,26 +647,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (10, 35),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'Perimeter in voxel edges (1 voxel = 2 µm). The band spans compact to strongly flattened shapes '
+                             'for a 25-voxel (100 µm²) cell: ≈18 is circular, ≈30–40 is a squamous 4–6:1 section. Anchored to '
+                             'the 10–30 µm cell-diameter range of De Paiva et al. 2006 and the layer morphologies in '
+                             "Sterenczak et al. 2021; the exact bounds are the modeler's envelope around those, not a "
+                             'measured perimeter distribution.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 20.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3', 'page': None},
+                        'notes': 'S8 Table cites Sterenczak et al. 2021 (in-vivo confocal morphology of the human corneal '
+                         'epithelium) for cell shape. Values rise from stem (18) through basal (20) to wing/superficial '
+                         '(25 voxel edges = 36–50 µm perimeter) to reproduce the columnar-to-squamous flattening '
+                         'described in §1.2.2. With all four target volumes at 25 voxels, a larger target perimeter '
+                         'forces a flatter cell: a 25-voxel circle has perimeter ≈17.7, so 25 implies a roughly 3:1 '
+                         'aspect ratio.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SurfaceArea',
                     '_model_context': 'Parameter S_target (Eq. 23) for SurfaceConstraint Hamiltonian term.',
                     '_conceptual_hint': "Target surface is the cell's preferred perimeter (a length in 2D); with the surface coefficient λs it regularizes cell shape. Higher targets permit more elongated or ruffled membranes; the constraint keeps cells compact. It shapes cells rather than sizing them — that is target volume's job.",
                     '_implementation_pattern': "Applied as `cell.targetSurface = self.InitBASAL_TargetSurface` in `ConstraintInitializerSteppable.start()`; the SurfaceConstraint plugin regularizes each basal cell's perimeter toward this value. From `Parameters.py`.",
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitBASAL_LambdaSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -546,15 +700,33 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the published values (2–5) by '
+                             'roughly a factor of five. Because λv enters the pressure that km_density (125) was fitted '
+                             'against, values outside the band shift the contact-inhibition set-point even with km_density '
+                             'unchanged (S1 Text §S1.3–S1.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {
+                            'table': 'S8 Table',
+                            'equation': 'S1 Text §S1.3 (effective pressure); S3 Text §S3.3',
+                            'page': None,
+                        },
+                        'notes': 'S8 Table lists no literature source ("-"). 2.0 for stem/basal/wing, 5.0 for superficial. λv is '
+                         'not only a shape stiffness: S1 Text §S1.3 derives the effective pressure P = λv·(V − V_target)² '
+                         'that feeds the density-inhibition Hill term (Eq. 2), so λv also scales how fast crowding shuts '
+                         'proliferation off. km_density = 125 was fitted with these λv values fixed; change one and the '
+                         'other no longer holds.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:VolumeEnergy',
                     '_model_context': 'Parameter λv (Eq. 22) for VolumeConstraint Hamiltonian term and Pressure calculation (Eq. 6).',
@@ -563,10 +735,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitBASAL_TargetVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 89],
                     '_dependencies': {},
                 },
                 'InitBASAL_TargetVolume': {
@@ -582,26 +754,41 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel^2); displays in µm²'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': 'S1 Text §S1.6', 'page': None},
+                            'note': '15–40 voxels = 60–160 µm² (equivalent diameters ≈ 9–14 µm): the small-cell end of the 10–30 µm '
+                             'range in De Paiva et al. 2006. The upper bound is kept below the 50-voxel mitosis threshold so '
+                             'a target volume can never trigger division by itself; a 30 µm cell (≈177 voxels) is '
+                             'deliberately excluded for that reason.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': '§2.4.2; S1 Text §S1.6', 'page': 11},
+                        'notes': '25 voxels = 100 µm² at 2 µm/voxel (§2.2). S8 Table cites De Paiva et al. 2006, who report human '
+                         'corneal epithelial cell diameters of 10–30 µm with the smallest cells being the '
+                         'stem/progenitor-like fraction; a 100 µm² section corresponds to an ≈11 µm diameter, i.e. the '
+                         'small end of that range. Stem and basal cells are initialised at this volume and divide when '
+                         'they reach 2× (50 voxels, 200 µm²; §2.4.2, S1 Text §S1.6), so target volume also sets the '
+                         'division pace.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Volume',
                     '_model_context': 'Parameter V_target (Eq. 22, 8) for VolumeConstraint and Growth. Represents TargetVolume state variable.',
                     '_conceptual_hint': 'Target volume and the volume coefficient λv together set how strongly a cell holds its size. Raising it makes cells larger (fewer per layer → thicker, fewer-celled epithelium); lowering it packs more, smaller cells. Because mitosis triggers at 2× the initial volume, target volume also paces division. Keep it within the 10–30 µm cell-diameter envelope or emergent thickness and turnover drift from the calibrated targets.',
                     '_implementation_pattern': 'Applied per cell in `ConstraintInitializerSteppable.start()` as `cell.targetVolume = self.InitBASAL_TargetVolume` for each basal cell; the CPM VolumeConstraint plugin then relaxes the cell toward this area each MCS. Stored in `Parameters.py` (pixels) and imported via `from Parameters import *`.',
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49, 48],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitBASAL_LambdaVolume', 'GrowthControl'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -619,14 +806,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81, 63, 64],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured value exists. Lower bound = one-tenth of the published value (equal to the stem λ, '
+                             'at which the centripetal bias between the two types vanishes); upper bound 5× the published '
+                             'value, beyond which the chemotaxis term dominates the Hamiltonian and cells tear away from the '
+                             'membrane. Not a physiological range.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1000.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table; S7 Table', 'equation': 'Eq. 7; S3 Text §S3.4', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-"). Ten times the stem value (100): the dominant driver '
+                         'of centripetal basal migration along the EpBM-secreted Movement-Bias gradient (§2.4.4: '
+                         '"directed migration by adjusting chemotactic responses, particularly for basal cells … '
+                         'following the basal cell migration hypothesis [63]"). Arbitrary CPM energy units; the paper '
+                         'calibrates it against population-level observables, not a measured force (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Chemotaxis',
                     '_model_context': 'Parameter λc (Eq. 24) for Chemotaxis_MBias Hamiltonian term influencing Movement.',
@@ -635,10 +836,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['MovementBiasScreteAmount', 'MovementBiasUptake'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 61, 62, 63, 64, 65],
                     '_dependencies': {},
                 },
                 'DensityBASAL_HalfMaxValue': {
@@ -655,25 +856,42 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM pressure units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [89],
+                            'locator': {'table': None, 'equation': 'S1 Text §S1.5', 'page': None},
+                            'note': "The fitting sweep covered 10–200 and selected 125. The 50–300 band is the modeler's exploration "
+                             'window around that optimum, not a measured range; values are in the arbitrary pressure units of '
+                             'S1 Text §S1.3 and shift if λv changes.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 125,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S8 Table', 'equation': 'Eq. 2; S1 Text §S1.2–S1.5', 'page': 11},
+                        'notes': 'Fitted by the iterative multi-objective sweep of S1 Text §S1.5: km_EGF swept 1.0–10.0 and '
+                         'km_density 10.0–200.0 against three constraints — (i) complete turnover in 7–14 days and '
+                         'recovery 3–5 days after injury [90, 7], (ii) 5–7 cell layers, (iii) stable thickness 54 ± 5 µm '
+                         '[alghamdi2023]. The Hill exponent n = 4 was fixed from MAPK/ERK ultrasensitivity (Huang & '
+                         'Ferrell 1996) and contact-inhibition measurements (Puliafito et al. 2012); n = 1–2 gave leaky '
+                         'proliferation that failed the constraints (§2.4.1, p. 11). The same value (125, arbitrary '
+                         'pressure units) was selected for stem and basal cells; the paper does not split them. Pressure '
+                         'is P = λv·(V − V_target)² (S1 Text §S1.3), so this threshold is only meaningful together with '
+                         'the λv it was fitted against (2.0 for stem and basal).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Parameter Km_density (Eq. 4) affecting Growth behavior sensitivity to crowding.',
                     '_related_parameters': ['InitBASAL_LambdaVolume', 'InitBASAL_TargetVolume', 'GrowthControl'],
                     '_conceptual_hint': 'Half-max pressure for basal contact inhibition (inverse n=4 Hill); same fitted value (125) as stem. Sets how crowded basal cells get before proliferation shuts off, capping peripheral epithelial density.',
                     '_implementation_pattern': 'Consumed by `GrowthSteppable` in the density-inhibition Hill term (Eq. 2) for basal cells. From `Parameters.py`.',
-                    '_literature': [89],  # paper ref numbers -> references.py
+                    '_literature': [88, 89, 30, 90, 7, 'alghamdi2023'],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'fitted',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -691,14 +909,33 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'normalized/arbitrary concentration; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [90, 7, 'alghamdi2023'],
+                            'locator': {'table': None, 'equation': 'S1 Text §S1.5', 'page': None},
+                            'note': 'The fitting sweep covered 1.0–10.0 for both km_EGF values and selected 7.0 for basal; the 3–15 '
+                             "band is the modeler's exploration window around that optimum (lower bound = the fitted stem "
+                             'value, upper bound extrapolated), not a measured range.',
+                        },
                     },
                     '_expert_level': 'basic',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 7.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S8 Table', 'equation': 'Eq. 1; S1 Text §S1.1, §S1.5', 'page': 11},
+                        'notes': 'Fitted by the iterative multi-objective sweep of S1 Text §S1.5: km_EGF swept 1.0–10.0 and '
+                         'km_density 10.0–200.0 against three constraints — (i) complete turnover in 7–14 days and '
+                         'recovery 3–5 days after injury [90, 7], (ii) 5–7 cell layers, (iii) stable thickness 54 ± 5 µm '
+                         '[alghamdi2023]. The Hill exponent n = 4 was fixed from MAPK/ERK ultrasensitivity (Huang & '
+                         'Ferrell 1996) and contact-inhibition measurements (Puliafito et al. 2012); n = 1–2 gave leaky '
+                         'proliferation that failed the constraints (§2.4.1, p. 11). The basal value 7.0 is double the '
+                         'stem (3.5) value: stem cells are made twice as EGF-sensitive so proliferation concentrates in '
+                         'the limbal niche without any spatial hard-coding, and basal cells ramp up mainly when a '
+                         'breached barrier lets EGF in (Table 1: "calibrated so epithelial thickness and '
+                         'limbal–peripheral density gradients remain physiological while maintaining 7–14 day renewal"). '
+                         'Units are the normalised EGF field in which the tear source is 1.0.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Parameter Km_EGF (Eq. 1) affecting Growth behavior sensitivity to EGF.',
@@ -707,11 +944,11 @@ class VCorneaProcess(Process):
                     ],
                     '_conceptual_hint': 'Half-max EGF for basal-cell growth (n=4 Hill). At 7.0 it is above the stem value (3.5), so peripheral basal cells need more EGF to proliferate — they ramp up mainly during wound healing, when a breached superficial barrier lets EGF flood in. Fitted (S1 Text §S1.5).',
                     '_implementation_pattern': 'Consumed by `GrowthSteppable` in the EGF-dependent Hill growth term (Eq. 1) for basal cells. From `Parameters.py`.',
-                    '_literature': [88],  # paper ref numbers -> references.py
+                    '_literature': [88, 89, 54, 55, 90, 7, 'alghamdi2023'],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'fitted',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -729,25 +966,39 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'exploratory range (dimensionless)'},
+                        'recommended': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'vCornea_v2Steppables.py 570–584', 'page': None},
+                            'note': 'β is a convex weight: G_EGF = β·Hill(EGF) + (1 − β). Values outside [0, 1] make the growth '
+                             'factor negative or above the Hill maximum, which the growth update does not guard against. Only '
+                             'β = 1 has been run in the paper.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
-                        'source': 'Vanin et al., 2025',
-                        'value': 1.0,
-                        'locator': {'table': None, 'equation': 'S1 Text Eq. S7', 'page': None},
-                        'notes': 'Implicit β parameter for Hill function combining EGF dependence with baseline (paper sets β=1 → fully EGF-dependent).',
+                        'source': 'Vanin et al., 2025 — paper_version source (not in the paper text)',
+                        'value': 1,
+                        'locator': {
+                            'table': None,
+                            'equation': 'vCornea_v2Steppables.py lines 570–572 (G_EGF = β·Hill + (1−β))',
+                            'page': None,
+                        },
+                        'notes': 'Not a parameter of the published model: the paper writes G_EGF as a pure Hill function (Eq. 1; '
+                         'S1 Text §S1.1). β is an implementation-only blend between EGF-gated and EGF-independent growth; '
+                         'β = 1 reproduces Eq. 1 exactly, which is the only value the paper used. Defined in '
+                         'Parameters.py line 21.',
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Modulates the impact of G_EGF term in Growth behavior (Eq. 1, S1 Text S1.1).',
                     '_related_parameters': ['EGF_BASAL_HalfMaxValue', 'GrowthControl'],
                     '_conceptual_hint': 'Same β blend for basal cells: at 1 (paper) basal growth is fully EGF-gated. Lowering it lets basal cells grow without EGF, useful for testing the barrier hypothesis.',
                     '_implementation_pattern': 'Read by `GrowthSteppable`; the beta factor blends EGF-dependence with a baseline in the basal growth term. From `Parameters.py`.',
-                    '_literature': [88],  # paper ref numbers -> references.py
+                    '_literature': [88, 89],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -767,15 +1018,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the four published per-type '
+                             'values (2–5) by roughly a factor of five in each direction; far above it membrane fluctuations '
+                             'freeze and cells stop moving, far below it cells lose shape control (S3 Text §S3.3, §S3.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3 (surface constraint)', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-") for any λ. The published set is 2.0 for stem/basal '
+                         'and 5.0 for wing/superficial: the two non-dividing, flattened types are held more rigidly so '
+                         'the stratified sheet keeps its shape while proliferative layers stay deformable enough to '
+                         'rearrange and divide. Arbitrary CPM energy units (S3 Text §S3.3); the paper treats mechanical '
+                         'coefficients phenomenologically and calibrates them to tissue-level observables (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AreaEnergy',
                     '_model_context': 'Parameter λs (Eq. 23) for SurfaceConstraint Hamiltonian term.',
@@ -784,10 +1048,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitWING_TargetSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
                 'InitWING_TargetSurface': {
@@ -803,26 +1067,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'Perimeter in voxel edges (1 voxel = 2 µm). The band spans compact to strongly flattened shapes '
+                             'for a 25-voxel (100 µm²) cell: ≈18 is circular, ≈30–40 is a squamous 4–6:1 section. Anchored to '
+                             'the 10–30 µm cell-diameter range of De Paiva et al. 2006 and the layer morphologies in '
+                             "Sterenczak et al. 2021; the exact bounds are the modeler's envelope around those, not a "
+                             'measured perimeter distribution.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3', 'page': None},
+                        'notes': 'S8 Table cites Sterenczak et al. 2021 (in-vivo confocal morphology of the human corneal '
+                         'epithelium) for cell shape. Values rise from stem (18) through basal (20) to wing/superficial '
+                         '(25 voxel edges = 36–50 µm perimeter) to reproduce the columnar-to-squamous flattening '
+                         'described in §1.2.2. With all four target volumes at 25 voxels, a larger target perimeter '
+                         'forces a flatter cell: a 25-voxel circle has perimeter ≈17.7, so 25 implies a roughly 3:1 '
+                         'aspect ratio.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SurfaceArea',
                     '_model_context': 'Parameter S_target (Eq. 23) for SurfaceConstraint Hamiltonian term.',
                     '_conceptual_hint': "Target surface is the cell's preferred perimeter (a length in 2D); with the surface coefficient λs it regularizes cell shape. Higher targets permit more elongated or ruffled membranes; the constraint keeps cells compact. It shapes cells rather than sizing them — that is target volume's job.",
                     '_implementation_pattern': "Applied as `cell.targetSurface = self.InitWING_TargetSurface` in `ConstraintInitializerSteppable.start()`; the SurfaceConstraint plugin regularizes each wing cell's perimeter toward this value. From `Parameters.py`.",
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitWING_LambdaSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -840,15 +1120,33 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the published values (2–5) by '
+                             'roughly a factor of five. Because λv enters the pressure that km_density (125) was fitted '
+                             'against, values outside the band shift the contact-inhibition set-point even with km_density '
+                             'unchanged (S1 Text §S1.3–S1.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {
+                            'table': 'S8 Table',
+                            'equation': 'S1 Text §S1.3 (effective pressure); S3 Text §S3.3',
+                            'page': None,
+                        },
+                        'notes': 'S8 Table lists no literature source ("-"). 2.0 for stem/basal/wing, 5.0 for superficial. λv is '
+                         'not only a shape stiffness: S1 Text §S1.3 derives the effective pressure P = λv·(V − V_target)² '
+                         'that feeds the density-inhibition Hill term (Eq. 2), so λv also scales how fast crowding shuts '
+                         'proliferation off. km_density = 125 was fitted with these λv values fixed; change one and the '
+                         'other no longer holds.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:VolumeEnergy',
                     '_model_context': 'Parameter λv (Eq. 22) for VolumeConstraint Hamiltonian term.',
@@ -857,10 +1155,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitWING_TargetVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 89],
                     '_dependencies': {},
                 },
                 'InitWING_TargetVolume': {
@@ -876,26 +1174,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel^2); displays in µm²'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': 'S1 Text §S1.6', 'page': None},
+                            'note': '15–40 voxels = 60–160 µm² (equivalent diameters ≈ 9–14 µm): the small-cell end of the 10–30 µm '
+                             'range in De Paiva et al. 2006. The upper bound is kept below the 50-voxel mitosis threshold so '
+                             'a target volume can never trigger division by itself; a 30 µm cell (≈177 voxels) is '
+                             'deliberately excluded for that reason.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': '§2.4.2; S1 Text §S1.6', 'page': 11},
+                        'notes': '25 voxels = 100 µm² at 2 µm/voxel (§2.2). S8 Table cites De Paiva et al. 2006, who report human '
+                         'corneal epithelial cell diameters of 10–30 µm with the smallest cells being the '
+                         'stem/progenitor-like fraction; a 100 µm² section corresponds to an ≈11 µm diameter, i.e. the '
+                         'small end of that range. Stem and basal cells are initialised at this volume and divide when '
+                         'they reach 2× (50 voxels, 200 µm²; §2.4.2, S1 Text §S1.6), so target volume also sets the '
+                         'division pace. Wing and superficial cells do not divide; here the value fixes packing density '
+                         'and layer thickness only.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Volume',
                     '_model_context': 'Parameter V_target (Eq. 22) for VolumeConstraint. Represents fixed TargetVolume state variable.',
                     '_conceptual_hint': 'Target volume and the volume coefficient λv together set how strongly a cell holds its size. Raising it makes cells larger (fewer per layer → thicker, fewer-celled epithelium); lowering it packs more, smaller cells. These cells do not divide, so target volume mainly sets packing density and layer thickness. Keep it within the 10–30 µm cell-diameter envelope or emergent thickness and turnover drift from the calibrated targets.',
                     '_implementation_pattern': 'Applied per cell in `ConstraintInitializerSteppable.start()` as `cell.targetVolume = self.InitWING_TargetVolume` for each wing cell; the CPM VolumeConstraint plugin then relaxes the cell toward this area each MCS. Stored in `Parameters.py` (pixels) and imported via `from Parameters import *`.',
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49, 48],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitWING_LambdaVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -913,25 +1227,38 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': ['boisjoly1993', 14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'Literature supports EGF chemotaxis qualitatively (Boisjoly et al. 1993) but gives no CPM '
+                             'coefficient. The band is a factor-of-4 to -5 envelope around the published 20; above it wing '
+                             'cells pile onto the surface and the Wing→Superficial rule (Eq. 6) fires prematurely.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 20.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'Eq. 7; S3 Text §S3.4', 'page': None},
+                        'notes': 'S8 Table cites Boisjoly et al. 1993, who showed EGF is chemotactic for corneal epithelial cells '
+                         'in microchemotaxis chambers at the same concentrations that accelerate in-vitro wound closure. '
+                         'Wing cells therefore chemotax up the EGF gradient (toward the tear film and, after injury, '
+                         "toward the breach) rather than along the Movement-Bias field. The magnitude 20 is the modeler's "
+                         'choice; the reference supports the direction of the effect, not the number.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Chemotaxis',
                     '_model_context': 'Parameter λc (Eq. 24) for Chemotaxis_EGF_Wing Hamiltonian term influencing Movement.',
                     '_conceptual_hint': 'λc for wing cells biases movement up the EGF gradient (rather than the Movement-Bias field), contributing to the upward drift of maturing cells toward the surface and, after injury, toward EGF-rich wound regions. Arbitrary CPM energy units.',
                     '_implementation_pattern': 'Sets the chemotaxis weight (lambda_c) for wing cells toward the EGF field (Chemotaxis plugin). From `Parameters.py`.',
-                    '_literature': [93],  # paper ref numbers -> references.py
+                    '_literature': ['boisjoly1993', 14, 81],  # paper ref numbers -> references.py
                     '_related_parameters': ['EGF_ScreteAmount', 'EGF_GlobalDecay', 'EGF_SUPERDiffCoef'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -951,15 +1278,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the four published per-type '
+                             'values (2–5) by roughly a factor of five in each direction; far above it membrane fluctuations '
+                             'freeze and cells stop moving, far below it cells lose shape control (S3 Text §S3.3, §S3.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3 (surface constraint)', 'page': None},
+                        'notes': 'S8 Table lists no literature source ("-") for any λ. The published set is 2.0 for stem/basal '
+                         'and 5.0 for wing/superficial: the two non-dividing, flattened types are held more rigidly so '
+                         'the stratified sheet keeps its shape while proliferative layers stay deformable enough to '
+                         'rearrange and divide. Arbitrary CPM energy units (S3 Text §S3.3); the paper treats mechanical '
+                         'coefficients phenomenologically and calibrates them to tissue-level observables (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AreaEnergy',
                     '_model_context': 'Parameter λs (Eq. 23) for SurfaceConstraint Hamiltonian term.',
@@ -968,10 +1308,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitSUPER_TargetSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
                 'InitSUPER_TargetSurface': {
@@ -987,26 +1327,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'Perimeter in voxel edges (1 voxel = 2 µm). The band spans compact to strongly flattened shapes '
+                             'for a 25-voxel (100 µm²) cell: ≈18 is circular, ≈30–40 is a squamous 4–6:1 section. Anchored to '
+                             'the 10–30 µm cell-diameter range of De Paiva et al. 2006 and the layer morphologies in '
+                             "Sterenczak et al. 2021; the exact bounds are the modeler's envelope around those, not a "
+                             'measured perimeter distribution.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': 'S3 Text §S3.3', 'page': None},
+                        'notes': 'S8 Table cites Sterenczak et al. 2021 (in-vivo confocal morphology of the human corneal '
+                         'epithelium) for cell shape. Values rise from stem (18) through basal (20) to wing/superficial '
+                         '(25 voxel edges = 36–50 µm perimeter) to reproduce the columnar-to-squamous flattening '
+                         'described in §1.2.2. With all four target volumes at 25 voxels, a larger target perimeter '
+                         'forces a flatter cell: a 25-voxel circle has perimeter ≈17.7, so 25 implies a roughly 3:1 '
+                         'aspect ratio.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SurfaceArea',
                     '_model_context': 'Parameter S_target (Eq. 23) for SurfaceConstraint Hamiltonian term.',
                     '_conceptual_hint': "Target surface is the cell's preferred perimeter (a length in 2D); with the surface coefficient λs it regularizes cell shape. Higher targets permit more elongated or ruffled membranes; the constraint keeps cells compact. It shapes cells rather than sizing them — that is target volume's job.",
                     '_implementation_pattern': "Applied as `cell.targetSurface = self.InitSUPER_TargetSurface` in `ConstraintInitializerSteppable.start()`; the SurfaceConstraint plugin regularizes each superficial cell's perimeter toward this value. From `Parameters.py`.",
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitSUPER_LambdaSurface'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -1024,15 +1380,33 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S8 Table', 'equation': None, 'page': None},
+                            'note': 'No measured range exists for a CPM stiffness. The band brackets the published values (2–5) by '
+                             'roughly a factor of five. Because λv enters the pressure that km_density (125) was fitted '
+                             'against, values outside the band shift the contact-inhibition set-point even with km_density '
+                             'unchanged (S1 Text §S1.3–S1.5).',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_hidden_basic': True,
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {
+                            'table': 'S8 Table',
+                            'equation': 'S1 Text §S1.3 (effective pressure); S3 Text §S3.3',
+                            'page': None,
+                        },
+                        'notes': 'S8 Table lists no literature source ("-"). 2.0 for stem/basal/wing, 5.0 for superficial. λv is '
+                         'not only a shape stiffness: S1 Text §S1.3 derives the effective pressure P = λv·(V − V_target)² '
+                         'that feeds the density-inhibition Hill term (Eq. 2), so λv also scales how fast crowding shuts '
+                         'proliferation off. km_density = 125 was fitted with these λv values fixed; change one and the '
+                         'other no longer holds.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:VolumeEnergy',
                     '_model_context': 'Parameter λv (Eq. 22) for VolumeConstraint Hamiltonian term.',
@@ -1041,10 +1415,10 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['InitSUPER_TargetVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81, 89],
                     '_dependencies': {},
                 },
                 'InitSUPER_TargetVolume': {
@@ -1060,26 +1434,42 @@ class VCorneaProcess(Process):
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel^2); displays in µm²'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [85, 49],
+                            'locator': {'table': 'S8 Table', 'equation': 'S1 Text §S1.6', 'page': None},
+                            'note': '15–40 voxels = 60–160 µm² (equivalent diameters ≈ 9–14 µm): the small-cell end of the 10–30 µm '
+                             'range in De Paiva et al. 2006. The upper bound is kept below the 50-voxel mitosis threshold so '
+                             'a target volume can never trigger division by itself; a 30 µm cell (≈177 voxels) is '
+                             'deliberately excluded for that reason.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S8 Table', 'equation': '§2.4.2; S1 Text §S1.6', 'page': 11},
+                        'notes': '25 voxels = 100 µm² at 2 µm/voxel (§2.2). S8 Table cites De Paiva et al. 2006, who report human '
+                         'corneal epithelial cell diameters of 10–30 µm with the smallest cells being the '
+                         'stem/progenitor-like fraction; a 100 µm² section corresponds to an ≈11 µm diameter, i.e. the '
+                         'small end of that range. Stem and basal cells are initialised at this volume and divide when '
+                         'they reach 2× (50 voxels, 200 µm²; §2.4.2, S1 Text §S1.6), so target volume also sets the '
+                         'division pace. Wing and superficial cells do not divide; here the value fixes packing density '
+                         'and layer thickness only.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Volume',
                     '_model_context': 'Parameter V_target (Eq. 22) for VolumeConstraint. Represents fixed TargetVolume state variable.',
                     '_conceptual_hint': 'Target volume and the volume coefficient λv together set how strongly a cell holds its size. Raising it makes cells larger (fewer per layer → thicker, fewer-celled epithelium); lowering it packs more, smaller cells. These cells do not divide, so target volume mainly sets packing density and layer thickness. Keep it within the 10–30 µm cell-diameter envelope or emergent thickness and turnover drift from the calibrated targets.',
                     '_implementation_pattern': 'Applied per cell in `ConstraintInitializerSteppable.start()` as `cell.targetVolume = self.InitSUPER_TargetVolume` for each superficial cell; the CPM VolumeConstraint plugin then relaxes the cell toward this area each MCS. Stored in `Parameters.py` (pixels) and imported via `from Parameters import *`.',
-                    '_literature': [85],  # paper ref numbers -> references.py
+                    '_literature': [85, 49, 48],  # paper ref numbers -> references.py
                     '_related_parameters': ['InitSUPER_LambdaVolume'],
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -1099,14 +1489,27 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'A normalised proxy term with no measurable counterpart. 0.1–10 /MCS spans one order of '
+                             'magnitude either side of the published value; the gradient reach is set by the secretion/uptake '
+                             'ratio, so moving one without the other changes where basal cells stop migrating.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1.0,
-                        'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
-                        'notes': None,
+                        'locator': {'table': 'S9 Table; S7 Table', 'equation': 'Eq. 9 (analogous)', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-"). The Movement-Bias field is a short-diffusing '
+                         "chemoattractant secreted by the Bowman's/EpBM boundary (S7 Table) that stands in for the matrix "
+                         'guidance cues (laminin, fibronectin) that direct centripetal migration in vivo (§1.2.3; Kimura '
+                         '2010, Kariya 2004). Secretion is normalised to 1.0 like the EGF source; only the ratio to the '
+                         'uptake rate (1.0) matters for the gradient shape.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeCreation',
                     '_model_context': 'Source term (φ) for BASALMVBIAS field in ReactionDiffusion_MBias process.',
@@ -1115,10 +1518,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Constant secretion into the Movement-Bias (BASALMVBIAS) field by the basement membrane, establishing the guidance gradient. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [61, 62, 63, 64, 65],
                     '_dependencies': {},
                 },
                 'MovementBiasUptake': {
@@ -1135,14 +1538,25 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'A proxy term with no measurable counterpart. 0.1–10 /MCS spans one order of magnitude either '
+                             'side of the published value; see MovementBiasScreteAmount for the ratio caveat.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1.0,
-                        'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
-                        'notes': None,
+                        'locator': {'table': 'S9 Table; S7 Table', 'equation': None, 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-"). Uptake by basal and stem cells (S7 Table) is what '
+                         'makes the Movement-Bias field short-range: the chemoattractant is consumed by the cells it '
+                         'guides, so the gradient is steepest at the advancing edge of the basal layer. Set equal to the '
+                         'secretion rate (1.0).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Sink term (μ) for BASALMVBIAS field in ReactionDiffusion_MBias process.',
@@ -1151,10 +1565,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Basal-cell uptake from the Movement-Bias field, shaping how the guidance gradient decays. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [61, 62, 63, 64, 65],
                     '_dependencies': {},
                 },
 
@@ -1173,25 +1587,38 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [34, 35, 66, 67],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'The paper only ran the normalised value 1.0. Because km_EGF was fitted on that scale, the band '
+                             'is a reminder of the usable order of magnitude, not a physiological range: at 0.1 neither cell '
+                             'type reaches half-max growth, at 10 the barrier no longer limits proliferation.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 13},
+                        'notes': 'S9 Table cites Peterson & Ceresa 2021 and Rao et al. 2010 for EGF in the tear film; the tear is '
+                         'modelled as a constant EGF source (§2.3.2, §2.5) representing continuous lacrimal '
+                         'replenishment. The secretion rate was normalised so the field maximum is 1.0 across the domain '
+                         '(S9 Table) — it is a scale-setting constant, and the km_EGF values (3.5, 7.0) and the SLS scale '
+                         'are expressed relative to it. Changing it rescales every EGF threshold in the model.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeCreation',
                     '_model_context': 'Source term (φ, Eq. 40) for EGF field in ReactionDiffusion_EGF process.',
                     '_related_parameters': ['EGF_GlobalDecay', 'EGF_SUPERDiffCoef'], # Simplified
                     '_conceptual_hint': "Constant EGF the tear film injects at the surface, normalized so the field peaks at 1.0. The tear is the model's sole EGF source; raising this lifts the whole gradient and the proliferative drive. A normalized/abstract source term.",
                     '_implementation_pattern': 'Constant EGF secreted into the EGF field by tear cells (Secretion plugin / field steppable). From `Parameters.py`.',
-                    '_literature': [34, 35, 54, 66],  # paper ref numbers -> references.py
+                    '_literature': [34, 35, 66, 67, 54],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'literature_based',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -1209,14 +1636,26 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [94],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'No per-cell-type uptake was measured or fitted. The band 0–5 /MCS spans from the published zero '
+                             'up to ten times the global decay; it is a usable range for re-partitioning clearance between '
+                             'global decay and cellular uptake, not evidence.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 0.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 13},
+                        'notes': 'Set to 0.0 for every cell type (S5 Text §S5.3): "we are using an increased global decay as a '
+                         'surrogate to these individual cells uptakes for simplicity". Receptor-mediated endocytosis and '
+                         'binding are real (Peterson & Ceresa 2021) but are lumped into EGF_GlobalDecay = 0.5 instead. '
+                         'Raising this without lowering the global decay double-counts clearance.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Sink term (μ, Eq. 40) for EGF field (specific to BASAL cells).',
@@ -1225,10 +1664,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Per-cell EGF uptake from the EGF field for basal cells; 0 in the paper (uptake is folded into the inflated global decay). From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [94, 54],
                     '_dependencies': {},
                 },
                 # ... Similar updates for EGF_FieldUptakeSTEM, EGF_FieldUptakeSuper, EGF_FieldUptakeWing ...
@@ -1246,14 +1685,26 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [94],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'No per-cell-type uptake was measured or fitted. The band 0–5 /MCS spans from the published zero '
+                             'up to ten times the global decay; it is a usable range for re-partitioning clearance between '
+                             'global decay and cellular uptake, not evidence.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 0.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 13},
+                        'notes': 'Set to 0.0 for every cell type (S5 Text §S5.3): "we are using an increased global decay as a '
+                         'surrogate to these individual cells uptakes for simplicity". Receptor-mediated endocytosis and '
+                         'binding are real (Peterson & Ceresa 2021) but are lumped into EGF_GlobalDecay = 0.5 instead. '
+                         'Raising this without lowering the global decay double-counts clearance.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Sink term (μ, Eq. 40) for EGF field (specific to STEM cells).',
@@ -1262,10 +1713,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Per-cell EGF uptake from the EGF field for stem cells; 0 in the paper (uptake is folded into the inflated global decay). From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [94, 54],
                     '_dependencies': {},
                 },
                 'EGF_FieldUptakeSuper': {
@@ -1282,14 +1733,26 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [94],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'No per-cell-type uptake was measured or fitted. The band 0–5 /MCS spans from the published zero '
+                             'up to ten times the global decay; it is a usable range for re-partitioning clearance between '
+                             'global decay and cellular uptake, not evidence.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 0.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 13},
+                        'notes': 'Set to 0.0 for every cell type (S5 Text §S5.3): "we are using an increased global decay as a '
+                         'surrogate to these individual cells uptakes for simplicity". Receptor-mediated endocytosis and '
+                         'binding are real (Peterson & Ceresa 2021) but are lumped into EGF_GlobalDecay = 0.5 instead. '
+                         'Raising this without lowering the global decay double-counts clearance.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Sink term (μ, Eq. 40) for EGF field (specific to SUPER cells).',
@@ -1298,10 +1761,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Per-cell EGF uptake from the EGF field for super cells; 0 in the paper (uptake is folded into the inflated global decay). From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [94, 54],
                     '_dependencies': {},
                 },
                 'EGF_FieldUptakeWing': {
@@ -1318,14 +1781,26 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [94],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': 'No per-cell-type uptake was measured or fitted. The band 0–5 /MCS spans from the published zero '
+                             'up to ten times the global decay; it is a usable range for re-partitioning clearance between '
+                             'global decay and cellular uptake, not evidence.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 0.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 13},
+                        'notes': 'Set to 0.0 for every cell type (S5 Text §S5.3): "we are using an increased global decay as a '
+                         'surrogate to these individual cells uptakes for simplicity". Receptor-mediated endocytosis and '
+                         'binding are real (Peterson & Ceresa 2021) but are lumped into EGF_GlobalDecay = 0.5 instead. '
+                         'Raising this without lowering the global decay double-counts clearance.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Sink term (μ, Eq. 40) for EGF field (specific to WING cells).',
@@ -1334,10 +1809,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Per-cell EGF uptake from the EGF field for wing cells; 0 in the paper (uptake is folded into the inflated global decay). From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [94, 54],
                     '_dependencies': {},
                 },
                 'EGF_GlobalDecay': {
@@ -1354,25 +1829,41 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': 'model-usable range in sim 1/MCS; proxy term, not strictly physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [94],
+                            'locator': {'table': 'S9 Table', 'equation': 'S5 Text §S5.3', 'page': None},
+                            'note': '0.1–2.0 per MCS. The lower end approaches the literature clearance rate (0.036–0.099 per MCS '
+                             'from the 42–114 min half-life in Chan et al. 1991) at which EGF floods the tissue; the upper '
+                             'end is 4× the published value, where the gradient collapses to the first cell layer. The '
+                             'published 0.5 was chosen, not fitted.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 0.5,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'Table 1; S9 Table', 'equation': 'Eq. 9; S5 Text §S5.3', 'page': 14},
+                        'notes': 'S9 Table cites Chan et al. 1991 (pharmacokinetics of rhEGF in the anterior eye): half-life '
+                         '42–114 min (78 ± 36 min), which converts to k = ln2/t½ = 0.036–0.099 per MCS at 6 min/MCS. The '
+                         'model uses 0.5 per MCS (≈ 5 per hour), 5–14× the physiological clearance, "to implicitly '
+                         'incorporate additional processes not explicitly modeled, including cellular uptake, '
+                         'receptor-mediated endocytosis, proteolytic degradation, and sequestration by extracellular '
+                         'matrix components" and to keep the EGF gradient length scale inside the 200×90 domain (S5 Text '
+                         '§S5.3). Stored in sim units (1/MCS); the GUI displays 1/hour.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Decay term (k_dEGF, Eq. 38) for EGF field in ReactionDiffusion_EGF process.',
                     '_related_parameters': ['EGF_ScreteAmount', 'EGF_SUPERDiffCoef'], # Simplified
                     '_conceptual_hint': 'Rate at which EGF disappears everywhere (0.5/MCS ≈ 5/hour) — deliberately ~5–10× the physiological clearance (half-life 42–114 min). The inflation lumps in unmodeled uptake, receptor endocytosis and ECM sequestration, and sets the EGF gradient length scale. A proxy rate, not a measured one.',
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('EGF_GlobalDecay').cdata = self.EGF_GlobalDecay`, overriding the EGF field's XML GlobalDecayConstant. From `Parameters.py`.",
-                    '_literature': [94],  # paper ref numbers -> references.py
+                    '_literature': [94, 54],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'calibrated',
                     '_affects_output': [],
                     '_dependencies': {},
                 },
@@ -1389,25 +1880,47 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 186),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, EGF field global diffusion = 186]; displays as [0, 124] µm²/min'},
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [50, 55, 93, 'thorne2004'],
+                            'locator': {'table': 'S9 Table', 'equation': 'Eq. 10; S5 Text §S5.2', 'page': None},
+                            'note': "Upper bound 186 voxel²/MCS is the EGF field's global diffusion constant (Eq. 10; "
+                             'vCornea_v2.xml): a compartment cannot transport faster than the field it sits in, and at 186 '
+                             'the superficial barrier disappears entirely. Lower bound 0 is an impermeable barrier (the value '
+                             'the model already uses for the limbal EpBM). The published 20 sits at the "tight but not '
+                             'sealed" end, consistent with Van Itallie 2008 pore sizes.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 20.0,
-                        'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
-                        'notes': 'Higher than baseline EGF diffusion to reflect superficial tight-junction permeability for EGF in healthy cornea (Savage & Cohen 1973 + Van Itallie 2008). refs Savage & Cohen 1973, Van Itallie 2008',
+                        'locator': {'table': 'Table 1; S9 Table', 'equation': 'Eq. 10; S5 Text §S5.2', 'page': 13},
+                        'notes': 'S9 Table cites Savage & Cohen 1973 and Van Itallie et al. 2008. Superficial tight junctions '
+                         'have a pore radius of ≈4 Å (Van Itallie 2008) while EGF is a ≈6 kDa protein (§1.2.3), and '
+                         'topical EGF proliferates wounded but not intact corneas (Savage & Cohen 1973) — so EGF '
+                         'transport through the intact superficial layer is throttled. The model gives superficial cells '
+                         'and the peripheral EpBM D = 20 voxel²/MCS against a global D = 186 voxel²/MCS (Eq. 10), i.e. '
+                         '≈9× slower; this contrast IS the barrier, and its loss on injury is what triggers healing '
+                         "(§2.5). The exact factor is the modeler's choice; the literature fixes direction, not "
+                         'magnitude. Global D = 186 derives from the GelMA value 2.5×10⁻⁸ cm²/s (Kuo et al. 2016; 225 '
+                         'voxel²/MCS) — the rat-brain value (Thorne et al. 2004, 5.18×10⁻⁷ cm²/s) was rejected as too '
+                         'fast. Note: S5 Text quotes the Thorne conversion as 466.2 voxel²/MCS; at 2 µm/voxel and 6 '
+                         'min/MCS it recomputes to ≈4.7×10³, a factor-of-ten discrepancy in the supplement that does not '
+                         'affect the chosen value.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_EGF,super for superficial layer in ReactionDiffusion_EGF (Eq. 10). Steppable line 261 overwrites XML default with this value at start().',
                     '_conceptual_hint': 'How fast EGF diffuses through superficial cells (20 voxel²/MCS ≈ 13 µm²/min) — about 9× slower than the global rate (186). This contrast IS the barrier: intact superficial cells throttle EGF reaching basal/stem layers, so proliferation stays low until injury breaches them. From tight-junction permeability data.',
                     '_implementation_pattern': "The EGF field's per-region diffusion is defined in CC3DML and overwritten at runtime: `ConstraintInitializerSteppable.start()` runs `get_xml_element('EGF_Coef_SUPER').cdata = self.EGF_SUPERDiffCoef`, so the `Parameters.py` value (voxel^2/MCS) wins over the XML default.",
-                    '_literature': [93, 50],  # paper ref numbers -> references.py
+                    '_literature': [50, 55, 56, 93, 'thorne2004'],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'literature_based',
                     '_related_parameters': [],
                     '_affects_output': [],
                     '_dependencies': {},
@@ -1428,14 +1941,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
+                            'note': 'No measured value for a CPM spring constant. 10–200 brackets the published 50 by a factor of '
+                             '4–5; too stiff and the apical sheet cannot follow the tissue surface, too soft and it tears '
+                             'during injury. With AutoAdjustLinks on this is only the initial value.',
+                        },
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 50,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-") for any focal-point-plasticity link parameter. The '
+                         'links are Hooke springs between superficial cell centres (and between superficial cells and the '
+                         'lateral wall) that hold the apical sheet under constant tension (S3 Text §S3.2); with '
+                         'AutoAdjustLinks on, either λ or the target length is re-tuned every step to keep that tension. '
+                         "They are the model's stand-in for the tight-junction belt of §1.2.2 and are calibrated "
+                         'phenomenologically (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:StiffnessMechanical', # Represents stiffness
                     '_model_context': 'Stiffness parameter (λ, Eq. 17) for FPP links between SUPER and WALL cells.',
@@ -1444,10 +1971,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Passed to `new_fpp_link(cell, wall_neighbor, self.LINKWALL_lambda_distance, ...)` in the link steppable — spring constant for superficial<->boundary FPP links. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [51, 50, 14, 81],
                     '_dependencies': {},
                 },
                 'LINKWALL_max_distance': {
@@ -1463,15 +1990,31 @@ class VCorneaProcess(Process):
                     '_physiological_range': (100, 2000),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
+                            'note': '100–2000 voxels. Below ≈100 (half the domain width) links start snapping during normal '
+                             'rearrangement and the apical sheet fragments; anything ≥ 200 (the domain width) is equivalent '
+                             'to "never breaks", which is the published behaviour. Not a physiological quantity.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1000,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-") for any focal-point-plasticity link parameter. The '
+                         'links are Hooke springs between superficial cell centres (and between superficial cells and the '
+                         'lateral wall) that hold the apical sheet under constant tension (S3 Text §S3.2); with '
+                         'AutoAdjustLinks on, either λ or the target length is re-tuned every step to keep that tension. '
+                         "They are the model's stand-in for the tight-junction belt of §1.2.2 and are calibrated "
+                         'phenomenologically (§2.2, p. 10). 1000 voxels exceeds the 200-voxel domain, so in the published '
+                         'runs a link never breaks by stretching; links are removed only when a cell dies or changes '
+                         'type.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AdhesionEnergy',
                     '_model_context': 'Maximum interaction distance for FPP links between SUPER and WALL cells.',
@@ -1480,10 +2023,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Break-length (max distance) argument to `new_fpp_link(...)` for superficial<->boundary links. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
 
@@ -1502,14 +2045,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'arbitrary CPM energy units; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'expert_judgement',
+                            'refs': [14, 81],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
+                            'note': 'No measured value for a CPM spring constant. 10–200 brackets the published 50 by a factor of '
+                             '4–5; too stiff and the apical sheet cannot follow the tissue surface, too soft and it tears '
+                             'during injury. With AutoAdjustLinks on this is only the initial value.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 50,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-") for any focal-point-plasticity link parameter. The '
+                         'links are Hooke springs between superficial cell centres (and between superficial cells and the '
+                         'lateral wall) that hold the apical sheet under constant tension (S3 Text §S3.2); with '
+                         'AutoAdjustLinks on, either λ or the target length is re-tuned every step to keep that tension. '
+                         "They are the model's stand-in for the tight-junction belt of §1.2.2 and are calibrated "
+                         'phenomenologically (§2.2, p. 10).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:StiffnessMechanical',
                     '_model_context': 'Stiffness parameter (λ, Eq. 17) for FPP links between SUPER cells.',
@@ -1518,10 +2075,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Passed to `new_fpp_link(cell, neighbor, self.LINKSUPER_lambda_distance, ...)` — spring constant for superficial<->superficial FPP links. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [51, 50, 14, 81],
                     '_dependencies': {},
                 },
                 'LINKSUPER_target_distance': {
@@ -1537,15 +2094,33 @@ class VCorneaProcess(Process):
                     '_physiological_range': (1, 10),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [49],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
+                            'note': '1–10 voxels (2–20 µm): from touching centres up to a cell diameter apart. Above the superficial '
+                             'cell width (≈10 voxels for a 25-voxel squamous cell) the spring would pull non-neighbours '
+                             'together. Geometric reasoning from the cell sizes in Sterenczak 2021, not a measured junction '
+                             'length.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 3,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-") for any focal-point-plasticity link parameter. The '
+                         'links are Hooke springs between superficial cell centres (and between superficial cells and the '
+                         'lateral wall) that hold the apical sheet under constant tension (S3 Text §S3.2); with '
+                         'AutoAdjustLinks on, either λ or the target length is re-tuned every step to keep that tension. '
+                         "They are the model's stand-in for the tight-junction belt of §1.2.2 and are calibrated "
+                         'phenomenologically (§2.2, p. 10). Target 3 voxels (6 µm) is roughly the centre-to-centre '
+                         'spacing of two flattened superficial cells sharing a 25-voxel area. Note that the wall-link '
+                         'target (LINKWALL_target_distance) is listed as 3 in S10 Table but hard-coded to 8 in '
+                         'vCornea_v2Steppables.py line 196; it is not exposed here.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AdhesionEnergy',
                     '_model_context': 'Target length parameter (d_target, Eq. 17) for FPP links between SUPER cells.',
@@ -1554,10 +2129,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Rest-length argument to `new_fpp_link(...)` for superficial<->superficial links. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [49, 51],
                     '_dependencies': {},
                 },
                 'LINKSUPER_max_distance': {
@@ -1573,15 +2148,31 @@ class VCorneaProcess(Process):
                     '_physiological_range': (100, 2000),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
+                            'note': '100–2000 voxels. Below ≈100 (half the domain width) links start snapping during normal '
+                             'rearrangement and the apical sheet fragments; anything ≥ 200 (the domain width) is equivalent '
+                             'to "never breaks", which is the published behaviour. Not a physiological quantity.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 1000,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-") for any focal-point-plasticity link parameter. The '
+                         'links are Hooke springs between superficial cell centres (and between superficial cells and the '
+                         'lateral wall) that hold the apical sheet under constant tension (S3 Text §S3.2); with '
+                         'AutoAdjustLinks on, either λ or the target length is re-tuned every step to keep that tension. '
+                         "They are the model's stand-in for the tight-junction belt of §1.2.2 and are calibrated "
+                         'phenomenologically (§2.2, p. 10). 1000 voxels exceeds the 200-voxel domain, so in the published '
+                         'runs a link never breaks by stretching; links are removed only when a cell dies or changes '
+                         'type.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:AdhesionEnergy',
                     '_model_context': 'Maximum interaction distance for FPP links between SUPER cells.',
@@ -1590,10 +2181,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Break-length (max distance) argument to `new_fpp_link(...)` for superficial<->superficial links. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
                 'AutoAdjustLinks': {
@@ -1609,8 +2200,13 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': 'S3 Text §S3.2', 'page': None},
+                        'notes': 'S11 Table default True. S3 Text §S3.2: "We enforce a constant tension on the superficial cells '
+                         "layer by automatically adjusting either λ or the target length … Depending on the user's "
+                         'AutoAdjustLinks and Lambda_link_adjustment settings, the code picks one of these two '
+                         'strategies." All published results used the adjusting mode.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellCellAdhesion',
                     '_model_context': 'Enables dynamic adjustment mechanism (Eq. 19-21) for SUPER-SUPER links.',
@@ -1624,11 +2220,11 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_dimension': 'boolean',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [14, 81],
                     '_dependencies': {},
                 },
 
@@ -1646,8 +2242,12 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': 17},
+                        'notes': 'S11 Table default False (the homeostasis runs of §3.1–3.3, Figs 6–8). The injury runs of §3.4 '
+                         '(Figs 9–10) set it True. Injuries follow the depth-of-injury classification of Scott et al. '
+                         '2010 (slight / mild / moderate). Schema default True because the GUI targets injury workflows.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SystemQualities',
                     '_model_context': 'Globally enables/disables the injury event.',
@@ -1661,11 +2261,11 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'initial_condition',
+                    '_dimension': 'boolean',
+                    '_fitting_method': 'literature_based',
                     '_related_parameters': [],
-                    '_literature': [],
+                    '_literature': [3, 2, 6],
                     '_dependencies': {},
                 },
                 'InjuryType': {
@@ -1682,8 +2282,15 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': False,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': 'S4 Text §S4.4', 'page': 13},
+                        'notes': 'Two implemented pathways (§2.4.5, S4 Text §S4.4): mechanical ablation removes every cell '
+                         'intersecting a circle and replaces it with tear (reflecting reflex tearing after wounding, '
+                         'Wilson et al. 1999); chemical exposure spreads a toxicant by reaction–diffusion and kills cells '
+                         'above a threshold. S11 Table lists True; the published injury figures (Fig 9: '
+                         'slight/mild/moderate at 750/1500/2500 a.u.) are chemical runs, which is why the schema defaults '
+                         'to chemical (False).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },  # Table S8.4 is True, param_defaults is False. Assuming Chemical=False is default intent. NEEDS VERIFICATION.
                     '_ontology_term': 'cbo:SystemQualities',
                     '_model_context': 'Selects injury mode.',
@@ -1699,12 +2306,12 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'initial_condition',
+                    '_dimension': 'categorical',
+                    '_fitting_method': 'literature_based',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [3, 2, 6, 66, 70],
                 },
                 'InjuryTime': {
                     '_default': 3.0,  # 3 days pre-injury relaxation before applying the insult
@@ -1719,15 +2326,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0.5, 30),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+                        'physiological': {
+                            'basis': 'calibration',
+                            'refs': [90, 95, 96, 97, 108],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 14},
+                            'note': '0.5–30 days. Upper bound is the published 30-day pre-injury period. Injuring before the tissue '
+                             'has stratified (<≈7 days, §3.1) confounds the recovery readout with development; 0.5 day is the '
+                             'floor at which the lattice has at least been populated. A calibration window, not a biological '
+                             'range.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
-                        'value': 3.0,
-                        'locator': None,
-                        'notes': None,
+                        'value': 30.0,
+                        'locator': {'table': 'S10 Table', 'equation': None, 'page': 14},
+                        'notes': 'S10 Table: t_injury = 7200 MCS = 30 days at 240 MCS/day. The tissue is grown from stem cells '
+                         'alone and reaches a stratified homeostatic state by day 15 (§3.1, Fig 6), so the paper injures '
+                         'at day 30 after a full turnover cycle of stable homeostasis (the dashed "stability" line in '
+                         'Figs 7 and 10). The GUI default of 3 days is a short pre-injury relaxation for quick runs and '
+                         'is NOT the published protocol; the schema presets on SimTime ("3 pre + 21 post", "3 pre + 180 '
+                         'post") assume this 3-day value.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:TemporalInstant',
                     '_model_context': 'Specifies t_injury (used in Eq. 29, 32, 33 triggers). A 3-day relaxation period is recommended to let the tissue reach homeostasis before perturbation.',
@@ -1736,12 +2358,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; the injury (ablation or SLS seeding) is applied at this MCS. Stored in `Parameters.py` (converted from days).',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
+                    '_parameter_type': 'initial_condition',
                     '_dimension': None,
-                    '_fitting_method': None,
+                    '_fitting_method': 'calibrated',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [90, 95, 96, 97, 108],
                 },
 
                 # --- Ablation Injury Parameters ---
@@ -1757,16 +2379,35 @@ class VCorneaProcess(Process):
                     '_dimension': 'length',
                     '_physiological_range': (0, 200),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': None, 'page': 8},
+                            'note': 'The x-axis of the lattice spans 0–200 voxels (§2.2); a centre outside it addresses no cells and '
+                             'the ablation silently does nothing.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 8},
+                            'note': 'Same as the lattice extent (0–200 voxels). Within it, biologically meaningful placements keep '
+                             'the circle out of the limbal niche (x ≳ 40 + radius) so the stem pool survives, as in every '
+                             'published scenario.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 150,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-A', 'page': None},
+                        'notes': 'Ablation centre x = 150 voxels (300 µm). S10 Table lists no literature source ("-"); the site '
+                         'was chosen so the lesion sits in the peripheral cornea away from the limbal niche (x = 0–40 '
+                         'voxels) and the lateral wall, keeping the stem pool intact as required for the healing '
+                         'scenarios of §3.4. Lattice is 200 × 90 voxels (400 × 180 µm, §2.2). Stored in voxels; the GUI '
+                         'displays µm.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Location',
                     '_model_context': 'Sets x_center_abla (Eq. 29).',
@@ -1777,11 +2418,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; the x-coordinate of the ablation center used at InjuryTime. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'estimated',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [87],
+                    '_mathematical_range': (0, 200),
                 },
                 'InjuryY_Center': {
                     '_default': 60,
@@ -1795,16 +2437,36 @@ class VCorneaProcess(Process):
                     '_dimension': 'length',
                     '_physiological_range': (0, 90),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': None, 'page': 8},
+                            'note': 'The y-axis of the lattice spans 0–90 voxels (§2.2); a centre outside it addresses no cells and '
+                             'the ablation silently does nothing.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 8},
+                            'note': 'Same as the lattice extent (0–90 voxels). Within it, biologically meaningful placements keep '
+                             'the circle out of the limbal niche and centred on the epithelium (y ≈ 50–80) rather than deep '
+                             'in the stroma.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 60,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-A', 'page': None},
+                        'notes': 'Ablation centre y = 60 voxels (120 µm). S10 Table lists no literature source ("-"); the site '
+                         'was chosen so the lesion sits in the peripheral cornea away from the limbal niche (x = 0–40 '
+                         'voxels) and the lateral wall, keeping the stem pool intact as required for the healing '
+                         'scenarios of §3.4. Lattice is 200 × 90 voxels (400 × 180 µm, §2.2). Stored in voxels; the GUI '
+                         'displays µm. y = 60 places the circle so that, with radius 25, it spans the full epithelium (≈y '
+                         '35–85) and reaches into the EpBM/stroma — the "moderate" ablation geometry.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Location',
                     '_model_context': 'Sets y_center_abla (Eq. 29).',
@@ -1815,11 +2477,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; the y-coordinate of the ablation center used at InjuryTime. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'estimated',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [87],
+                    '_mathematical_range': (0, 90),
                 },
                 'InjuryRadius': {
                     '_default': 25,
@@ -1833,16 +2496,37 @@ class VCorneaProcess(Process):
                     '_dimension': 'length',
                     '_physiological_range': (1, 90),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': None, 'page': 8},
+                            'note': '1–90 voxels: at least one voxel, at most the lattice height. A radius of 90 removes the whole '
+                             'column including the stem niche, after which healing is impossible.',
+                        },
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': [3, 2, 6, 87],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 19},
+                            'note': 'Within 1–90 voxels (2–180 µm), the depth classes map as: ≤ ~10 voxels superficial-only '
+                             '(slight), ~10–25 full epithelium with intact EpBM (mild), ≥ 25 reaching the EpBM/stroma '
+                             '(moderate) — Scott et al. 2010 classification as applied in §3.4. The bounds are the lattice, '
+                             'the interpretation is the literature.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'basic',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 25,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-A', 'page': None},
+                        'notes': 'S10 Table lists no literature source ("-"). 25 voxels = 50 µm radius: equal to the epithelial '
+                         'thickness (≈50 µm, §2.2), so a circle centred in the epithelium removes every layer and the '
+                         'underlying EpBM — the moderate, basement-membrane-disrupting class of Scott et al. 2010. '
+                         'Smaller radii that stay within the epithelium give the slight/mild classes. Remember the 2D '
+                         'slice: a radius here is a half-width of the wound along one meridian, not a plan-view wound '
+                         'radius (§2.2, p. 9).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:ExtentGeometrical',
                     '_model_context': 'Sets r_abla (Eq. 29).',
@@ -1853,11 +2537,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; at InjuryTime, cells within this radius of (InjuryX_Center, InjuryY_Center) are converted to tear (ablation). From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'literature_based',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [3, 2, 6, 87, 70],
+                    '_mathematical_range': (1, 90),
                 },
 
                 # --- Chemical Injury Parameters ---
@@ -1875,7 +2560,13 @@ class VCorneaProcess(Process):
                         'source': 'Vanin et al., 2025',
                         'value': False,
                         'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
-                        'notes': 'Paper supp default is False (baseline homeostasis runs); schema default True since the GUI surface assumes injury workflows.',
+                        'notes': 'S11 Table default False ("Enable or disable a chemical-based injury using SLS"). The published '
+                         'chemical-injury runs (Fig 9, 750/1500/2500 a.u.) set it True. SLS (sodium lauryl sulphate) '
+                         'names the surfactant class the proof-of-concept targets; the field is a generic toxicant with '
+                         'no chemical-specific mode of action (§4.3). Schema default True because the GUI surface assumes '
+                         'injury workflows.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_model_context': 'Controls activation of the SLS injury field (ReactionDiffusion_Chemical). When False, the steppable skips the chemical-injury branch (vCornea_v2Steppables.py:742).',
                     '_dependencies': {'IsInjury': None, 'InjuryType': None},
@@ -1890,12 +2581,12 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'initial_condition',
+                    '_dimension': 'boolean',
+                    '_fitting_method': 'literature_based',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [3, 2, 6],
                 },
                 'SLS_X_Center': {
                     '_default': 100,
@@ -1909,16 +2600,33 @@ class VCorneaProcess(Process):
                     '_dimension': 'length',
                     '_physiological_range': (0, 200),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': None, 'page': 8},
+                            'note': 'The x-axis of the lattice spans 0–200 voxels (§2.2); a source outside it deposits nothing.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 8},
+                            'note': 'Same as the lattice extent (0–200 voxels). Keep the droplet clear of the limbus (x ≳ 40) unless '
+                             'stem-cell loss is the question.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 100,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'Chemical source centre x = 100 voxels (200 µm). S10 Table lists no literature source ("-"); the '
+                         'site was chosen so the lesion sits in the peripheral cornea away from the limbal niche (x = '
+                         '0–40 voxels) and the lateral wall, keeping the stem pool intact as required for the healing '
+                         'scenarios of §3.4. Lattice is 200 × 90 voxels (400 × 180 µm, §2.2). Stored in voxels; the GUI '
+                         'displays µm. x = 100 is the middle of the lattice, 60 voxels (120 µm) from the limbal niche.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Location',
                     '_model_context': 'Sets x_center_chem (Eq. 32/33).',
@@ -1929,11 +2637,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; x-coordinate of the SLS chemical source seeded into the SLS field. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'estimated',
                     '_related_parameters': [],
                     '_affects_output': [],
                     '_literature': [],
+                    '_mathematical_range': (0, 200),
                 },
                 'SLS_Y_Center': {
                     '_default': 75,
@@ -1947,16 +2656,35 @@ class VCorneaProcess(Process):
                     '_dimension': 'length',
                     '_physiological_range': (0, 90),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units (voxel); displays in µm'},
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': None, 'page': 8},
+                            'note': 'The y-axis of the lattice spans 0–90 voxels (§2.2); a source outside it deposits nothing.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 8},
+                            'note': 'Same as the lattice extent (0–90 voxels). A droplet below the superficial layer (y ≲ 70) '
+                             'bypasses the barrier and no longer represents surface exposure.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'intermediate',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 75,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'Chemical source centre y = 75 voxels (150 µm). S10 Table lists no literature source ("-"); the '
+                         'site was chosen so the lesion sits in the peripheral cornea away from the limbal niche (x = '
+                         '0–40 voxels) and the lateral wall, keeping the stem pool intact as required for the healing '
+                         'scenarios of §3.4. Lattice is 200 × 90 voxels (400 × 180 µm, §2.2). Stored in voxels; the GUI '
+                         'displays µm. y = 75 puts the droplet in the tear film just above the superficial layer '
+                         '(epithelium top ≈ y 70), so the toxicant enters from the surface as it would in an accidental '
+                         'splash.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Location',
                     '_model_context': 'Sets y_center_chem (Eq. 32/33).',
@@ -1967,11 +2695,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the injury steppable; y-coordinate of the SLS chemical source. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'geometric',
+                    '_fitting_method': 'estimated',
                     '_related_parameters': [],
                     '_affects_output': [],
                     '_literature': [],
+                    '_mathematical_range': (0, 90),
                 },
                 'SLS_Concentration': {
                     '_default': 750.0,
@@ -1987,15 +2716,32 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'normalized/arbitrary concentration; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [3, 2, 6],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 19},
+                            'note': '100–5000 a.u. brackets the three published presets (750/1500/2500). Below ≈100 no cell exceeds '
+                             'the death threshold (2.0) once the droplet has diffused; above 5000 the lesion extends past the '
+                             'stroma boundary and the "moderate" outcome saturates. The presets, not the bounds, carry the '
+                             'literature meaning.',
+                        },
                     },
                     '_presets': {'slight': 750.0, 'mild': 1500.0, 'moderate': 2500.0},
                     '_expert_level': 'basic',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 750.0,
-                        'locator': {'table': 'S10 Table', 'equation': None, 'page': None},
-                        'notes': 'Scott et al. 2010 depth-of-injury classification',
+                        'locator': {'table': 'S10 Table', 'equation': 'S4 Text §S4.4-B', 'page': 19},
+                        'notes': 'S10 Table cites Scott et al. 2010: "chosen based on the descriptions of different '
+                         'classifications following the depth of injury model". Three operating points: 750 a.u. = slight '
+                         '(superficial layer only), 1500 = mild (full epithelium, EpBM intact), 2500 = moderate (reaches '
+                         'EpBM/stroma) — Fig 9. The numbers are arbitrary field units on the scale where SLS_Threshold = '
+                         '2.0 kills a cell; they were tuned so each preset produces the intended injury depth, then the '
+                         'healing times (3–5 d for slight/mild; failure to stabilise with RCE-like erosions for moderate) '
+                         'were compared with clinical data (Table 2, S12 Table). Not a molar concentration and not '
+                         'chemical-specific (§4.3).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:ChemicalDensity',
                     '_model_context': 'Sets c0_chem (Eq. 32/33).',
@@ -2004,11 +2750,11 @@ class VCorneaProcess(Process):
                     '_conditional_display': lambda params: params.get('IsInjury', False) and not params.get('InjuryType', False), # False = Chemical
                     '_conceptual_hint': 'Initial strength of the chemical insult, in arbitrary units mapped to injury DEPTH: 750 = slight (superficial only), 1500 = mild (full epithelium, BM intact), 2500 = moderate (destroys the BM → RCE-like instability). A depth-of-injury proxy, not a molar concentration.',
                     '_implementation_pattern': 'Initial value seeded into the SLS field at injury time by the injury steppable (Gaussian pulse or uniform coating). From `Parameters.py`.',
-                    '_literature': [3],  # paper ref numbers -> references.py
+                    '_literature': [3, 2, 6, 7, 87, 98, 109, 110, 111, 72, 73, 100, 101, 112],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'initial_condition',
+                    '_fitting_method': 'calibrated',
                     '_related_parameters': [],
                     '_affects_output': [],
                 },
@@ -2026,8 +2772,13 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S11 Table default True. S4 Text §S4.4-B defines two initial conditions: a Gaussian pulse '
+                         '("droplet or localized exposure") centred at (SLS_X_Center, SLS_Y_Center) and a uniform '
+                         'distribution ("coating or widespread exposure") across the lattice width at a given height. All '
+                         'published injury figures use the Gaussian droplet.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },  # Value from Table S8.4
                     '_ontology_term': 'cbo:ChemicalPattern',
                     '_model_context': 'Selects initial condition Eq. 32 (True) or Eq. 33 (False) for ReactionDiffusion_Chemical.',
@@ -2043,12 +2794,12 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'initial_condition',
+                    '_dimension': 'categorical',
+                    '_fitting_method': 'estimated',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [3, 2, 6],
                 },
                 # ... Diffusion Coefficients SLS_*DiffCoef ...
                  'SLS_STEMDiffCoef': {
@@ -2063,17 +2814,32 @@ class VCorneaProcess(Process):
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                      '_range_evidence': {
-                         'mathematical': None,
-                         'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
-                         'recommended': None,
-                     },
+                        'mathematical': None,
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
+                        'recommended': None,
+                    },
                     '_expert_level': 'advanced',
                      '_reference_paper': {
-                         'source': 'Vanin et al., 2025',
-                         'value': 5.0,
-                         'locator': None,
-                         'notes': None,
-                     },
+                        'source': 'Vanin et al., 2025',
+                        'value': 5.0,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in stem cells. All seven '
+                         "compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant spreads "
+                         'isotropically and injury depth is set by dose (SLS_Concentration) and the death threshold alone '
+                         '— a deliberate simplification: "without incorporating chemical-specific modes of action or '
+                         'cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in epithelium were '
+                         'not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
+                    },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in STEM cells.',
                     '_conceptual_hint': "How fast the injury chemical spreads within stem cells (5 voxel²/MCS, the field's global rate). All compartments share one value, so SLS diffuses uniformly; injury depth/severity is governed by concentration and exposure, not compartment-specific diffusion. A proxy field, not a specific molecule.",
@@ -2084,8 +2850,8 @@ class VCorneaProcess(Process):
                     '_related_parameters': ['SLS_BASALDiffCoef', 'SLS_WINGDiffCoef', 'SLS_SUPERDiffCoef', 'SLS_MEMBDiffCoef', 'SLS_LIMBDiffCoef', 'SLS_TEARDiffCoef'],
                      # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                      '_scope': 'model',
-                     '_parameter_type': None,
-                     '_fitting_method': None,
+                     '_parameter_type': 'kinetic',
+                     '_fitting_method': 'estimated',
                      '_affects_output': [],
                      '_literature': [],
                 },
@@ -2102,15 +2868,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in basal cells. All seven '
+                         "compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant spreads "
+                         'isotropically and injury depth is set by dose (SLS_Concentration) and the death threshold alone '
+                         '— a deliberate simplification: "without incorporating chemical-specific modes of action or '
+                         'cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in epithelium were '
+                         'not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in BASAL cells.',
@@ -2122,8 +2903,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_BASAL').cdata = self.SLS_BASALDiffCoef`, overriding the SLS field's XML diffusion constant for the BASAL region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2140,15 +2921,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in wing cells. All seven '
+                         "compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant spreads "
+                         'isotropically and injury depth is set by dose (SLS_Concentration) and the death threshold alone '
+                         '— a deliberate simplification: "without incorporating chemical-specific modes of action or '
+                         'cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in epithelium were '
+                         'not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in WING cells.',
@@ -2160,8 +2956,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_WING').cdata = self.SLS_WINGDiffCoef`, overriding the SLS field's XML diffusion constant for the WING region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2178,15 +2974,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in superficial cells. All '
+                         "seven compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant spreads "
+                         'isotropically and injury depth is set by dose (SLS_Concentration) and the death threshold alone '
+                         '— a deliberate simplification: "without incorporating chemical-specific modes of action or '
+                         'cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in epithelium were '
+                         'not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in SUPER cells.',
@@ -2198,8 +3009,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_SUPER').cdata = self.SLS_SUPERDiffCoef`, overriding the SLS field's XML diffusion constant for the SUPER region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2216,15 +3027,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in the peripheral '
+                         "Bowman's/EpBM. All seven compartments share the field's global value of 5.0 voxel²/MCS, so the "
+                         'toxicant spreads isotropically and injury depth is set by dose (SLS_Concentration) and the '
+                         'death threshold alone — a deliberate simplification: "without incorporating chemical-specific '
+                         'modes of action or cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in '
+                         'epithelium were not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in MEMB cells.',
@@ -2236,8 +3062,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_MEMB').cdata = self.SLS_MEMBDiffCoef`, overriding the SLS field's XML diffusion constant for the MEMB region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2254,15 +3080,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in the limbal Bowman\'s/EpBM. '
+                         "All seven compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant "
+                         'spreads isotropically and injury depth is set by dose (SLS_Concentration) and the death '
+                         'threshold alone — a deliberate simplification: "without incorporating chemical-specific modes '
+                         'of action or cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in '
+                         'epithelium were not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in LIMB cells.',
@@ -2274,8 +3115,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_LIMB').cdata = self.SLS_LIMBDiffCoef`, overriding the SLS field's XML diffusion constant for the LIMB region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2292,15 +3133,30 @@ class VCorneaProcess(Process):
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': 'SIM units voxel^2/MCS: [0, SLS field global diffusion = 5.0]; displays as [0, 3.33] µm²/min'},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': 'S9 Table', 'equation': None, 'page': None},
+                            'note': "Upper bound 5.0 voxel²/MCS is the SLS field's global diffusion constant (vCornea_v2.xml): a "
+                             'compartment cannot transport faster than its field. 0 makes the compartment impermeable. No '
+                             'literature value exists for this proxy toxicant; the bound is a solver constraint, not a '
+                             'measurement.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'advanced',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 5.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S9 Table', 'equation': 'S4 Text §S4.4-B', 'page': None},
+                        'notes': 'S9 Table lists no literature source ("-") for toxicant diffusion in the tear film. All seven '
+                         "compartments share the field's global value of 5.0 voxel²/MCS, so the toxicant spreads "
+                         'isotropically and injury depth is set by dose (SLS_Concentration) and the death threshold alone '
+                         '— a deliberate simplification: "without incorporating chemical-specific modes of action or '
+                         'cellular selectivity" (§4.3). Diffusion coefficients for real surfactants in epithelium were '
+                         'not available to the authors.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion coefficient D_chem (Eq. 31) in TEAR cells.',
@@ -2312,8 +3168,8 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': "`ConstraintInitializerSteppable.start()` runs `get_xml_element('SLS_Coef_TEAR').cdata = self.SLS_TEARDiffCoef`, overriding the SLS field's XML diffusion constant for the TEAR region. From `Parameters.py`.",
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
                     '_literature': [],
                 },
@@ -2330,8 +3186,13 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': 'S4 Text §S4.5', 'page': None},
+                        'notes': 'S11 Table default True: "cells will die when chemical level surpasses a certain threshold". S4 '
+                         'Text §S4.5 defines the doomed set as cells whose mean intracellular concentration exceeds the '
+                         'threshold; they then undergo rapid volume collapse (target volume 0, λv raised to 1000, §S4.3). '
+                         'This is the only death rule the published runs used.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Necrosis',
                     '_model_context': 'Enables the Death_Chemical behavior based on threshold (Eq. 36).',
@@ -2348,11 +3209,11 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_dimension': 'boolean',
+                    '_fitting_method': 'estimated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [2, 6],
                 },
                 'SLS_Threshold': {
                     '_default': 2.0, # Assuming 2.0 based on previous schema and CBO.owl value
@@ -2368,15 +3229,28 @@ class VCorneaProcess(Process):
                     '_range_evidence': {
                         'mathematical': None,
                         'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'normalized/arbitrary concentration; exploratory, not physiological'},
+                        'recommended': {
+                            'basis': 'calibration',
+                            'refs': [3],
+                            'locator': {'table': 'S11 Table', 'equation': 'S4 Text §S4.5', 'page': None},
+                            'note': '0.5–10 a.u.: a factor of 4–5 around the published 2.0. Because injury depth depends on the '
+                             'ratio SLS_Concentration / SLS_Threshold, halving the threshold is equivalent to doubling every '
+                             'preset; re-derive the slight/mild/moderate presets if you move it.',
+                        },
                     },
                     '_expert_level': 'intermediate',
                      # Table S8.4 has True, param_defaults has 2.0. Using 2.0. NEEDS VERIFICATION.
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': 2.0,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': 'S4 Text §S4.5', 'page': None},
+                        'notes': 'Defined in Parameters.py line 58 (SLS_Threshold = 2.0; S11 Table prints "True" in the value '
+                         'column, a typesetting error). No literature source: the threshold and the concentration presets '
+                         'were tuned together so that 750/1500/2500 a.u. reproduce the slight/mild/moderate depths of '
+                         'Scott et al. 2010 — only their ratio is meaningful. Mechanistically it is a stand-in for the '
+                         'surfactant dose that lyses a corneal epithelial cell (Maurer et al. 1997, 2002).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Necrosis',
                     '_model_context': 'Sets threshold ω_chem (Eq. 36) for Death_Chemical behavior.',
@@ -2388,10 +3262,10 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Read by the chemical-death logic: a cell dies when its mean internal SLS exceeds this. From `Parameters.py`.',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'biophysical',
+                    '_fitting_method': 'calibrated',
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [2, 6, 3],
                 },
 
                 # --- Simulation Duration ---
@@ -2415,15 +3289,29 @@ class VCorneaProcess(Process):
                     '_physiological_range': (1, 200),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': '200 day ceiling allows the 183-day paper-replication run with headroom'},
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [90, 95, 96, 97, 108],
+                            'locator': {'table': 'S10 Table', 'equation': None, 'page': 14},
+                            'note': '1–200 days. A homeostatic epithelium needs ≈15 days to form (§3.1) and one 7–14 day turnover to '
+                             'stabilise, so runs under ~2 weeks only probe development; the published horizon was 210 days. '
+                             '200 is a GUI ceiling with headroom for the 183-day preset, not a biological limit — the paper '
+                             'notes the model can run 6 months (§1.3).',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'basic',
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
-                        'value': 183,
-                        'locator': None,
-                        'notes': None,
+                        'value': 210,
+                        'locator': {'table': 'S10 Table', 'equation': None, 'page': 14},
+                        'notes': 'S10 Table: t_final = 50,400 MCS = 210 days at 240 MCS/day (the "six months" of §3.2, Figs 7, 8, '
+                         '10), with injury at day 30. The GUI default of 30 days covers a 3-day relaxation plus the '
+                         '21-day categorisation window; the "Paper Replication" preset (183 days = 3 pre + 180 post) '
+                         "reproduces the six-month post-injury horizon but with the GUI's 3-day pre-injury period, not "
+                         "the paper's 30.",
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:TemporalInterval',
                     '_model_context': 'Sets the total simulation time (t_final). Internally converted to MCS for the CC3D engine.',
@@ -2437,12 +3325,12 @@ class VCorneaProcess(Process):
                     '_implementation_pattern': 'Total number of MCS the simulation runs. Stored in `Parameters.py` (converted from days at the GUI->Parameters.py boundary).',
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
+                    '_parameter_type': 'control',
                     '_dimension': None,
-                    '_fitting_method': None,
+                    '_fitting_method': 'calibrated',
                     '_related_parameters': [],
                     '_affects_output': [],
-                    '_literature': [],
+                    '_literature': [90, 95, 96, 97, 108, 7],
                     '_dependencies': {},
                 },
 
@@ -2462,13 +3350,15 @@ class VCorneaProcess(Process):
                     '_recommended_range': (-1, 2147483646),
 
                     '_range_evidence': {
-
                         'mathematical': None,
-
                         'physiological': None,
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'recommended': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'CC3DML <Potts><RandomSeed>', 'page': None},
+                            'note': '-1 asks the wrapper to draw a seed; otherwise any non-negative 32-bit integer accepted by the '
+                             'CompuCell3D Mersenne-Twister seed element. Execution control, no biology.',
+                        },
                     },
                     '_expert_level': 'intermediate',
 
@@ -2526,8 +3416,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Master switch for the growth steppable (Eq. 1–3). S11 Table: "Enable or disable cell growth '
+                         'processes for debugging". True in every published run.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellGrowth',
                     '_model_context': 'Master switch for the Growth behavior.',
@@ -2541,8 +3434,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2562,8 +3455,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Master switch for the division rules (S1 Text §S1.6). S11 Table: "for debugging". True in every '
+                         'published run.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:Mitosis',
                     '_model_context': 'Master switch for Mitosis_Asymmetric_STEM and Mitosis_Symmetric_BASAL behaviors.',
@@ -2577,8 +3473,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2598,8 +3494,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Master switch for sloughing (Eq. 8), volume-collapse death and chemical death (S4 Text). S11 '
+                         'Table: "for debugging". True in every published run.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellDeath',
                     '_model_context': 'Master switch for Death_Sloughing, Death_Volume_Collapse, Death_Chemical, and Death_Execution_Shrink behaviors.',
@@ -2613,8 +3512,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2634,8 +3533,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Master switch for the three contact-triggered transitions (Eqs. 4–6, S2 Text). S11 Table: "for '
+                         'debugging". True in every published run.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:CellDifferentiation',
                     '_model_context': 'Master switch for Differentiation_STEM_to_BASAL, Differentiation_BASAL_to_WING, and Differentiation_WING_to_SUPER behaviors.',
@@ -2649,8 +3551,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2662,34 +3564,49 @@ class VCorneaProcess(Process):
                      '_updater': 'set',
                      '_emit': True,
                      '_display_name': 'Cell Shrink Rate Multiplier',
-                     '_description': 'Multiplier for how quickly cells shrink when dying (higher values = faster removal).',
+                     '_description': 'Multiplier intended to scale cell-death timing. In the paper_version source it is read '
+                      '(vCornea_v2Steppables.py line 683) but never applied: the sloughing probability is hard-coded '
+                      'as (1/3)/DAYtoMCS at line 772. Changing it has no effect on paper_version runs.',
                      '_category': 'Simulation Control',
                      '_subcategory': 'Biological Processes',
                      '_unit': 'dimensionless',
                      '_dimension': 'dimensionless',
                      '_recommended_range': (0.1, 10.0),
                     '_range_evidence': {
-                        'mathematical': None,
-                        'physiological': None,
-                        'recommended': {'basis': 'exploratory', 'refs': [], 'locator': None, 'note': 'exploratory range (dimensionless)'},
-                    },
+                         'mathematical': None,
+                         'physiological': None,
+                         'recommended': {
+                             'basis': 'exploratory',
+                             'refs': [],
+                             'locator': {'table': None, 'equation': 'vCornea_v2Steppables.py 683, 772', 'page': None},
+                             'note': '0.1–10 is the band a working multiplier on the 1/3 sloughing factor would sensibly span '
+                              '(3.5-day to 4-hour layer transit). Because the paper_version steppable never reads the stored '
+                              'value, no value in or out of this band changes the simulation.',
+                         },
+                     },
                      '_expert_level': 'advanced',
                     '_reference_paper': {
-                        'source': 'Vanin et al., 2025',
-                        'value': 1.0,
-                        'locator': {'table': 'S4 Text Cell Death and Injury Implementation', 'equation': None, 'page': None},
-                        'notes': 'Multiplicative scalar on the natural sloughing rate (Eq. 8). Source steppable line 207 imports from Parameters.py; default 1.0 keeps paper baseline rate of (1/3)/DAYtoMCS per MCS.',
-                    },
+                         'source': 'Vanin et al., 2025 — paper_version source (inert parameter)',
+                         'value': 1.0,
+                         'locator': {'table': 'S4 Text §S4.1', 'equation': 'Eq. 8', 'page': None},
+                         'notes': 'Parameters.py line 37 (DeathTimeScalar = 1). Not in any supplementary table. The published '
+                          'sloughing rule is P = U(0,1) < 1/(3·DaytoMCS) with DaytoMCS = 240 (Eq. 8), whose 1/3 factor "is '
+                          'calibrated so that the average layer transit time is about 1.75 days out of a total 7–14 day '
+                          'turnover cycle" (S4 Text §S4.1; turnover 7–14 days per refs [90, 95–97, 108] of the paper). The '
+                          'steppable stores this scalar (line 683) but neither the sloughing test (line 772) nor the '
+                          'shrinkage step uses it, so in paper_version the parameter is inert and the 1/3 factor cannot be '
+                          'retuned from the GUI.',
+                     },
                      '_ontology_term': 'cbo:CellDeath',
                      '_model_context': 'Scales the speed (effective λ_v) of the Death_Execution_Shrink process (Eq. 28, 37).',
                     '_dependencies': {'DeathControl': None},
                     '_conceptual_hint': 'Multiplies the natural sloughing probability (Eq. 8). 1.0 = paper baseline (≈1.75-day layer transit, 7–14-day turnover); >1 sheds superficial cells faster (thinner epithelium), <1 slower. Retunes turnover without touching the calibrated 1/3 factor.',
                     '_implementation_pattern': 'Read by the death/sloughing steppable; multiplies the per-MCS superficial sloughing probability (Eq. 8). From `Parameters.py`.',
-                    '_literature': [90, 108],  # paper ref numbers -> references.py
+                    '_literature': [90, 95, 96, 97, 108, 52],  # paper ref numbers -> references.py
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_fitting_method': None,
+                    '_parameter_type': 'kinetic',
+                    '_fitting_method': 'calibrated',
                     '_related_parameters': [],
                     '_affects_output': [],
                 },
@@ -2712,8 +3629,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Collect the number of cells over time (S11 Table, True). Source of Fig 7 and Fig 10 cell-count '
+                         'trajectories; sampled every HOURtoMCS = 10 MCS (steppable line 1108).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SystemQualities',
                     '_model_context': 'Enables logging cell counts.',
@@ -2727,8 +3647,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2749,8 +3669,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': False,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Show a real-time plot of pressure (S11 Table, False). Diagnostic for the effective pressure of '
+                         'S1 Text §S1.3; schema default True for richer GUI output.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:PressureMechanical',
                     '_model_context': 'Enables logging of cell pressure (Eq. 6).',
@@ -2764,8 +3687,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2785,8 +3708,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Track the EGF concentration experienced by each cell (S11 Table, True). The cell-level average '
+                         'that enters Eq. 1.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MolecularField',
                     '_model_context': 'Enables logging AvgEGFConcentration state variable (Eq. 2).',
@@ -2800,8 +3726,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2822,7 +3748,10 @@ class VCorneaProcess(Process):
                         'source': 'Vanin et al., 2025',
                         'value': False,
                         'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
-                        'notes': 'Paper supp default is False; schema default True for richer GUI debugging output.',
+                        'notes': 'Track the chemical concentration experienced by each cell (S11 Table, False). The cell-level '
+                         'average tested against SLS_Threshold (S4 Text §S4.5). Schema default True.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MolecularField',
                     '_model_context': 'Enables logging AvgChemicalConcentration state variable (Eq. 35).',
@@ -2839,8 +3768,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2851,7 +3780,8 @@ class VCorneaProcess(Process):
                     '_updater': 'set',
                     '_emit': True,
                     '_display_name': 'Log Movement Bias Field',
-                    '_description': 'Record the concentration of the Movement Bias field over time.',
+                    '_description': 'Show a real-time window of the Movement-Bias chemoattractant concentration at the edge of '
+                     "Bowman's membrane (CC3D player visualisation; no effect on dynamics).",
                     '_category': 'Data Collection',
                     '_subcategory': 'Movement Tracking',
                     '_unit': 'boolean',
@@ -2859,8 +3789,12 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': False,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': None, 'equation': 'Parameters.py line 87', 'page': None},
+                        'notes': 'Parameters.py line 87 (CenterBias = False); not in S11 Table. Steppable line 231: "Window in '
+                         'player tracking real-time Mbias concentration at edge of Bowman\'s membrane" — a visualisation '
+                         'of the Movement-Bias field, nothing to do with placement.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MolecularField',
                     '_model_context': 'Enables logging of the BASALMVBIAS field.',
@@ -2874,8 +3808,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2895,8 +3829,11 @@ class VCorneaProcess(Process):
                     '_reference_paper': {
                         'source': 'Vanin et al., 2025',
                         'value': True,
-                        'locator': None,
-                        'notes': None,
+                        'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
+                        'notes': 'Collect and plot tissue thickness over time (S11 Table, True). Source of the Fig 8 '
+                         'thickness/top-position analysis; sampled every 10 MCS (steppable line 1123).',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SystemQualities',
                     '_model_context': 'Enables logging thickness measurements.',
@@ -2910,8 +3847,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2932,7 +3869,9 @@ class VCorneaProcess(Process):
                         'source': 'Vanin et al., 2025',
                         'value': False,
                         'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
-                        'notes': 'Paper supp default is False; schema default True for richer GUI output during injury runs.',
+                        'notes': 'Track chemical distribution over time (S11 Table, False). Schema default True for injury runs.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:MolecularField',
                     '_model_context': 'Enables logging of the Chemical_Toxicant field.',
@@ -2949,8 +3888,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -2983,7 +3922,7 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_parameter_type': 'control',
-                    '_dimension': None,
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -3017,7 +3956,7 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_parameter_type': 'control',
-                    '_dimension': None,
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -3052,7 +3991,7 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_parameter_type': 'control',
-                    '_dimension': None,
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -3073,7 +4012,10 @@ class VCorneaProcess(Process):
                         'source': 'Vanin et al., 2025',
                         'value': True,
                         'locator': {'table': 'S11 Table', 'equation': None, 'page': None},
-                        'notes': 'Paper supp default is True; schema default kept False for safety and data-storage cost.',
+                        'notes': 'Take snapshots of the simulation state at regular intervals (S11 Table, True); every 10 MCS '
+                         'when on (steppable line 1167). Schema default False to limit output size.',
+                        'doi': '10.1371/journal.pcbi.1013410',
+                        'year': 2025,
                     },
                     '_ontology_term': 'cbo:SystemQualities',
                     '_model_context': 'Enables saving image snapshots.',
@@ -3087,8 +4029,8 @@ class VCorneaProcess(Process):
                     },
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
                     '_scope': 'model',
-                    '_parameter_type': None,
-                    '_dimension': None,
+                    '_parameter_type': 'control',
+                    '_dimension': 'boolean',
                     '_fitting_method': None,
                     '_related_parameters': [],
                     '_affects_output': [],
@@ -3109,7 +4051,14 @@ class VCorneaProcess(Process):
                     '_physiological_range': (1, 48),
                     '_range_evidence': {
                         'mathematical': None,
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
+                        'physiological': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'vCornea_v2Steppables.py 1167', 'page': None},
+                            'note': '1–48 hours. The paper_version steppable snapshots every HOURtoMCS = 10 MCS (1 hour) when '
+                             'SnapShot is on; the GUI exposes the interval. Below 1 hour the I/O dominates run time; above 2 '
+                             'days healing dynamics (3–5 days) are under-sampled. Execution control.',
+                        },
                         'recommended': None,
                     },
                     '_expert_level': 'basic',
