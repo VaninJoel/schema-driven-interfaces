@@ -178,16 +178,45 @@ Everything else below is still content work.
 
 ## What becomes required that is missing today
 
-| Requirement | V-Cornea gap | Angio gap |
-|---|---|---|
-| `_mathematical_range` | all 84 | 4 of 13 |
-| `_physiological_range` | 57 of 84 (many legitimately `None`: arbitrary CPM units) | 4 of 13 |
-| `_dimension` | 29 of 84 | all 13 |
-| `_reference_paper.locator` | 67 bare self-cites | 0 |
-| `_literature` | 64 of 84 | all 13 |
-| `_dependencies` with explanations | 84 (23 have an unexplained `_depends_on`) | 7 of 13 |
-| `_range_evidence` | all | all |
-| `_fitting_method`, `_parameter_type`, `_scope` | all / all / 74 | 6 / 3 / all |
+| Requirement | V-Cornea gap (2026-10-06) | V-Cornea gap (2026-10-12) | Angio gap |
+|---|---|---|---|
+| `_mathematical_range` | all 79 | 74 (only lattice-bound coordinates/radius have a hard bound; CPM stiffnesses and rates have none) | 4 of 13 |
+| `_physiological_range` | 52 of 79 (many legitimately absent: arbitrary CPM units) | unchanged | 4 of 13 |
+| `_dimension` | 24 of 79 | 3 (the three schema-layer time values, whose storage is not sim-canonical) | all 13 |
+| `_reference_paper.locator` | 67 bare self-cites | 0 | 0 |
+| `_literature` | 59 of 79 | 9 (SLS coordinates and diffusion coefficients: the paper cites nothing for them) | all 13 |
+| `_dependencies` with explanations | 79 (23 have an unexplained `_depends_on`) | unchanged | 7 of 13 |
+| `_range_evidence` with a `basis` | 36 of 58 declared tiers | 0 | all |
+| `_fitting_method`, `_parameter_type` | all / all | 0 / 0 (controls exempt) | 6 / 3 |
+
+### V-Cornea content pass (2026-10-12)
+
+Every V-Cornea descriptor was filled from the published paper (Vanin et al.
+2025, PLOS Comput Biol 21(12):e1013410), its S1–S5 Text and S6–S12 Tables, and
+the `paper_version` CC3D source. Conventions:
+
+- `_reference_paper.locator` names the supplementary table that lists the value
+  (S8 mechanics, S9 fields, S10 injury/links, S11 controls) plus the equation
+  or S-Text section that uses it; `notes` says what the table's "Literature /
+  Ref." column gave (a citation, "Fitted (S1 Text §S1.5)", or "-") and why the
+  value is what it is.
+- `_range_evidence.basis` is `literature` only when the paper cites a
+  measurement for that bound (cell sizes [85, 49]; EGF barrier [50, 55]; injury
+  depth classes [3]); `calibration` for bounds that are the published fitting
+  window (km_EGF 1–10, km_density 10–200) or the published preset set
+  (SLS 750/1500/2500); `numerical_stability` for lattice extents and
+  field-global diffusion ceilings; `expert_judgement` where S8–S10 say "-".
+  Nothing is labelled literature that the paper did not cite.
+- Three references that appear only in the supplement were added to
+  `references.py` under author-year keys (`boisjoly1993`, `thorne2004`,
+  `alghamdi2023`); DOIs/PMIDs for these and for 16 previously bare entries were
+  resolved through PubMed.
+- Four paper-vs-schema discrepancies are recorded in `notes` rather than
+  silently fixed: `InjuryTime` (paper 30 d, GUI default 3 d), `SimTime` (paper
+  210 d, preset 183 d), `DeathTimeScalar` (read but never used in
+  `paper_version`; the 1/3 sloughing factor is hard-coded), and the S11 Table
+  misprint of `SLS_Threshold` as "True". One supplement arithmetic slip is noted
+  on `EGF_SUPERDiffCoef` (S5 Text's rat-brain conversion is 10× low).
 
 Filling these is content work for the modeler, not code work. The format makes
 the gaps enumerable, which is the point Section 2.2 argues.
