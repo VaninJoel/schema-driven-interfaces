@@ -587,7 +587,13 @@ class AngiogenesisProcess(Process):
                     # === DISPLAY & DESCRIPTION ===
                     '_display_name': 'EC-EC Adhesion Energy',
                     '_description': 'Contact energy between adjacent Endothelial Cells (EC). Lower values promote stronger adhesion and cell-cell cohesion. This is the J parameter in the Cellular Potts Model Hamiltonian.',
-                    '_long_description': 'In the Cellular Potts Model, the Hamiltonian includes a term Σ J(τ(σ),τ(σ\')) (1-δ(σ,σ\')) where J represents contact energy between cells of types τ. Lower J values favor contact (stronger adhesion), while higher values discourage contact. For EC-EC interactions, typical values range from 2 (strong adhesion) to 16 (weak adhesion).',
+                    '_long_description': "In the Cellular Potts Model the effective energy includes Σ J(τ(σ),τ(σ')) (1−δ(σ,σ')), where J "
+                     'is the contact energy per unit boundary between cells of types τ. Lower J favours contact. '
+                     'Whether cells actually adhere depends on the combination γ = J(EC,Medium) − J(EC,EC)/2: '
+                     'positive γ means cell–cell contact is cheaper than exposing two medium interfaces. With the '
+                     'defaults (J_EE = J_EM = 2) γ = 1, so endothelial cells are mildly adhesive; the published Merks '
+                     'et al. (2006, 2008) standard (J_cc = 40, J_cM = 20) has γ = 0, i.e. no net adhesion, and Merks '
+                     '2006 Fig 7 lowers J_cc to 20…1 to add adhesion.',
 
                     # === CATEGORIZATION ===
                     '_category': 'Cell Properties',
@@ -605,23 +611,59 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 100.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': 'numerical_stability', 'refs': [], 'locator': None, 'note': 'Model stable range'},
-
-                        'physiological': {'basis': 'literature', 'refs': ['merks2006'], 'locator': {'table': 'Table 1', 'equation': None, 'page': 47}, 'note': 'J values 2-16 span the reference study (Table 1) and its aggregation experiments (8-16).'},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs: fluctuation_amplitude=5.0',
+                                'page': None,
+                            },
+                            'note': 'J must be ≥ 0: a negative contact energy rewards boundary creation and cells fragment despite '
+                             'the connectivity constraint. At the upper end J ≫ T (T = 5) makes boundary moves essentially '
+                             "never accepted (Boltzmann factor e^(−ΔE/T)); 100 = 20 T is the modeler's cap, not a measured "
+                             'limit.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2006', 'merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2006, Fig 7 (J_cc = 20…1 at J_cM = 20, T = 50)',
+                                'page': 49,
+                            },
+                            'note': 'The papers give no measured J; their values live on a T = 50 scale (J_cc 1–40). Rescaled to '
+                             "this model's T = 5 that is J_EE ≈ 0.1–4. The 2–16 band is the model author's exploration range "
+                             "in the model's own units: 2 keeps cells adhesive (γ = 1), 16 is strongly repulsive (γ = −6) and "
+                             'the network fragments. Labelled expert judgement because the published ranges do not transfer '
+                             'across the 10× temperature difference.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'The preset set (strong 2 / moderate 4 / weak 8) spans the band; above 8 γ turns negative with '
+                             'J_EM = 2 and EC–EC contact is disfavoured. Not calibrated against data.',
+                        },
                     },
                     '_warning_threshold': 10.0,  # Warn if exceeds this
 
                     # === SCIENTIFIC DOCUMENTATION ===
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['model_specific'],
                         'value': 2.0,
-                        'notes': 'Default value from Table 1',
-
-                        'locator': {'table': 'Table 1', 'equation': 'H_adhesion term in Eq. 1', 'page': 47},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: ContactPlugin.param_new("EC", "EC", jee); PottsCore fluctuation_amplitude=5.0', 'page': None},
+                        'notes': 'Value chosen for this implementation; it is not a value from either Merks paper. Merks et al. '
+                                 '2008 use J(c,c) = 40 with J(c,M) = 20 at T = 50 ("standard setting"), which is adhesion-neutral '
+                                 '(γ = J_cM − J_cc/2 = 0); Merks et al. 2006 Fig 7 then sweep J_cc = 20, 15, 10, 5, 1 and report '
+                                 'no change in the vascular pattern until the strongest adhesion (J_cc = 1), where lacunae become '
+                                 'slightly larger and more regular. Here T = 5 and J_EE = J_EM = 2, so the relative adhesion γ/T '
+                                 '= 0.2 corresponds to the mildly adhesive Merks 2006 J_cc = 20 case (γ/T = 10/50). No published '
+                                 'source gives the number 2 itself.',
                     },
                     '_ontology_term': 'CBO:0000015',  # Cell-cell adhesion
                     '_model_context': 'Contact energy term in Cellular Potts Model Hamiltonian. Appears in energy calculation: ΔH = Σ J(τ,τ\')(1-δ) for cell boundary modifications.',
@@ -658,7 +700,7 @@ class AngiogenesisProcess(Process):
                     # === PARAMETER HISTORY (for metadata tracking) ===
                     '_parameter_type': 'biophysical',  # biophysical | kinetic | geometric | control
                     '_measurable': False,  # Can this be directly measured experimentally?
-                    '_fitting_method': 'literature_based',  # literature_based | fitted | estimated
+                    '_fitting_method': 'estimated',  # literature_based | fitted | estimated
 
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
 
@@ -666,7 +708,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'energy',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 'jem': {
@@ -691,22 +733,53 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 100.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': 'literature', 'refs': ['merks2006'], 'locator': {'table': 'Table 1', 'equation': None, 'page': 47}, 'note': 'J values 2-16 span the reference study (Table 1) and its aggregation experiments (8-16).'},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs: fluctuation_amplitude=5.0',
+                                'page': None,
+                            },
+                            'note': 'J ≥ 0 required (negative J rewards cell–medium boundary and cells dissolve into the medium). '
+                             "100 = 20 T is the modeler's cap, where medium-contact moves are never accepted.",
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2008', 'merks2006'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'page': None,
+                            },
+                            'note': 'Merks et al. hold J(c,M) fixed at 20 (T = 50) in every published run, i.e. the single point J/T '
+                             "= 0.4 = this model's default. The 2–16 band is the model author's exploration range: with J_EE "
+                             '= 2 it moves γ from 1 (network) to 15 (compact islands).',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Preset set (network 2 / moderate 4 / strong 8 / extreme 12). The GUI\'s own "aggregation study" '
+                             'preset uses 8. Not calibrated against data.',
+                        },
                     },
                     '_warning_threshold': 12.0,
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['model_specific'],
                         'value': 2.0,
-                        'notes': 'Default value. Higher values (8-16) tested for aggregation studies',
-
-                        'locator': {'table': None, 'equation': 'H_adhesion term in Eq. 1', 'page': 47},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: ContactPlugin.param_new("Medium", "EC", jem)', 'page': None},
+                        'notes': 'Value chosen for this implementation. Merks et al. 2008 use J(c,M) = 20 at T = 50, i.e. J/T = '
+                                 "0.4 — the same relative value as J_EM = 2 at this model's T = 5. Together with J_EE it fixes "
+                                 'the net adhesion γ = J_EM − J_EE/2 (= 1 here, 0 in the Merks standard). Raising J_EM alone '
+                                 'makes medium contact expensive and drives aggregation into islands, the phenotype Merks 2008 '
+                                 'associate with blocked VE-cadherin signalling (anti-VE-cadherin antibody, Fig 1) — though in '
+                                 'the paper that phenotype is produced by removing contact inhibition, not by changing J.',
                     },
                     '_ontology_term': 'CBO:0000016',  # Cell-matrix adhesion
                     '_model_context': 'EC-Medium contact energy in CPM Hamiltonian. Critical parameter controlling aggregation vs network formation.',
@@ -746,7 +819,7 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'biophysical',
                     '_measurable': False,
-                    '_fitting_method': 'literature_based',
+                    '_fitting_method': 'estimated',
 
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
 
@@ -754,7 +827,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'energy',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 # =====================================================================
@@ -783,22 +856,54 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0, 5000),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'literature',
+                            'refs': ['merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods: "χ(c,M) = 500 (standard; varied to 0–5,000)"',
+                                'page': None,
+                            },
+                            'note': 'Exactly the range Merks et al. 2008 swept (0–5,000). λ = 0 switches chemotaxis off; above '
+                             '≈5,000 at T = 5 the chemotaxis term dominates every copy attempt and cells stream up the '
+                             'gradient regardless of adhesion or volume.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'page': None,
+                            },
+                            'note': '0–1,000 brackets the two published standards (500 in 2008, 1,000 in 2006) and the preset set. '
+                             'Not a measured quantity: λ is a CPM coupling, calibrated by the authors against the velocity of '
+                             '5 µm/h (up to 30 µm/h) they report for endothelial cells.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets weak 200 / moderate 500 / strong 800. 100–800 is the window in which the default '
+                             'parameter set still forms a connected network at T = 5; not calibrated.',
+                        },
                     },
                     '_warning_threshold': 1200,
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['merks2008'],
                         'value': 500.0,
-                        'notes': 'Moderate chemotaxis strength',
-
-                        'locator': {'table': None, 'equation': 'λ in chemotaxis term (Eq. 3)', 'page': 48},
+                        'locator': {'table': None, 'equation': 'Methods: χ(c,M) = 500 (standard), χ(c,c) = 0 (contact inhibition); varied 0–5,000', 'page': None},
+                        'notes': 'Merks et al. 2008 standard chemotactic strength χ(c,M) = 500 at cell–ECM interfaces with χ(c,c) '
+                                 '= 0 at cell–cell interfaces; this core reproduces exactly that rule through '
+                                 'ChemotaxisTypeParameters(towards="Medium"). The number is carried over unchanged, but note the '
+                                 'temperature: Merks ran at T = 50, this model at T = 5, so the same λ is 10× stronger relative '
+                                 'to the membrane fluctuations that drive movement. Merks 2006 used χ = 1000 at T = 50 without '
+                                 'contact inhibition.',
                     },
                     '_ontology_term': 'CBO:0000072',  # Chemotaxis
                     '_model_context': 'Chemotaxis Hamiltonian term: H_chem = -λ_chem * Σ_membrane VEGF(x). Drives cell migration toward VEGF sources.',
@@ -847,7 +952,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'energy',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 'lsc': {
@@ -857,7 +962,11 @@ class AngiogenesisProcess(Process):
 
                     '_display_name': 'Chemotaxis Saturation Coefficient',
                     '_description': 'Saturation parameter for chemotaxis response. Controls whether chemotaxis is linear (0) or saturating (>0) with concentration.',
-                    '_long_description': 'Implements saturation in chemotaxis: H_chem = -λ_chem * Σ C(x)/(1 + lsc*C(x)). When lsc=0, response is linear with concentration. When lsc>0, response saturates at high concentrations, representing receptor saturation. Binary choice in original model: 0 or 0.1.',
+                    '_long_description': "Linear saturation coefficient s of the CompuCell3D chemotaxis term, ΔE = −λ [c(x')/(1 + "
+                     "s·c(x')) − c(x)/(1 + s·c(x))], which is the saturating response of Merks et al. 2008 (their Eq. "
+                     'for ΔH_chemotaxis with saturation parameter s). s = 0 is a linear response; s > 0 makes the '
+                     'response level off at high concentration, standing in for receptor saturation. Merks 2008 use s '
+                     '= 0 as standard and sweep 0–0.15.',
 
                     '_category': 'Cell Properties',
                     '_subcategory': 'Chemotaxis',
@@ -872,21 +981,44 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 1.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'ChemotaxisTypeParameters(linear_sat_cf=lsc)', 'page': None},
+                            'note': 's ≥ 0 required (a negative s makes the denominator vanish at c = −1/s). At s = 1 the response '
+                             'is already half-saturated at c = 1, the steady-state concentration inside cells for α = ε; '
+                             'above that chemotaxis is effectively flat.',
+                        },
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': ['merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'page': None,
+                            },
+                            'note': 'Merks et al. 2008 explore s from 0 to 0.15. The band 0–0.1 is that sweep clipped at the model '
+                             'default; 0.15 would be the literature-backed ceiling.',
+                        },
+                        'recommended': {
+                            'basis': 'literature',
+                            'refs': ['merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'page': None,
+                            },
+                            'note': 'Same as the physiological band: linear (0) or saturating (0.1), both inside the published sweep.',
+                        },
                     },
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['merks2008'],
                         'value': 0.1,
-                        'notes': 'Binary choice: 0 (linear) or 0.1 (saturating)',
-
-                        'locator': {'table': None, 'equation': 'Saturation term in Eq. 3', 'page': 48},
+                        'locator': {'table': None, 'equation': 'Methods: saturation parameter s = 0 (standard; varied 0–0.15)', 'page': None},
+                        'notes': "The saturating form is Merks et al. 2008's; their standard value is s = 0 (linear) and they "
+                                 "sweep 0–0.15 to show the effect. This model's default 0.1 sits inside that sweep but is not the "
+                                 'published standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
                     },
                     '_ontology_term': 'CBO:0000072',  # Chemotaxis (same as lchem)
                     '_model_context': 'Saturation parameter in chemotaxis term. Determines if cells respond linearly or with saturation to VEGF concentration.',
@@ -921,7 +1053,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'dimensionless',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008'],
 
                     '_dependencies': {},
                 },
@@ -952,22 +1084,53 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 10.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'DiffusionSolverFE, explicit scheme', 'page': None},
+                            'note': 'The explicit finite-difference step is stable only for D·Δt/Δx² ≤ 0.25 in 2D; DiffusionSolverFE '
+                             'subdivides the MCS to stay under that limit, so larger D costs run time rather than failing '
+                             "outright. 10 site²/MCS is the modeler's cap (40 sub-steps per MCS). D < 0 is meaningless.",
+                        },
+                        'physiological': {
+                            'basis': 'literature',
+                            'refs': ['merks2006', 'merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2006, Results ("diffuses slowly at about 1e-13 m² s⁻¹") and Discussion (VEGF165 ≈ '
+                                 '1e-11 m² s⁻¹)',
+                                'page': 50,
+                            },
+                            'note': '0.1–2 site²/MCS brackets the Merks value (0.75 site²/MCS at 2 µm, 30 s). Free VEGF-A165 (≈1e-11 '
+                             'm²/s ≈ 75 site²/MCS) lies far above the band and, per Merks 2006, does not produce stable '
+                             "networks in this mechanism — the band therefore encodes the paper's conclusion that the "
+                             'morphogen must be ECM-bound and slow.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets 0.5 / 1.0 / 1.5 / 2.0. The gradient length L = √(D/ε) is what matters: with ε = 0.3 the '
+                             "band gives L ≈ 1.3–2.2 sites, much shorter than Merks' 5 sites.",
+                        },
                     },
                     '_warning_threshold': 3.0,
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['model_specific'],
                         'value': 1.0,
-                        'notes': 'Moderate diffusion rate',
-
-                        'locator': {'table': None, 'equation': 'D in reaction-diffusion PDE (Eq. 2)', 'page': 48},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: vegf.diff_data.diff_global = vedir (site²/MCS, Δx = Δt = 1)', 'page': None},
+                        'notes': 'Merks et al. (2006, 2008) use D = 1e-13 m²/s for the chemoattractant in the ECM, deliberately '
+                                 '~100× slower than VEGF-A165 (≈1e-11 m²/s, Merks 2006 Discussion) because faster diffusion gives '
+                                 'gradients too shallow for network formation; they note SDF-1 (1.7e-13 m²/s) as a candidate with '
+                                 "the right mobility. On their scale (2 µm, 30 s) 1e-13 m²/s is 0.75 site²/MCS, so this model's "
+                                 '1.0 is close to the published value. This model sets no physical scale (Δx = Δt = 1 in '
+                                 "DiffusionSolverFE); the comparison values assume Merks et al.'s mapping of 2 µm per lattice "
+                                 'site and 30 s per MCS.',
                     },
                     '_ontology_term': 'CBO:0000090',  # Molecular diffusion
                     '_model_context': 'Diffusion term in VEGF field PDE: ∂C/∂t = D∇²C + production - decay. Solved using DiffusionSolverFE.',
@@ -1005,7 +1168,7 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'kinetic',
                     '_measurable': True,
-                    '_fitting_method': 'literature_based',
+                    '_fitting_method': 'estimated',
                     '_experimental_assay': 'Fluorescence recovery after photobleaching (FRAP)',
 
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
@@ -1014,7 +1177,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'diffusivity',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 'veder': {
@@ -1039,22 +1202,54 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 2.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'DiffusionSolverFE decay step', 'page': None},
+                            'note': 'ε ≥ 0 required. The explicit decay update c ← c(1 − εΔt) changes sign for ε > 1 per MCS; '
+                             "DiffusionSolverFE's sub-stepping keeps εΔt_sub < 1, so 2 is the modeler's cap rather than the "
+                             'hard limit.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2008', 'merks2006'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (ε = α = 1e-3 s⁻¹); Merks et al. 2006, Results (1.8e-4 s⁻¹)',
+                                'page': 50,
+                            },
+                            'note': "0.1–0.5 per MCS is the model author's band around the default. On the Merks scale the "
+                             "literature values are 0.0054–0.03 per MCS and VEGF165's 30–60 min half-life gives 0.006–0.012 "
+                             'per MCS, all BELOW this band. Labelled expert judgement, not literature, for that reason; see '
+                             'the default-value note for the consequence (shorter gradients).',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets 0.1 / 0.3 / 0.5. Keep veder and vesec equal if the Merks α = ε steady state (c = 1 '
+                             'inside cells) is to be preserved, otherwise the saturation coefficient lsc acts on a different '
+                             'concentration scale.',
+                        },
                     },
                     '_warning_threshold': 0.8,
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['model_specific'],
                         'value': 0.3,
-                        'notes': 'Moderate decay rate',
-
-                        'locator': {'table': None, 'equation': 'k in reaction-diffusion PDE (Eq. 2)', 'page': 48},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: decay_global = veder; decay_types["EC"] = 0.0 (no decay inside cells)', 'page': None},
+                        'notes': 'Decay only in the medium, as in Merks et al. (chemoattractant "gradually inactivates in the '
+                                 'ECM"). The number is this implementation\'s: Merks 2008 use ε = 1e-3 s⁻¹ and Merks 2006 ε = '
+                                 '1.8e-4 s⁻¹ (from VEGF half-lives of 30–60 min, Lauer 2002; Serini 2003), which on their scale '
+                                 'are 0.03 and 0.0054 per MCS — 10–55× slower than 0.3. Because secretion is also 0.3, the '
+                                 "steady-state concentration α/ε = 1 matches Merks' α = ε choice, but the gradient length √(D/ε) "
+                                 'is 1.8 sites here versus 5 sites (10 µm) in Merks 2008 and ≈12 sites in Merks 2006. This model '
+                                 'sets no physical scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks '
+                                 "et al.'s mapping of 2 µm per lattice site and 30 s per MCS.",
                     },
                     '_ontology_term': 'CBO:0000091',  # Molecular degradation
                     '_model_context': 'Decay term in VEGF field PDE. Combined with diffusion, determines gradient spatial scale.',
@@ -1091,7 +1286,7 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'kinetic',
                     '_measurable': True,
-                    '_fitting_method': 'literature_based',
+                    '_fitting_method': 'estimated',
                     '_experimental_assay': 'ELISA time course, radiolabeled VEGF clearance',
 
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
@@ -1100,7 +1295,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'rate',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 'vesec': {
@@ -1125,22 +1320,49 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (0.0, 2.0),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'DiffusionSolverFE secretion step', 'page': None},
+                            'note': 'α ≥ 0 required (negative secretion is uptake, which this field does not model). 2 per MCS is '
+                             "the modeler's cap; the field itself has no upper stability limit on secretion.",
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2008', 'merks2006'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'page': None,
+                            },
+                            'note': "0.1–0.5 per MCS is the model author's band around the default; the literature values "
+                             '(0.0054–0.03 per MCS on the Merks scale) lie below it. Only the ratio to veder is constrained '
+                             'by the papers (α = ε), not the absolute rate.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets 0.1 / 0.3 / 0.5. Change together with veder to keep α/ε = 1.',
+                        },
                     },
                     '_warning_threshold': 0.8,
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2006'],
+                        **self.REFERENCES['model_specific'],
                         'value': 0.3,
-                        'notes': 'Moderate secretion rate',
-
-                        'locator': {'table': None, 'equation': 'S in reaction-diffusion PDE (Eq. 2)', 'page': 48},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: vegf.secretion_data_new("EC", vesec) (per EC site per MCS)', 'page': None},
+                        'notes': 'Every lattice site inside an endothelial cell secretes at this rate, as in Merks et al. (α '
+                                 'inside cells, zero in the ECM). Merks 2008 set α = ε = 1e-3 s⁻¹ (0.03 per MCS on their scale), '
+                                 'Merks 2006 α = ε = 1.8e-4 s⁻¹ (0.0054 per MCS). This implementation uses 0.3 for both, keeping '
+                                 'the α/ε ratio — and hence the steady-state concentration of 1 inside a cell — identical to the '
+                                 'papers while running the chemoattractant kinetics ~10× faster. This model sets no physical '
+                                 "scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks et al.'s mapping "
+                                 'of 2 µm per lattice site and 30 s per MCS.',
                     },
                     '_ontology_term': 'CBO:0000092',  # Molecular secretion
                     '_model_context': 'Source term in VEGF field PDE. ECs secrete VEGF, creating gradients that guide chemotaxis.',
@@ -1177,7 +1399,7 @@ class AngiogenesisProcess(Process):
 
                     '_parameter_type': 'kinetic',
                     '_measurable': True,
-                    '_fitting_method': 'literature_based',
+                    '_fitting_method': 'estimated',
                     '_experimental_assay': 'VEGF ELISA from conditioned media',
 
                     # -- common descriptor format: fields below still to be documented (None/empty = not yet known)
@@ -1186,7 +1408,7 @@ class AngiogenesisProcess(Process):
 
                     '_dimension': 'rate',
 
-                    '_literature': ['merks2006'],
+                    '_literature': ['merks2008', 'merks2006'],
                 },
 
                 # =====================================================================
@@ -1268,13 +1490,31 @@ class AngiogenesisProcess(Process):
                     '_recommended_range': (50, 500),
 
                     '_range_evidence': {
-
                         'mathematical': None,
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': ['merks2006', 'merks2008'],
+                            'locator': {
+                                'table': None,
+                                'equation': 'Merks et al. 2006, Fig 5 (0–50 h); Merks et al. 2008, Methods (30 s per MCS)',
+                                'page': 48,
+                            },
+                            'note': '10–1,000 MCS. On the Merks scale (30 s per MCS) the default 100 MCS is 50 min and 1,000 MCS is '
+                             '8.3 h; the in-vitro network coarsening that Merks 2006 Fig 5 reproduces unfolds over 10–50 h '
+                             '(1,200–6,000 MCS). Runs inside this band therefore show network formation but little of the '
+                             'remodelling the papers validate against.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets quick 50 / standard 100 / extended 500 / long 1,000 MCS. A practical compute window on '
+                             'a 200×200 lattice, not a biological one.',
+                        },
                     },
 
                     '_presets': {
@@ -1339,13 +1579,15 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (-1, 2147483646),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'PottsCore(random_seed=...)', 'page': None},
+                            'note': '-1 asks the wrapper to draw a seed; otherwise any non-negative 32-bit integer accepted by the '
+                             'CompuCell3D random-number generator. Execution control, no biology.',
+                        },
                         'physiological': None,
-
                         'recommended': None,
-
                     },
 
                     '_gui_hints': {
@@ -1394,13 +1636,30 @@ class AngiogenesisProcess(Process):
                     '_mathematical_range': (1, 1000),
 
                     '_range_evidence': {
-
-                        'mathematical': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'physiological': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
-                        'recommended': {'basis': None, 'refs': [], 'locator': None, 'note': None},
-
+                        'mathematical': {
+                            'basis': 'numerical_stability',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'WriterSteppable frequency', 'page': None},
+                            'note': 'At least 1 (every MCS); the upper bound 1,000 equals the longest preset run, above which '
+                             'nothing would ever be written.',
+                        },
+                        'physiological': {
+                            'basis': 'expert_judgement',
+                            'refs': [],
+                            'locator': {'table': None, 'equation': 'WriterSteppable frequency', 'page': None},
+                            'note': '5–100 MCS: on the Merks scale 2.5–50 min between frames, fine enough to resolve cell movement '
+                             'at 5 µm/h (one site per 24 min). Execution control.',
+                        },
+                        'recommended': {
+                            'basis': 'exploratory',
+                            'refs': [],
+                            'locator': {
+                                'table': None,
+                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'page': None,
+                            },
+                            'note': 'Presets 5 / 10 / 20 / 50. 10–50 balances I/O cost against time resolution.',
+                        },
                     },
                     '_gui_hints': {
                         'widget_type': 'spinbox',
