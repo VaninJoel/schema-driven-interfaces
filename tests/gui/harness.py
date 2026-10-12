@@ -119,6 +119,10 @@ def _fake_worker_class():
         finished = pyqtSignal(dict)
         error = pyqtSignal(str)
         instances = []
+        delay_s = 0.0          # make runs take time so concurrency is observable
+        active = 0             # runs currently inside run()
+        peak_active = 0
+        lock = __import__('threading').Lock()
 
         def __init__(self, parameters, output_dir='experiments', parameter_audit=None, **kw):
             super().__init__()
@@ -132,6 +136,11 @@ def _fake_worker_class():
 
         @pyqtSlot()
         def run(self):
+            with FakeWorker.lock:
+                FakeWorker.active += 1
+                FakeWorker.peak_active = max(FakeWorker.peak_active, FakeWorker.active)
+            if FakeWorker.delay_s:
+                time.sleep(FakeWorker.delay_s)
             self.exp_dir.mkdir(parents=True, exist_ok=True)
             (self.exp_dir / 'run_metadata.json').write_text(json.dumps({
                 'experiment_id': self.exp_name, 'run_name': self.exp_name,
@@ -141,6 +150,10 @@ def _fake_worker_class():
             }, default=str))
             self.progress.emit(50, 'half')
             self.progress.emit(100, 'done')
+            with FakeWorker.lock:
+                FakeWorker.active -= 1
+            if self.cancelled:
+                return
             self.finished.emit({'exp_name': self.exp_name, 'exp_dir': str(self.exp_dir),
                                 'final_step': 1, 'parameters': self.parameters,
                                 'stdout': '', 'stderr': '', 'zarr_path': str(self.exp_dir / 'data.zarr'),
