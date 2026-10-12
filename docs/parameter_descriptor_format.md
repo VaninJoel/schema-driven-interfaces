@@ -183,11 +183,11 @@ Everything else below is still content work.
 | `_mathematical_range` | all 79 | 74 (only lattice-bound coordinates/radius have a hard bound; CPM stiffnesses and rates have none) | 4 of 13 |
 | `_physiological_range` | 52 of 79 (many legitimately absent: arbitrary CPM units) | unchanged | 4 of 13 |
 | `_dimension` | 24 of 79 | 3 (the three schema-layer time values, whose storage is not sim-canonical) | all 13 |
-| `_reference_paper.locator` | 67 bare self-cites | 0 | 0 |
+| `_reference_paper.locator` | 67 bare self-cites | 0 | 0 (7 pointed at a non-existent Table 1) |
 | `_literature` | 59 of 79 | 9 (SLS coordinates and diffusion coefficients: the paper cites nothing for them) | all 13 |
 | `_dependencies` with explanations | 79 (23 have an unexplained `_depends_on`) | unchanged | 7 of 13 |
-| `_range_evidence` with a `basis` | 36 of 58 declared tiers | 0 | all |
-| `_fitting_method`, `_parameter_type` | all / all | 0 / 0 (controls exempt) | 6 / 3 |
+| `_range_evidence` with a `basis` | 36 of 58 declared tiers | 0 | 0 (was 24 of 28) |
+| `_fitting_method`, `_parameter_type` | all / all | 0 / 0 (controls exempt) | 0 / 0 |
 
 ### V-Cornea content pass (2026-10-12)
 
@@ -217,6 +217,29 @@ the `paper_version` CC3D source. Conventions:
   `paper_version`; the 1/3 sloughing factor is hard-coded), and the S11 Table
   misprint of `SLS_Threshold` as "True". One supplement arithmetic slip is noted
   on `EGF_SUPERDiffCoef` (S5 Text's rat-brain conversion is 10× low).
+
+### Angiogenesis content pass (2026-10-12)
+
+The angiogenesis core re-implements the contact-inhibited chemotaxis model of
+Merks, Perryn, Shirinifard & Glazier 2008 (PLoS Comput Biol 4(9):e1000163):
+chemotaxis only at cell–medium interfaces (`towards="Medium"`), a saturating
+response, and an autocrine chemoattractant that decays only in the medium. The
+registry entry `merks2008` previously pointed at a different paper (Merks &
+Glazier 2005, Physica A) and the schema cited a "Table 1" that neither Merks
+paper contains; both are corrected. Conventions:
+
+- Only `lchem` (χ = 500) and the saturating form of `lsc` are values taken from
+  Merks 2008; their `_reference_paper` cites that paper. `jee`, `jem`, `vedir`,
+  `veder` and `vesec` are defaults chosen for this implementation and now cite
+  `model_specific`, with `notes` converting the Merks values to lattice units
+  (2 µm per site, 30 s per MCS: D = 1e-13 m²/s → 0.75 site²/MCS; 1e-3 s⁻¹ →
+  0.03 /MCS) so the reader can see how far the default sits from the paper.
+- The comparison is unflattering in two places and the schema says so: the
+  model runs at T = 5 against Merks' T = 50, so every energy coupling is 10×
+  stronger in relative terms; and decay/secretion (0.3 /MCS) are 10–55× faster
+  than any literature value, giving a chemoattractant range of ≈1.8 sites
+  against 5–12 sites in the papers. No range is labelled `literature` unless
+  the paper swept or cited it (χ 0–5,000; s 0–0.15; D around 1e-13 m²/s).
 
 Filling these is content work for the modeler, not code work. The format makes
 the gaps enumerable, which is the point Section 2.2 argues.
