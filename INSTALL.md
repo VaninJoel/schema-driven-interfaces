@@ -55,6 +55,11 @@ cd ../angio-gui && python run_gui.py
 Each GUI finds its sibling Vivarium process package by relative path, so keep the
 folders arranged as they are in this repository.
 
+Shortcut for a development checkout: `./run_local.sh` (Linux/macOS/WSLg) finds
+the `vc` env automatically, launches one or both GUIs, and mirrors their console
+output to `.logs/run_local/`. `./run_local.sh check` verifies the interpreter,
+`./run_local.sh tests` runs the headless GUI test suite.
+
 ## 4. Verify (optional)
 
 ```bash
