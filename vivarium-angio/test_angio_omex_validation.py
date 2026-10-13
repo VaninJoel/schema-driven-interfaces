@@ -330,6 +330,76 @@ def test_report_never_rewrites_a_typed_archive_as_success(tmp_path, status):
     assert doc['status'] == status and 'simulation.sedml' not in names
 
 
+def _zarr_run(root, name, status, n_ec_rows):
+    """A run dir with a real Zarr trajectory (as the writer steppable lays it out:
+    <step>/data = [x, y, z, (type, id, VEGF)]) and its run_metadata.json."""
+    import numpy as np
+    import zarr
+    d = root / name
+    d.mkdir(parents=True)
+    store = zarr.open(str(d / 'data.zarr'), mode='w')
+    for step in (0, 10):
+        a = np.zeros((20, 20, 1, 3))
+        a[:n_ec_rows, :, 0, 0] = 1                      # EC cell type
+        a[:n_ec_rows, :, 0, 1] = 1                      # one cell id
+        a[..., 2] = 0.5                                 # VEGF
+        store.require_group(str(step))['data'] = a
+    (d / 'run_metadata.json').write_text(json.dumps({
+        'run_id': f'id-{name}', 'simulation_status': status, 'random_seed': 7,
+        'parameters': {'sim_time': 10, 'jee': 2.0},
+        'execution': {'exit_code': 0 if status == 'success' else 3}}))
+    return d
+
+
+def test_scan_archive_means_use_only_successful_replicates(tmp_path):
+    from vivarium_angio.utils import omex_generator as og
+    import io
+    import pandas as pd
+    ok = _zarr_run(tmp_path, 'scan_combo001_rep01', 'success', 4)
+    bad = _zarr_run(tmp_path, 'scan_combo001_rep02', 'failed', 15)      # partial, different
+    omex = og.create_experiment_scan_archive(
+        tmp_path, {'jee': [2.0, 4.0]},
+        [{'label': 'jee=2.0', 'replicate_dirs': [str(ok), str(bad)], '_index': 1}],
+        {'sim_time': 10}, run_name='scan', num_replicates=2)
+    with zipfile.ZipFile(omex) as zf:
+        meta = json.loads(zf.read('scan_metadata.json'))
+        [series] = [n for n in zf.namelist() if n.startswith('combo_data/')]
+        mean = pd.read_csv(io.BytesIO(zf.read(series)))
+    only_ok = pd.read_csv(io.StringIO(og.extract_zarr_metrics(ok / 'data.zarr')))
+    pd.testing.assert_frame_equal(mean.reset_index(drop=True), only_ok.reset_index(drop=True),
+                                  check_dtype=False)
+    [combo] = meta['combinations']
+    assert combo['replicates'] == 2 and combo['replicates_in_mean'] == 1
+    assert [r['run_id'] for r in combo['included']] == ['id-scan_combo001_rep01']
+    assert combo['included'][0]['run_dir'] == 'scan_combo001_rep01'
+    assert [(r['run_id'], r['reason']) for r in combo['excluded']] == [('id-scan_combo001_rep02', 'failed')]
+
+
+def test_report_plots_only_successful_replicates(tmp_path, monkeypatch):
+    rep = _report_tool()
+    ok = _zarr_run(tmp_path, 'exp_combo001_rep01', 'success', 4)
+    bad = _zarr_run(tmp_path, 'exp_combo001_rep02', 'timed_out', 15)
+    lost = _zarr_run(tmp_path, 'exp_combo002_rep01', 'failed', 15)     # no success at all
+    seen = {}
+    real_combo, real_only = rep.build_combo_report, rep.build_excluded_only_report
+
+    def combo_spy(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=()):
+        seen[c] = ([Path(d).name for d in rep_dirs], [(Path(d).name, s) for d, s in excluded])
+        return real_combo(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=excluded)
+
+    def only_spy(c, label, excluded, out_pdf):
+        seen[c] = ([], [(Path(d).name, s) for d, s in excluded])
+        return real_only(c, label, excluded, out_pdf)
+
+    monkeypatch.setattr(rep, 'build_combo_report', combo_spy)
+    monkeypatch.setattr(rep, 'build_excluded_only_report', only_spy)
+    written = rep.generate(tmp_path)
+
+    assert seen['exp_combo001'] == ([ok.name], [(bad.name, 'timed_out')])
+    assert seen['exp_combo002'] == ([], [(lost.name, 'failed')])
+    assert all(Path(p).exists() for p in written)
+
+
 def test_report_rebuilds_legacy_archive_with_recorded_status(tmp_path):
     rep = _report_tool()
     d, _, sim_params = _run_dir(tmp_path, 'legacy_rep01', 'failed')   # no archive yet
