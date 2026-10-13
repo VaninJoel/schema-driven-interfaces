@@ -461,7 +461,7 @@ class ParameterInfoDialog(QDialog):
         html += f"<li><span class='label'>Parameter Name:</span> <code>{param_name}</code></li>"
         html += f"<li><span class='label'>Category:</span> {param_info.get('_category', 'N/A')}</li>"
         html += f"<li><span class='label'>Subcategory:</span> {param_info.get('_subcategory', 'N/A')}</li>"
-        html += f"<li><span class='label'>Unit (as documented):</span> {param_info.get('_unit', 'dimensionless')}</li>"
+        html += f"<li><span class='label'>Unit of stored value:</span> {param_info.get('_unit', 'dimensionless')}</li>"
         html += f"<li><span class='label'>Expertise Level:</span> {param_info.get('_expert_level', 'N/A').title()}</li>"
         if param_info.get('_unit_long'):
             html += f"<li><span class='label'>Unit, spelled out:</span> {param_info['_unit_long']}</li>"
@@ -487,14 +487,14 @@ class ParameterInfoDialog(QDialog):
             if _units is not None and dim and abs(_units.factor(dim, disp_override) - 1.0) > 1e-12:
                 dr = _units.convert_range(r, dim, disp_override)
                 dl = _units.display_unit_label(dim, disp_override)
-                sl = _units.sim_unit_label(dim)
+                sl = param_info.get('_unit') or _units.sim_unit_label(dim)
                 return f"[{dr[0]:g}, {dr[1]:g}] {dl} &nbsp;<i>(sim: [{r[0]:g}, {r[1]:g}] {sl})</i>"
             return f"[{r[0]}, {r[1]}] {param_info.get('_unit', '')}"
 
         if _units is not None and dim and is_number:
             f = _units.factor(dim, disp_override)
             disp_label = _units.display_unit_label(dim, disp_override)
-            sim_label = _units.sim_unit_label(dim)
+            sim_label = param_info.get('_unit') or _units.sim_unit_label(dim)
             html += "<h3>Units &amp; Conversion</h3><ul>"
             if abs(f - 1.0) < 1e-12:
                 html += f"<li><span class='label'>Value:</span> {sim_default:g} {disp_label or param_info.get('_unit', '')}</li>"

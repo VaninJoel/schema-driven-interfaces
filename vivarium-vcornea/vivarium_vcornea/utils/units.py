@@ -10,9 +10,13 @@ corrupt a real run.
 
     display = sim * factor          sim = display / factor
 
-A parameter declares a ``_dimension`` (and, for time, an optional ``_display_unit``).
-Arbitrary-unit dimensions (energy, pressure, concentration, dimensionless) use an
-identity factor of 1.0, so the displayed number equals the sim number.
+A parameter declares a ``_dimension``; its ``_unit`` names the unit of the STORED
+value (sim units), as the descriptor format defines it. For time, an optional
+``_display_unit`` selects days/hours/minutes; for other dimensions it may give a
+more specific display label (e.g. 'Normalized Conc. / hour' for a rate) without
+changing the factor. Arbitrary-unit dimensions (energy, pressure, concentration,
+dimensionless) use an identity factor of 1.0, so the displayed number equals the
+sim number.
 
 To reuse this for another model, redefine the four scale constants below; the dimension
 table is derived from them.
@@ -76,6 +80,8 @@ def display_unit_label(dimension, display_unit=None):
     """Human-facing unit label for a dimension (e.g. 'µm', '1/hour', 'days')."""
     if dimension == 'time':
         return display_unit or DEFAULT_TIME_UNIT
+    if display_unit:
+        return display_unit
     spec = _DIMENSIONS.get(dimension)
     return spec[1] if spec else ''
 

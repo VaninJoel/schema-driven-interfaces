@@ -144,7 +144,7 @@ def render(pname, info, name_lookup):
     L.append(f"**Schema parameter:** `{pname}`")
     if is_num and dim and abs(units.factor(dim, du) - 1.0) > 1e-12:
         dv = units.to_display(default, dim, du)
-        L.append(f"**Simulation value:** `{default}` {units.sim_unit_label(dim)}")
+        L.append(f"**Simulation value:** `{default}` {(unit or units.sim_unit_label(dim))}")
         L.append(f"**Physical value:** `{dv:g}` {units.display_unit_label(dim, du)} "
                  f"*(display = sim × {units.factor(dim, du):g})*")
     else:
@@ -154,7 +154,7 @@ def render(pname, info, name_lookup):
         if is_num and dim and abs(units.factor(dim, du) - 1.0) > 1e-12:
             dr = units.convert_range(rng, dim, du)
             label = "Physiological range" if phys_range else "Recommended range (exploratory)"
-            L.append(f"**{label}:** {tuple(rng)} {units.sim_unit_label(dim)} = "
+            L.append(f"**{label}:** {tuple(rng)} {(unit or units.sim_unit_label(dim))} = "
                      f"[{dr[0]:g}, {dr[1]:g}] {units.display_unit_label(dim, du)}")
         else:
             label = "Physiological range" if phys_range else "Recommended range (exploratory, not physiological)"
