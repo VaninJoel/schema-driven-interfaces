@@ -72,8 +72,16 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (HRFlowable, Image, PageBreak, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
-sys.path.insert(0, str((Path(__file__).resolve().parent / 'vivarium_angio' / 'utils')))
-import omex_generator as og  # noqa: E402
+# By package name: vivarium-vcornea ships a module also called omex_generator,
+# so a bare import off sys.path can resolve to the wrong package's generator in
+# any process that has loaded both. (vivarium_angio/__init__ imports nothing, so
+# this does not pull in the simulation stack.) Bare import only as a fallback for
+# a checkout whose package is not installed.
+try:
+    from vivarium_angio.utils import omex_generator as og  # noqa: E402
+except ImportError:
+    sys.path.insert(0, str((Path(__file__).resolve().parent / 'vivarium_angio' / 'utils')))
+    import omex_generator as og  # noqa: E402
 
 SEDNS = {'s': 'http://sed-ml.org/sed-ml/level1/version4',
          'h': 'http://www.w3.org/1999/xhtml'}
@@ -453,7 +461,57 @@ def _styles():
 
 
 # ----------------------------------------------------------------- reports
-def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf):
+_EXCLUDED_NOTE = (
+    "Excluded from every plot, mean and summary metric in this report. A failed, "
+    "timed-out or cancelled run can leave a partial Zarr trajectory; averaging it "
+    "into a replicate mean would bias the result. Its archive keeps the logs, "
+    "parameters and partial outputs for diagnosis.")
+
+
+def _excluded_rows(excluded):
+    rows = [["Replicate", "Status", "Exit code", "Error", "Archive"]]
+    for d, status in excluded:
+        try:
+            meta = json.loads((Path(d) / 'run_metadata.json').read_text())
+        except Exception:
+            meta = {}
+        exit_code = (meta.get('execution') or {}).get('exit_code')
+        err = str(meta.get('error_message') or '&mdash;').replace('<', '&lt;')
+        archive = Path(d) / f"{Path(d).name}.omex"
+        rows.append([Path(d).name, f"<b>{status}</b>",
+                     '&mdash;' if exit_code is None else str(exit_code),
+                     err[:200] + ('&hellip;' if len(err) > 200 else ''),
+                     archive.name if archive.exists() else '&mdash;'])
+    return rows
+
+
+def _excluded_block(excluded, H2, SUB, prows, title="Excluded Replicates (unsuccessful runs)"):
+    if not excluded:
+        return []
+    return [Paragraph(title, H2),
+            prows(_excluded_rows(excluded),
+                  [1.6 * inch, 0.75 * inch, 0.65 * inch, 2.35 * inch, 1.4 * inch]),
+            Paragraph(_EXCLUDED_NOTE, SUB)]
+
+
+def build_excluded_only_report(combo, label, excluded, out_pdf):
+    """A combination none of whose replicates succeeded: nothing to plot or
+    average, but its attempts are part of the record."""
+    H, SUB, H2, N, prows = _styles()
+    S = [Paragraph(f"Angio OMEX Combination Report — {label}", H),
+         Paragraph(f"{combo} &nbsp;|&nbsp; no successful replicate "
+                   f"({len(excluded)} unsuccessful)", SUB),
+         HRFlowable(width="100%", thickness=1, color=colors.HexColor(NAVY))]
+    S.extend(_excluded_block(excluded, H2, SUB, prows))
+    SimpleDocTemplate(str(out_pdf), pagesize=letter, topMargin=0.55 * inch, bottomMargin=0.5 * inch,
+                      leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                      title=f"Angio Combination Report {combo}").build(S)
+    return Path(out_pdf)
+
+
+def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=()):
+    """rep_dirs / omex_paths: the combination's SUCCESSFUL replicates (plotted and
+    averaged). excluded: [(run_dir, status)] of the others, listed only."""
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='angio_combo_'))
     H, SUB, H2, N, prows = _styles()
@@ -469,10 +527,13 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf):
 
     S.append(Paragraph("Combination Overview", H2))
     S.append(prows([["Property", "Value"],
-                    ["Scan point", label], ["Replicates", str(len(rep_dirs))],
+                    ["Scan point", label],
+                    ["Replicates", f"{len(rep_dirs)} successful (plotted and averaged)"
+                     + (f"; {len(excluded)} unsuccessful, excluded" if excluded else "")],
                     ["Signals", ", ".join(METRICS)],
                     ["Time", "MCS (angio has no physical-time calibration)"]],
                    [1.4 * inch, 5.35 * inch]))
+    S.extend(_excluded_block(excluded, H2, SUB, prows))
 
     if prov:
         S.append(Paragraph("Provenance (OMEX Metadata)", H2))
@@ -528,10 +589,13 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf):
     return Path(out_pdf)
 
 
-def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf):
+def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, excluded=None):
+    """combos: {combo: SUCCESSFUL replicate dirs}. excluded: {combo: [(dir,
+    status)]} of the others, listed and left out of every comparison."""
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='angio_exp_'))
     H, SUB, H2, N, prows = _styles()
+    excluded = {c: v for c, v in (excluded or {}).items() if v}
     order = sorted(combos)
     combo_means = []
     for c in order:
@@ -591,6 +655,18 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf):
             if prov.get('keywords'):
                 pr.append(["Keywords", ", ".join(prov['keywords'])])
             S.append(prows(pr, [1.6 * inch, 5.15 * inch]))
+
+    if excluded:
+        rows = [["Combination"] + _excluded_rows([])[0]]
+        for c in sorted(excluded):
+            rows += [[labels.get(c, c)] + r for r in _excluded_rows(excluded[c])[1:]]
+        S.append(Paragraph("Excluded Replicates (unsuccessful runs)", H2))
+        S.append(prows(rows, [1.1 * inch, 1.25 * inch, 0.7 * inch, 0.55 * inch,
+                              1.95 * inch, 1.2 * inch]))
+        missing = [labels.get(c, c) for c in sorted(set(excluded) - set(order))]
+        S.append(Paragraph(_EXCLUDED_NOTE + (
+            " Combinations with no successful replicate (absent from the comparisons): "
+            + ", ".join(missing) + "." if missing else ""), SUB))
 
     # summary metrics table (final value per combo per metric)
     S.append(Paragraph("Summary Metrics (replicate-mean, final step)", H2))
@@ -729,17 +805,36 @@ def generate(root, creator=None):
             if creator:
                 break
 
+    # Every run, whatever its outcome, gets a correctly typed archive (the scan
+    # archive filters to successful replicates itself, via og.run_outcome).
     omex_by_combo, scan = _regenerate_archives(combos, labels, scan_spec, sim_params, root, num_replicates, creator)
+
+    # Results use successful replicates only; the rest are listed, never averaged.
+    successful, excluded = {}, {}
+    for c, dirs in combos.items():
+        ok, other = og.split_replicates(dirs)
+        if ok:
+            successful[c] = ok
+        if other:
+            excluded[c] = other
 
     written = []
     for c in sorted(combos):
         out_pdf = root / f"{c}_omex_report.pdf"
-        written.append(build_combo_report(c, labels[c], combos[c], omex_by_combo.get(c, []), sim_time, out_pdf))
-        print(f"[angio_report] wrote {out_pdf}  ({len(combos[c])} replicate(s))")
-    if len(combos) > 1:
+        if c in successful:
+            ok_names = {d.name for d in successful[c]}
+            omex_ok = [o for o in omex_by_combo.get(c, []) if Path(o).parent.name in ok_names]
+            written.append(build_combo_report(c, labels[c], successful[c], omex_ok, sim_time,
+                                              out_pdf, excluded=excluded.get(c, [])))
+        else:
+            written.append(build_excluded_only_report(c, labels[c], excluded.get(c, []), out_pdf))
+        print(f"[angio_report] wrote {out_pdf}  ({len(successful.get(c, []))} successful, "
+              f"{len(excluded.get(c, []))} excluded replicate(s))")
+    if len(combos) > 1 and successful:
         out_pdf = root / f"{root.name}_experiment_report.pdf"
-        written.append(build_experiment_report(root, scan, combos, labels, sim_time, out_pdf))
-        print(f"[angio_report] wrote {out_pdf}  (comparison across {len(combos)} combos)")
+        written.append(build_experiment_report(root, scan, successful, labels, sim_time,
+                                               out_pdf, excluded=excluded))
+        print(f"[angio_report] wrote {out_pdf}  (comparison across {len(successful)} combos)")
     return written
 
 

@@ -6,17 +6,17 @@ Runs the create_omex_archive() path against synthetic CC3D-shaped outputs
   1) the built-in structural checks in omex_generator.py
   2) biosimulators-utils (if installed) for COMBINE-spec compliance
 
-This avoids the vivarium import chain so it runs in any Python environment
-with only stdlib + (optionally) biosimulators-utils.
+Needs the vivarium-vcornea package installed (the `vc` environment); the
+COMBINE check needs biosimulators-utils (the [validation] extra).
 
 Usage
 -----
     cd vivarium-vcornea
-    python test_omex_validation.py
+    python test_vcornea_omex_validation.py
 
 To also run the biosimulators-utils check:
     pip install biosimulators-utils
-    python test_omex_validation.py
+    python test_vcornea_omex_validation.py
 
 The script prints PASS/FAIL for each step and exits non-zero on any failure.
 Paste the full stdout back if you want me to interpret the results.
@@ -33,11 +33,13 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-UTILS_DIR = REPO_ROOT / 'vivarium_vcornea' / 'utils'
-sys.path.insert(0, str(UTILS_DIR))
 
-from omex_generator import (  # noqa: E402
+# Imported by package name, never as a bare `omex_generator` off sys.path: both
+# packages ship a module of that name, and a bare import let whichever test ran
+# first shadow the other package's generator in a shared pytest session.
+from vivarium_vcornea.utils.omex_generator import (  # noqa: E402
     create_omex_archive,
+    executed_model_overrides,
     validate_sedml_structure,
     validate_omex_manifest,
 )
@@ -103,7 +105,7 @@ def step_create_archive(tmpdir: Path) -> Path:
     parameter_audit = None
     try:
         from vivarium_vcornea.processes.vcornea_process import VCorneaProcess
-        from parameter_audit import build_parameter_audit
+        from vivarium_vcornea.utils.parameter_audit import build_parameter_audit
         parameter_audit = build_parameter_audit(VCorneaProcess().ports_schema(), sim_params)
         print(f"  note  parameter audit built: {parameter_audit['summary']['n_parameters']} parameters")
     except Exception as e:
@@ -223,8 +225,6 @@ if __name__ == '__main__':
 # suite. These make it part of `pytest vivarium-vcornea/`.
 # =============================================================================
 import pytest  # noqa: E402
-
-from omex_generator import executed_model_overrides  # noqa: E402
 
 
 def _combine_errors(omex_path):

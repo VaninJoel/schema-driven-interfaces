@@ -503,15 +503,15 @@ class AngiogenesisMainWindow(QMainWindow):
         # INITIALIZE PROCESS AND SCHEMA
         # =====================================================================
 
-        # Create process instance to get schema
+        # Create process instance to get schema. Cheap: the CC3D service starts
+        # only on the process's first next_update(), never in the GUI process.
         self.process = AngiogenesisProcess()
         self.schema = self.process.ports_schema()
 
         # Content hash of the parameter definitions driving this session's controls.
         # Computed once here (the schema is already in hand) and attached to every
         # run, so each result records exactly which definitions it was configured
-        # under. Workers must not recompute it: constructing AngiogenesisProcess
-        # starts a CC3D simulation.
+        # under.
         self.schema_fingerprint = None
         try:
             from vivarium_angio.utils.provenance import schema_fingerprint
@@ -1440,7 +1440,7 @@ batch_sweep_20251106_143052/
                 <a href="https://docs.biosimulators.org/Biosimulators_utils/">biosimulators-utils</a>. This validator
                 ships as a pinned <code>validation</code> dependency (installed by the project's conda environment),
                 so the conformance check is reproducible on a fresh checkout — see
-                <code>test_omex_validation.py</code>.</div>
+                <code>test_angio_omex_validation.py</code>.</div>
         </div>
 
         <div class="section">

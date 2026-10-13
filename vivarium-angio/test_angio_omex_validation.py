@@ -7,19 +7,20 @@ archive with:
   1) the built-in structural checks in omex_generator.py
   2) biosimulators-utils (if installed) for COMBINE-spec compliance
 
-No vivarium / zarr / numpy / pandas imports required: Zarr stores are just
-directories on disk, so we synthesize one by writing JSON metadata + a few
-binary chunk files. This exercises the file-walking and packaging path
-without needing the zarr library.
+Zarr stores are just directories on disk, so we synthesize one by writing JSON
+metadata + a few binary chunk files; this exercises the file-walking and
+packaging path without running a simulation. Needs the vivarium-angio package
+installed (the `vc` environment); the COMBINE check needs biosimulators-utils
+(the [validation] extra).
 
 Usage
 -----
     cd vivarium-angio
-    python test_omex_validation.py
+    python test_angio_omex_validation.py
 
 Optional external check:
     pip install biosimulators-utils
-    python test_omex_validation.py
+    python test_angio_omex_validation.py
 """
 
 from __future__ import annotations
@@ -33,10 +34,11 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-UTILS_DIR = REPO_ROOT / 'vivarium_angio' / 'utils'
-sys.path.insert(0, str(UTILS_DIR))
 
-from omex_generator import (  # noqa: E402
+# Imported by package name, never as a bare `omex_generator` off sys.path: both
+# packages ship a module of that name, and a bare import let whichever test ran
+# first shadow the other package's generator in a shared pytest session.
+from vivarium_angio.utils.omex_generator import (  # noqa: E402
     create_omex_archive_from_zarr,
     validate_sedml_structure,
     validate_omex_manifest,
@@ -107,13 +109,12 @@ def step_create_archive(tmpdir: Path) -> Path:
     store = make_fake_zarr_store(tmpdir)
     run_metadata, sim_params = make_metadata(store)
     # Parameter audit from the live schema, as the GUI main window / finish() do.
-    # Constructing AngiogenesisProcess starts a CC3D service (known limitation);
-    # skipped with a note when cc3d is unavailable so the archive path still runs.
+    # Skipped with a note when cc3d is unavailable so the archive path still runs.
     parameter_audit = None
     try:
         import contextlib, io
         from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
-        from parameter_audit import build_parameter_audit
+        from vivarium_angio.utils.parameter_audit import build_parameter_audit
         with contextlib.redirect_stdout(io.StringIO()):
             schema = AngiogenesisProcess().ports_schema()
         parameter_audit = build_parameter_audit(schema, sim_params)
@@ -291,9 +292,17 @@ def test_unsuccessful_archive_omits_sedml_and_records_status(tmp_path, status):
 
 
 def _report_tool():
-    sys.path.insert(0, str(REPO_ROOT))
-    import make_omex_combo_report
-    return make_omex_combo_report
+    # Loaded under a package-specific name: vivarium-vcornea has a report tool
+    # with the same file name, and both may be imported in one pytest session.
+    import importlib.util
+    name = 'angio_make_omex_combo_report'
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / 'make_omex_combo_report.py')
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[name]
 
 
 def _run_dir(root, name, status):
@@ -319,6 +328,76 @@ def test_report_never_rewrites_a_typed_archive_as_success(tmp_path, status):
     rep._regenerate_archives({'run': [d]}, {'run': 'run'}, None, sim_params, tmp_path, 1, None)
     names, doc = _status_doc(d / f'{d.name}.omex')
     assert doc['status'] == status and 'simulation.sedml' not in names
+
+
+def _zarr_run(root, name, status, n_ec_rows):
+    """A run dir with a real Zarr trajectory (as the writer steppable lays it out:
+    <step>/data = [x, y, z, (type, id, VEGF)]) and its run_metadata.json."""
+    import numpy as np
+    import zarr
+    d = root / name
+    d.mkdir(parents=True)
+    store = zarr.open(str(d / 'data.zarr'), mode='w')
+    for step in (0, 10):
+        a = np.zeros((20, 20, 1, 3))
+        a[:n_ec_rows, :, 0, 0] = 1                      # EC cell type
+        a[:n_ec_rows, :, 0, 1] = 1                      # one cell id
+        a[..., 2] = 0.5                                 # VEGF
+        store.require_group(str(step))['data'] = a
+    (d / 'run_metadata.json').write_text(json.dumps({
+        'run_id': f'id-{name}', 'simulation_status': status, 'random_seed': 7,
+        'parameters': {'sim_time': 10, 'jee': 2.0},
+        'execution': {'exit_code': 0 if status == 'success' else 3}}))
+    return d
+
+
+def test_scan_archive_means_use_only_successful_replicates(tmp_path):
+    from vivarium_angio.utils import omex_generator as og
+    import io
+    import pandas as pd
+    ok = _zarr_run(tmp_path, 'scan_combo001_rep01', 'success', 4)
+    bad = _zarr_run(tmp_path, 'scan_combo001_rep02', 'failed', 15)      # partial, different
+    omex = og.create_experiment_scan_archive(
+        tmp_path, {'jee': [2.0, 4.0]},
+        [{'label': 'jee=2.0', 'replicate_dirs': [str(ok), str(bad)], '_index': 1}],
+        {'sim_time': 10}, run_name='scan', num_replicates=2)
+    with zipfile.ZipFile(omex) as zf:
+        meta = json.loads(zf.read('scan_metadata.json'))
+        [series] = [n for n in zf.namelist() if n.startswith('combo_data/')]
+        mean = pd.read_csv(io.BytesIO(zf.read(series)))
+    only_ok = pd.read_csv(io.StringIO(og.extract_zarr_metrics(ok / 'data.zarr')))
+    pd.testing.assert_frame_equal(mean.reset_index(drop=True), only_ok.reset_index(drop=True),
+                                  check_dtype=False)
+    [combo] = meta['combinations']
+    assert combo['replicates'] == 2 and combo['replicates_in_mean'] == 1
+    assert [r['run_id'] for r in combo['included']] == ['id-scan_combo001_rep01']
+    assert combo['included'][0]['run_dir'] == 'scan_combo001_rep01'
+    assert [(r['run_id'], r['reason']) for r in combo['excluded']] == [('id-scan_combo001_rep02', 'failed')]
+
+
+def test_report_plots_only_successful_replicates(tmp_path, monkeypatch):
+    rep = _report_tool()
+    ok = _zarr_run(tmp_path, 'exp_combo001_rep01', 'success', 4)
+    bad = _zarr_run(tmp_path, 'exp_combo001_rep02', 'timed_out', 15)
+    lost = _zarr_run(tmp_path, 'exp_combo002_rep01', 'failed', 15)     # no success at all
+    seen = {}
+    real_combo, real_only = rep.build_combo_report, rep.build_excluded_only_report
+
+    def combo_spy(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=()):
+        seen[c] = ([Path(d).name for d in rep_dirs], [(Path(d).name, s) for d, s in excluded])
+        return real_combo(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=excluded)
+
+    def only_spy(c, label, excluded, out_pdf):
+        seen[c] = ([], [(Path(d).name, s) for d, s in excluded])
+        return real_only(c, label, excluded, out_pdf)
+
+    monkeypatch.setattr(rep, 'build_combo_report', combo_spy)
+    monkeypatch.setattr(rep, 'build_excluded_only_report', only_spy)
+    written = rep.generate(tmp_path)
+
+    assert seen['exp_combo001'] == ([ok.name], [(bad.name, 'timed_out')])
+    assert seen['exp_combo002'] == ([], [(lost.name, 'failed')])
+    assert all(Path(p).exists() for p in written)
 
 
 def test_report_rebuilds_legacy_archive_with_recorded_status(tmp_path):

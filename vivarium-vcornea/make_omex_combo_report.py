@@ -75,13 +75,31 @@ from reportlab.platypus import (HRFlowable, Image, PageBreak, Paragraph,
 from make_omex_summary_pdf import (parse_archive, run_validation, columns_for,
                                     ROLES, SEDNS, read_provenance as _read_provenance)
 
-# Import the generator (by filename, so the package __init__/vivarium chain is not
-# triggered) to (re)build the experiment scan.omex before reporting on it.
-sys.path.insert(0, str((Path(__file__).resolve().parent / 'vivarium_vcornea' / 'utils')))
+# The generator (to (re)build the experiment scan.omex before reporting on it) and
+# its sibling utils are imported by package name: vivarium-angio ships modules
+# with the same bare names (omex_generator, parameter_audit, provenance), so a bare
+# import off sys.path can resolve to the wrong package's module in any process
+# that has loaded both. Bare imports remain only as a fallback for a checkout
+# whose package is not installed.
+_UTILS_DIR = Path(__file__).resolve().parent / 'vivarium_vcornea' / 'utils'
 try:
-    import omex_generator as _og
-except Exception:  # noqa: BLE001
-    _og = None
+    from vivarium_vcornea.utils import omex_generator as _og
+    from vivarium_vcornea.utils import parameter_audit as _parameter_audit
+    from vivarium_vcornea.utils.units import MCS_PER_DAY, MCS_PER_HOUR
+except ImportError:
+    sys.path.insert(0, str(_UTILS_DIR))
+    try:
+        import omex_generator as _og
+    except Exception:  # noqa: BLE001
+        _og = None
+    try:
+        import parameter_audit as _parameter_audit
+    except Exception:  # noqa: BLE001
+        _parameter_audit = None
+    try:
+        from units import MCS_PER_DAY, MCS_PER_HOUR
+    except Exception:  # noqa: BLE001
+        MCS_PER_DAY, MCS_PER_HOUR = 240.0, 10.0
 
 CELL_COLORS = {'Superficial': '#55ffff', 'Wing': '#0055ff',
                'Basal': '#ffbe99', 'Stem': '#ff007f'}
@@ -89,12 +107,68 @@ CELL_COLORS = {'Superficial': '#55ffff', 'Wing': '#0055ff',
 
 # --------------------------------------------------------------- discovery
 def _is_per_run(omex: Path) -> bool:
+    """A per-run archive of ANY outcome (the experiment-level *_scan.omex is not).
+
+    Requiring simulation.sedml here used to drop every failed, cancelled and
+    timed-out run from the reports without a trace, since those archives
+    deliberately omit the executable SED-ML.
+    """
     try:
         with zipfile.ZipFile(omex) as zf:
             n = set(zf.namelist())
-        return 'run_metadata.json' in n and 'simulation.sedml' in n
+        return 'run_metadata.json' in n and 'scan_metadata.json' not in n
     except Exception:
         return False
+
+
+def archive_outcome(omex: Path) -> dict:
+    """{'status', 'exit_code', 'error', 'replicate', 'archive'} for one per-run
+    archive. status.json is authoritative; an archive that predates it is a
+    success iff it carries an executable SED-ML."""
+    out = {'status': None, 'exit_code': None, 'error': None,
+           'replicate': omex.parent.name, 'archive': omex.name}
+    try:
+        with zipfile.ZipFile(omex) as zf:
+            names = set(zf.namelist())
+            doc = json.loads(zf.read('status.json')) if 'status.json' in names else {}
+            meta = json.loads(zf.read('run_metadata.json')) if 'run_metadata.json' in names else {}
+    except Exception as e:
+        return {**out, 'status': 'unreadable', 'error': str(e)}
+    out['status'] = doc.get('status') or ('success' if 'simulation.sedml' in names else 'failed')
+    out['exit_code'] = doc.get('exit_code', meta.get('exit_code'))
+    out['error'] = doc.get('error_message') or meta.get('error_message')
+    if meta.get('replicate_id') is not None:
+        out['replicate'] = f"replicate_{meta['replicate_id']}"
+    return out
+
+
+def split_by_outcome(omex_paths):
+    """(successful archives, [archive_outcome() of every other archive])."""
+    ok, other = [], []
+    for o in omex_paths:
+        outcome = archive_outcome(o)
+        if outcome['status'] == 'success':
+            ok.append(o)
+        else:
+            other.append(outcome)
+    return ok, other
+
+
+def _unsuccessful_table_rows(outcomes):
+    rows = [["Replicate", "Status", "Exit code", "Error", "Archive"]]
+    for oc in outcomes:
+        err = (oc.get('error') or '&mdash;').replace('<', '&lt;')
+        rows.append([oc['replicate'], f"<b>{oc['status']}</b>",
+                     '&mdash;' if oc['exit_code'] is None else str(oc['exit_code']),
+                     err[:220] + ('&hellip;' if len(err) > 220 else ''), oc['archive']])
+    return rows
+
+
+_UNSUCCESSFUL_NOTE = (
+    "These attempts are part of the experiment record but are excluded from every "
+    "plot and metric in this report: their archives carry status.json and no "
+    "executable SED-ML, and any partial outputs they hold are not results. Open "
+    "the listed archive (logs, parameters, partial outputs) to diagnose them.")
 
 
 def _combo_key(omex: Path) -> str:
@@ -260,9 +334,8 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     summarised in a line, so a report stays short when the run stayed inside
     its documented evidence.
     """
-    try:
-        import parameter_audit as _pa  # utils dir is on sys.path
-    except Exception:
+    _pa = _parameter_audit
+    if _pa is None:
         return []
     audits = [a for a in (_pa.load_parameter_audit(s) for s in audit_sources) if a]
     if not audits:
@@ -301,7 +374,51 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     return out
 
 
-def build_combo_report(combo_key, omex_paths, out_pdf):
+def build_unsuccessful_combo_report(combo_key, outcomes, out_pdf):
+    """Report for a combination none of whose attempts succeeded: there is
+    nothing to plot, but the attempts must still appear in the record."""
+    ss = getSampleStyleSheet()
+    H = ParagraphStyle('H', parent=ss['Heading1'], fontSize=15, spaceAfter=2,
+                       textColor=colors.HexColor('#1a3c5e'))
+    SUB = ParagraphStyle('SUB', parent=ss['Normal'], fontSize=8.5,
+                         textColor=colors.grey, spaceAfter=8)
+    H2 = ParagraphStyle('H2', parent=ss['Heading2'], fontSize=10.5, spaceBefore=9,
+                        spaceAfter=3, textColor=colors.HexColor('#1a3c5e'))
+    S = [Paragraph(f"OMEX Combination Report — {combo_key}", H),
+         Paragraph(f"No successful replicate: {len(outcomes)} unsuccessful attempt(s).", SUB),
+         HRFlowable(width="100%", thickness=1, color=colors.HexColor('#1a3c5e')),
+         Paragraph("Unsuccessful Attempts", H2),
+         _prows_plain(_unsuccessful_table_rows(outcomes),
+                      [0.95 * inch, 0.8 * inch, 0.65 * inch, 2.6 * inch, 1.75 * inch]),
+         Paragraph(_UNSUCCESSFUL_NOTE, SUB)]
+    SimpleDocTemplate(str(out_pdf), pagesize=letter, topMargin=0.55 * inch,
+                      bottomMargin=0.5 * inch, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                      title=f"OMEX Combination Report {combo_key}").build(S)
+    return Path(out_pdf)
+
+
+def _prows_plain(rows, widths):
+    """Header-styled table of Paragraph cells (shared by the unsuccessful-run
+    sections, which sit outside the builders' local table helpers)."""
+    ss = getSampleStyleSheet()
+    cell = ParagraphStyle('cell', parent=ss['Normal'], fontSize=7.6, leading=9)
+    cellH = ParagraphStyle('cellH', parent=cell, textColor=colors.white, fontName='Helvetica-Bold')
+    t = Table([[Paragraph(c, cellH if i == 0 else cell) for c in r] for i, r in enumerate(rows)],
+              colWidths=widths)
+    t.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 7.6), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cccccc')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fdf3f2')]),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8a2a1f')),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5)]))
+    return t
+
+
+def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
+    """omex_paths: the combination's SUCCESSFUL per-run archives (plotted and
+    summarised). unsuccessful: archive_outcome() records of its other attempts,
+    listed in their own section and excluded from every result."""
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='omex_combo_'))
 
@@ -339,12 +456,6 @@ def build_combo_report(combo_key, omex_paths, out_pdf):
     total_combos = meta0.get('total_combinations')
     cfg = meta0.get('simulation_config', {})
 
-    try:
-        sys.path.insert(0, str((Path(__file__).resolve().parent /
-                                'vivarium_vcornea' / 'utils')))
-        from units import MCS_PER_DAY, MCS_PER_HOUR
-    except Exception:
-        MCS_PER_DAY, MCS_PER_HOUR = 240.0, 10.0
     sim_days = (meta0.get('key_parameters', {}).get('SimTime') or cfg.get('sim_time'))
     sim_mcs = sim_hours = None
     if isinstance(sim_days, (int, float)):
@@ -401,9 +512,17 @@ def build_combo_report(combo_key, omex_paths, out_pdf):
            (f"SimTime {sim_days} days (= {sim_mcs:g} MCS = {sim_hours:g} hours) &middot; "
             if sim_mcs else "") +
            f"injury={'yes' if cfg.get('has_injury') else 'no'} ({cfg.get('injury_type')})"],
-          ["Replicates", f"{n_replicates} (this report aggregates {len(reps)} archive(s); "
-                         "plots show each replicate plus the across-replicate mean)"]]
+          ["Replicates", f"{n_replicates} (this report aggregates {len(reps)} successful "
+                         "archive(s); plots show each replicate plus the across-replicate mean)"
+                         + (f" &middot; <b>{len(unsuccessful)} unsuccessful attempt(s) excluded, "
+                            "listed below</b>" if unsuccessful else "")]]
     S.append(prows([[f"<b>{a}</b>", b] for a, b in ov], [1.4 * inch, 5.35 * inch], header=False))
+
+    if unsuccessful:
+        S.append(Paragraph("Unsuccessful Attempts (excluded from results)", H2))
+        S.append(_prows_plain(_unsuccessful_table_rows(unsuccessful),
+                              [0.95 * inch, 0.8 * inch, 0.65 * inch, 2.6 * inch, 1.75 * inch]))
+        S.append(Paragraph(_UNSUCCESSFUL_NOTE, SUB))
 
     # How replicates are represented in the OMEX (the reference the run gives us)
     S.append(Paragraph("How Replicates Appear in the OMEX", H2))
@@ -477,7 +596,8 @@ def build_combo_report(combo_key, omex_paths, out_pdf):
             "Replicates of a combination share a parameterization and differ only in the "
             "random number generator seed, so a difference between them is stochastic rather "
             "than configured. Seeds marked <i>drawn</i> were generated independently at launch "
-            "and recorded afterwards; the software does not prescribe a seed. The schema "
+            "and recorded afterwards; seeds marked <i>explicit</i> were set by the operator "
+            "(a pinned seed applies to the first replicate only). The schema "
             "fingerprint identifies the parameter definitions in force when the run was "
             "configured, and the code entry the source revision that executed it.", SUB))
 
@@ -600,9 +720,13 @@ def _combo_metric_frames(omex_paths):
     return frames, label, reps, sim_days, inj_days, has_injury
 
 
-def build_experiment_report(root, combos, out_pdf):
+def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     """Cross-combination comparison PDF (OMEX-internal): one line per combo for
-    each cell type, surfactant, and mean thickness, plus a summary metrics table."""
+    each cell type, surfactant, and mean thickness, plus a summary metrics table.
+
+    combos: {combo: SUCCESSFUL per-run archives}. unsuccessful: {combo:
+    [archive_outcome()]} for every other attempt, listed and excluded."""
+    unsuccessful = {k: v for k, v in (unsuccessful or {}).items() if v}
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='omex_exp_'))
 
@@ -793,9 +917,22 @@ def build_experiment_report(root, combos, out_pdf):
         S.append(PageBreak())
 
     S.append(Paragraph("Combinations", H2))
-    S.append(prows([["Combination", "Label", "Replicates"]] +
-                   [[ck, data[ck]['label'], str(data[ck]['reps'])] for ck in order],
-                   [2.2 * inch, 3.35 * inch, 1.2 * inch]))
+    S.append(prows([["Combination", "Label", "Replicates", "Unsuccessful"]] +
+                   [[ck, data[ck]['label'], str(data[ck]['reps']),
+                     str(len(unsuccessful.get(ck, [])))] for ck in order],
+                   [2.0 * inch, 3.0 * inch, 0.85 * inch, 0.9 * inch]))
+    if unsuccessful:
+        S.append(Paragraph("Unsuccessful Attempts (excluded from every comparison)", H2))
+        rows = [["Combination"] + _unsuccessful_table_rows([])[0]]
+        for ck in sorted(unsuccessful):
+            for r in _unsuccessful_table_rows(unsuccessful[ck])[1:]:
+                rows.append([ck] + r)
+        S.append(_prows_plain(rows, [1.2 * inch, 0.8 * inch, 0.7 * inch, 0.55 * inch,
+                                     2.0 * inch, 1.5 * inch]))
+        no_success = sorted(set(unsuccessful) - set(order))
+        S.append(Paragraph(_UNSUCCESSFUL_NOTE + (
+            " Combinations with no successful replicate (absent from the comparisons): "
+            + ", ".join(no_success) + "." if no_success else ""), SUB))
 
     S.append(Paragraph("Summary Metrics (from replicate-mean series)", H2))
     mrows = [["Combination", "Wing baseline", "Wing min", "Wing final", "Recovery %",
@@ -875,18 +1012,28 @@ def generate(path):
         print(f"[combo_report] no per-run .omex archives under {path}")
         return []
     written = []
+    successful, unsuccessful = {}, {}
     for combo_key, omex_paths in combos.items():
+        ok, other = split_by_outcome(omex_paths)
+        if ok:
+            successful[combo_key] = ok
+        if other:
+            unsuccessful[combo_key] = other
         # write the report into the combo folder (next to its replicates)
         out_dir = (path / combo_key) if (path / combo_key).is_dir() else omex_paths[0].parent.parent
         out_pdf = out_dir / f"{combo_key}_omex_report.pdf"
-        written.append(build_combo_report(combo_key, omex_paths, out_pdf))
-        print(f"[combo_report] wrote {out_pdf}  ({len(omex_paths)} replicate archive(s))")
+        if ok:
+            written.append(build_combo_report(combo_key, ok, out_pdf, unsuccessful=other))
+        else:
+            written.append(build_unsuccessful_combo_report(combo_key, other, out_pdf))
+        print(f"[combo_report] wrote {out_pdf}  ({len(ok)} successful, "
+              f"{len(other)} unsuccessful replicate archive(s))")
     # whole-experiment comparison PDF when there is more than one combination
-    if len(combos) > 1:
-        _ensure_scan_archive(path, combos)   # refresh the comparison scan.omex first
+    if len(combos) > 1 and successful:
+        _ensure_scan_archive(path, successful)   # refresh the comparison scan.omex first
         out_pdf = path / f"{path.name}_experiment_report.pdf"
-        written.append(build_experiment_report(path, combos, out_pdf))
-        print(f"[combo_report] wrote {out_pdf}  (comparison across {len(combos)} combos)")
+        written.append(build_experiment_report(path, successful, out_pdf, unsuccessful))
+        print(f"[combo_report] wrote {out_pdf}  (comparison across {len(successful)} combos)")
     return written
 
 

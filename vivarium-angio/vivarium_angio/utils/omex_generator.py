@@ -1190,10 +1190,86 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name, sim_para
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
 
 
+def run_outcome(run_dir) -> str:
+    """'success' / 'failed' / 'timed_out' / 'cancelled' / 'unknown' for one run dir.
+
+    The single test of whether a run's outputs may enter a result. A run that
+    failed, timed out or was cancelled can still leave a partial data.zarr; its
+    trajectory is evidence for diagnosis, never a replicate to average.
+    Precedence: cancellation marker, the run's own run_metadata.json, then the
+    status.json of its archive. A run with no record at all is 'unknown' and is
+    treated as not successful.
+    """
+    run_dir = Path(run_dir)
+    if (run_dir / 'cancelled.json').exists():
+        return 'cancelled'
+    try:
+        meta = json.loads((run_dir / 'run_metadata.json').read_text())
+    except Exception:
+        meta = None
+    if meta:
+        if meta.get('simulation_status') in _ARCHIVE_STATUSES:
+            return meta['simulation_status']
+        success = (meta.get('execution') or {}).get('success')
+        if success is not None:
+            return 'success' if success else 'failed'
+    archive = run_dir / f"{run_dir.name}.omex"
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            status = json.loads(zf.read('status.json')).get('status')
+        if status in _ARCHIVE_STATUSES:
+            return status
+    except Exception:
+        pass
+    return 'unknown'
+
+
+def _replicate_identity(run_dir, root=None):
+    """Where a replicate lives and which realization it is, for scan_metadata."""
+    run_dir = Path(run_dir)
+    try:
+        meta = json.loads((run_dir / 'run_metadata.json').read_text())
+    except Exception:
+        meta = {}
+    params = meta.get('parameters') or {}
+    location = str(run_dir)
+    if root is not None:
+        try:
+            location = run_dir.relative_to(root).as_posix()
+        except ValueError:
+            pass
+    archive = run_dir / f"{run_dir.name}.omex"
+    return {
+        'run_dir': location,
+        'run_id': meta.get('run_id'),
+        'random_seed': meta.get('random_seed', params.get('random_seed')),
+        'archive': (f"{location}/{archive.name}" if archive.exists() else None),
+    }
+
+
+def split_replicates(replicate_dirs):
+    """(successful dirs, [(dir, outcome)] for the rest), in input order."""
+    ok, other = [], []
+    for d in replicate_dirs or []:
+        outcome = run_outcome(d)
+        if outcome == 'success':
+            ok.append(Path(d))
+        else:
+            other.append((Path(d), outcome))
+    return ok, other
+
+
 def _read_combo_metric_means(combinations):
     """For each combo, average the per-replicate metric series (extracted from each
-    replicate's data.zarr) on Time. combinations entries: {label, safe, replicate_dirs}.
-    Returns [{safe,label,df(Time+metrics)}]. Needs pandas; empty if unavailable."""
+    SUCCESSFUL replicate's data.zarr) on Time. combinations entries: {label, safe,
+    replicate_dirs}. Returns [{safe,label,df(Time+metrics),included,excluded}];
+    combos without a successful replicate are omitted. Needs pandas; empty if
+    unavailable.
+
+    Replicates that failed, timed out or were cancelled are excluded even when they
+    left a data.zarr: averaging a truncated trajectory into a replicate mean would
+    silently bias the series it is compared on.
+    """
     try:
         import io
         import pandas as pd
@@ -1201,19 +1277,24 @@ def _read_combo_metric_means(combinations):
         return []
     out = []
     for combo in combinations or []:
-        frames = []
-        for rep_dir in combo.get('replicate_dirs', []):
-            store = Path(rep_dir) / 'data.zarr'
+        ok, excluded = split_replicates(combo.get('replicate_dirs', []))
+        frames, included = [], []
+        for rep_dir in ok:
+            store = rep_dir / 'data.zarr'
             if not store.exists():
+                excluded.append((rep_dir, 'no data.zarr'))
                 continue
             csv = extract_zarr_metrics(store)
             if not csv:
+                excluded.append((rep_dir, 'no metrics'))
                 continue
             frames.append(pd.read_csv(io.StringIO(csv)).set_index('Time'))
+            included.append(rep_dir)
         if not frames:
             continue
         mean = pd.concat(frames).groupby(level=0).mean(numeric_only=True).reset_index()
-        out.append({'safe': _safe_sid(combo['label']), 'label': combo['label'], 'df': mean})
+        out.append({'safe': _safe_sid(combo['label']), 'label': combo['label'], 'df': mean,
+                    'included': included, 'excluded': excluded})
     return out
 
 
@@ -1260,6 +1341,28 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
     except Exception:
         scan_provenance = None
 
+    # Per combination: which replicates the bundled mean series was computed from
+    # (location, run_id, seed, archive) and which were left out, with why. The
+    # scan archive previously recorded only a replicate count, so neither the
+    # source runs of a mean nor the exclusion of a failed run was visible.
+    by_label = {s['label']: s for s in summaries}
+    combo_records = []
+    for c in (combinations or []):
+        s = by_label.get(c['label'])
+        if s is not None:
+            included, excluded = s['included'], s['excluded']
+        else:
+            included, excluded = [], split_replicates(c.get('replicate_dirs', []))[1]
+        combo_records.append({
+            'label': c['label'],
+            'index': c.get('_index'),
+            'replicates': len(c.get('replicate_dirs', [])),
+            'replicates_in_mean': len(included),
+            'mean_series': f"combo_data/{_safe_sid(c['label'])}.csv" if s is not None else None,
+            'included': [_replicate_identity(d, batch_output_dir) for d in included],
+            'excluded': [{**_replicate_identity(d, batch_output_dir), 'reason': why}
+                         for d, why in excluded],
+        })
     scan_metadata = {
         'run_name': run_name, 'created_at': datetime.now().isoformat(),
         'archive_type': 'experiment_scan', 'comparison': bool(summaries),
@@ -1267,8 +1370,10 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
         'parameter_scan': scan_spec, 'total_scan_points': len(combinations or []),
         'replicates_per_point': num_replicates,
         'metrics': ANGIO_METRIC_COLUMNS,
-        'combinations': [{'label': c['label'], 'replicates': len(c.get('replicate_dirs', []))}
-                         for c in (combinations or [])],
+        'replicate_mean_policy': ('Mean series average only replicates whose run '
+                                  'completed successfully; failed, timed-out and '
+                                  'cancelled replicates are listed under "excluded".'),
+        'combinations': combo_records,
     }
     cr = creator
     creators = ([cr] if isinstance(cr, dict) else [{'given': str(cr)}] if cr else [])

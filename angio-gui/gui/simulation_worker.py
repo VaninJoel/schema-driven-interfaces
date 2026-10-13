@@ -546,10 +546,8 @@ except Exception as e:
             spec.loader.exec_module(mod)
             record = mod.run_provenance(start_path=mod_path.parent)
             # The schema fingerprint is computed ONCE by the main window, which
-            # already holds the schema, and handed to each worker. It is not
-            # recomputed here: instantiating AngiogenesisProcess builds and starts
-            # a CC3D simulation in its constructor, so a "just read the schema"
-            # call would launch a stray simulation per run.
+            # already holds the schema, and handed to each worker, so every run of
+            # a session records the definitions its controls were built from.
             fingerprint = self.parameters.get('_schema_fingerprint')
             if fingerprint:
                 record['schema_fingerprint'] = fingerprint

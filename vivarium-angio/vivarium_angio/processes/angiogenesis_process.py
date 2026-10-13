@@ -514,24 +514,32 @@ class AngiogenesisProcess(Process):
         simInit.region_new(pt_min=[1, 1, 0], pt_max=[199, 199, 1], width=7, gap=3, cell_types=['EC'])
         self.specs.append(simInit)
 
+        # Use custom store path if provided, otherwise default
+        self.store = self.parameters.get('store_path', 'temp_store.zarr')
+        self.mcs = 0
+
+        # The CC3D service is started lazily, on the first next_update(). Starting
+        # it here meant that merely constructing the process — which the GUI does
+        # to read ports_schema() and PRESETS — launched a full simulation in the
+        # GUI process and created a stray temp_store.zarr in the working directory.
+        self.core_sim = None
+
+    def _start_simulation(self):
+        """Build and start the CC3D simulation service (once, on first use)."""
+        if self.core_sim is not None:
+            return
         # Disable CC3D default output directory (we use Zarr instead)
         # Setting output_dir=None prevents CC3D from creating OutStore folder
         self.core_sim = CC3DSimService(output_dir=None, output_frequency=0)
         self.core_sim.register_specs(self.specs)
-
-        # Use custom store path if provided, otherwise default
-        self.store = self.parameters.get('store_path', 'temp_store.zarr')
         field_names = ['VEGF']
         self.core_sim.register_steppable(WriterSteppable(store=self.store,
                                                            exp_name=self.parameters['exp_name'],
                                                            exp_params=self.parameters,
                                                            field_names=field_names), frequency=1)
-        
         self.core_sim.run()
         self.core_sim.init()
         self.core_sim.start()
-        
-        self.mcs = 0
 
     def _resolve_random_seed(self):
         """Return the concrete RNG seed for this run, drawing one if unset.
@@ -2040,8 +2048,9 @@ class AngiogenesisProcess(Process):
     # Original next_update method would remain unchanged
 
     def next_update(self, timestep, states):
+        self._start_simulation()
         self.mcs += 1
-        
+
         write_freq = self.parameters.get('write_frequency', 10)
         if self.mcs % write_freq == 0:
             self.core_sim.sim_input = ['write', self.mcs]
@@ -2057,6 +2066,10 @@ class AngiogenesisProcess(Process):
         }
 
     def finish(self):
+        if self.core_sim is None:
+            # Never stepped (e.g. constructed only to read the schema): there is
+            # no run to archive and no simulation to tear down.
+            return
         # Generate the OMEX archive BEFORE core_sim.finish() because the CC3D
         # finish tears down internal state and any subsequent reference to the
         # Zarr store or parameters can fail silently. The angio-gui worker
