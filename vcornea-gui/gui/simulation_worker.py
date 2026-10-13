@@ -6,11 +6,9 @@ Runs the black-box Vivarium wrapper in a subprocess and reports completion.
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 
@@ -212,7 +210,6 @@ class SimulationWorker(QObject):
     def run(self):
         try:
             self.progress.emit(0, f"Initializing simulation: {self.exp_name}")
-            start_time = time.time()
             self.temp_script = self._create_simulation_script()
 
             self.exp_dir.mkdir(parents=True, exist_ok=True)
@@ -411,21 +408,6 @@ except Exception as e:
         except Exception:
             pass
 
-    def _find_latest_run_dir(self, output_dir: Path, start_time: float):
-        candidates = [p for p in output_dir.iterdir() if p.is_dir()]
-        recent = [p for p in candidates if p.stat().st_mtime >= start_time - 5]
-        if not recent:
-            return None
-        return max(recent, key=lambda p: p.stat().st_mtime)
-
-    def _move_logs(self, run_dir: Path, stdout_log: Path, stderr_log: Path):
-        logs_dir = run_dir / 'logs'
-        logs_dir.mkdir(exist_ok=True)
-        try:
-            shutil.move(str(stdout_log), str(logs_dir / stdout_log.name))
-            shutil.move(str(stderr_log), str(logs_dir / stderr_log.name))
-        except Exception:
-            pass
 
     def _verify_real_outputs(self, exit_code: int) -> bool:
         """Return True only if the run produced real simulation output.

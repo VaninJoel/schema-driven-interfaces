@@ -18,11 +18,10 @@ Date: 2026
 
 import sys
 from pathlib import Path
-import json
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QGroupBox, QPushButton, QLabel, QMessageBox, QComboBox,
-    QTextBrowser, QSplitter, QFileDialog, QProgressBar, QDoubleSpinBox,
+    QTextBrowser, QFileDialog, QProgressBar, QDoubleSpinBox,
     QCheckBox, QLineEdit, QSpinBox, QDialog, QDialogButtonBox, QSizePolicy,
     QScrollArea
 )
@@ -42,24 +41,19 @@ except Exception:
 from simulation_worker import SimulationWorker
 
 # Import schema utilities
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
     format_ontology_term,
     default_provenance_lines,
-    literature_lines,
     evidence_basis_lines,
     expected_behavior_lines,
     get_parameter_structure,
     get_display_name_mapping,
     get_model_defaults,
-    get_parameters_by_expertise_level,
     get_full_parameter_info,
-    validate_parameter_set,
     validate_parameter_value,
-    get_parameter_presets,
     should_show_parameter,
 )
 
@@ -2387,112 +2381,12 @@ class VCorneaMainWindow(QMainWindow):
     def _make_worker(self, params_copy):
         return SimulationWorker(params_copy, str(self.batch_output_folder))
 
-    def launch_simulation(self, metadata):
-        """Actually launch the simulation in a worker thread."""
-        # Disable run button during simulation
-        self.run_button.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-
-        # Create worker and thread (convert Path to string for compatibility)
-        self.worker = SimulationWorker(self.current_params.copy(), str(self.output_dir))
-        self.worker_thread = QThread()
-
-        # Move worker to thread
-        self.worker.moveToThread(self.worker_thread)
-
-        # Connect signals
-        self.worker.progress.connect(self.on_simulation_progress)
-        self.worker.finished.connect(self.on_simulation_finished)
-        self.worker.error.connect(self.on_simulation_error)
-        self.worker_thread.started.connect(self.worker.run)
-
-        # Start the thread
-        self.worker_thread.start()
 
     def on_simulation_progress(self, percentage, message):
         """Handle progress updates from simulation worker."""
         self.progress_bar.setValue(percentage)
         self.statusBar().showMessage(message)
 
-    def on_simulation_finished(self, results):
-        """Handle simulation completion."""
-        # Stop and cleanup thread
-        if self.worker_thread:
-            self.worker_thread.quit()
-            self.worker_thread.wait()
-            self.worker_thread = None
-            self.worker = None
-
-        # Re-enable run button
-        self.run_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Simulation completed successfully", 5000)
-
-        # Show completion dialog
-        exp_name = results.get('exp_name', 'unknown')
-        final_step = results.get('final_step', 0)
-        exp_dir = results.get('exp_dir', 'unknown')
-        sim_time = results.get('parameters', {}).get('sim_time', 100)
-
-        # Check if simulation completed fully
-        completion_status = "completed successfully" if final_step >= sim_time else f"stopped at step {final_step}"
-
-        msg = (
-            f"<h3>Simulation '{exp_name}' {completion_status}!</h3>"
-            f"<p><b>Final step:</b> {final_step}/{int(sim_time)} MCS</p>"
-            f"<p><b>Experiment directory:</b> <code>{exp_dir}/</code></p>"
-        )
-
-        # Show directory structure
-        msg += "<hr><p><b>Output structure:</b></p>"
-        msg += "<pre style='font-size: 10px;'>"
-        msg += f"{exp_name}/\n"
-        msg += f"├── cell_count_*.csv\n"
-        msg += f"├── thickness_rep*_*.parquet\n"
-        msg += f"├── surfactant_*.csv\n"
-        msg += f"├── logs/\n"
-        msg += f"│   ├── stdout.log\n"
-        msg += f"│   └── stderr.log\n"
-        msg += f"└── run_metadata.json\n"
-        msg += "</pre>"
-
-        QMessageBox.information(
-            self,
-            "Simulation Complete",
-            msg
-        )
-
-    def on_simulation_error(self, error_message):
-        """Handle simulation errors."""
-        # Stop and cleanup thread
-        if self.worker_thread:
-            self.worker_thread.quit()
-            self.worker_thread.wait()
-            self.worker_thread = None
-            self.worker = None
-
-        # Re-enable run button
-        self.run_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Simulation failed", 5000)
-
-        # Create scrollable error dialog with better formatting
-        error_dialog = QMessageBox(self)
-        error_dialog.setIcon(QMessageBox.Critical)
-        error_dialog.setWindowTitle("Simulation Error")
-        error_dialog.setText("<h3>Simulation failed!</h3>")
-
-        # Format error message with HTML for better readability
-        formatted_msg = error_message.replace('\n', '<br>')
-        error_dialog.setInformativeText(
-            f"<p><b>Check the log files for complete output.</b></p>"
-            f"<pre style='font-size: 9px;'>{error_message}</pre>"
-        )
-
-        error_dialog.setStandardButtons(QMessageBox.Ok)
-        error_dialog.setDetailedText(error_message)  # Full text in expandable section
-        error_dialog.exec_()
 
     def on_batch_simulation_finished(self, results):
         """Handle completion of one simulation in a batch."""
