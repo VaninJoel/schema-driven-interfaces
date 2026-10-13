@@ -40,6 +40,25 @@ def test_info_panel_shows_current_value_as_written(vcornea_window):
     assert f'<code>SimTime={default_days!r}</code>' not in html
 
 
+def test_panels_label_stored_values_with_the_stored_unit(vcornea_window):
+    """A stored (sim-unit) value is never printed with the display unit."""
+    gui, win = vcornea_window
+    from schema_utils import get_full_parameter_info, validate_parameter_value
+    name = 'EGF_SUPERDiffCoef'
+    info = get_full_parameter_info(win.schema, name)
+    panel = _info_html(gui, win, name)
+    assert 'Unit of stored value:</span> voxel^2/MCS' in panel
+    assert '20 voxel^2/MCS' in panel and '13.3333 µm²/min' in panel
+
+    value = win.current_params.get(name)                     # stored: 20.0
+    dlg = gui.main_window.ValidationInfoDialog(
+        name, win.schema['inputs'][name], value,
+        validate_parameter_value(win.schema, name, value), win)
+    html = dlg._generate_html(name, win.schema['inputs'][name], value,
+                              validate_parameter_value(win.schema, name, value))
+    assert f'{value} voxel^2/MCS' in html and f'{value} µm²/min' not in html
+
+
 def test_batch_timeout_kills_tree_and_archives_unfinished_replicates(qapp, tmp_path):
     """The GUI worker's outer limit: the wrapper subprocess hangs with a CC3D-like
     grandchild. Both must die, and the replicate it never finalized is recorded

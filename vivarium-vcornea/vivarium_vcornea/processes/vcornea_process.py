@@ -253,7 +253,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal surface area (perimeter in 2D) each stem cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Stem Cells',
-                    '_unit': 'µm', # Perimeter length
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (10, 30),
                     '_range_evidence': {
@@ -360,7 +360,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal volume (area in 2D) each stem cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Stem Cells',
-                    '_unit': 'µm²', # Area in 2D
+                    '_unit': 'voxel^2',  # unit of the stored value (sim units); displayed in µm² via utils/units.py
                     '_dimension': 'area',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -670,7 +670,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal surface area (perimeter in 2D) each basal cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Basal Cells',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (10, 35),
                     '_range_evidence': {
@@ -777,7 +777,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal volume (area in 2D) each basal cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Basal Cells',
-                    '_unit': 'µm²',
+                    '_unit': 'voxel^2',  # unit of the stored value (sim units); displayed in µm² via utils/units.py
                     '_dimension': 'area',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -1090,7 +1090,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal surface area (perimeter in 2D) each wing cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Wing Cells',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -1197,7 +1197,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal volume (area in 2D) each wing cell tries to maintain (fixed).',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Wing Cells',
-                    '_unit': 'µm²',
+                    '_unit': 'voxel^2',  # unit of the stored value (sim units); displayed in µm² via utils/units.py
                     '_dimension': 'area',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -1350,7 +1350,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal surface area (perimeter in 2D) each superficial cell tries to maintain.',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Superficial Cells',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -1457,7 +1457,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal volume (area in 2D) each superficial cell tries to maintain (fixed).',
                     '_category': 'Cell Properties',
                     '_subcategory': 'Superficial Cells',
-                    '_unit': 'µm²',
+                    '_unit': 'voxel^2',  # unit of the stored value (sim units); displayed in µm² via utils/units.py
                     '_dimension': 'area',
                     '_physiological_range': (15, 40),
                     '_range_evidence': {
@@ -1511,7 +1511,8 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of Movement Bias chemoattractant secretion by the basement membrane.',
                     '_category': 'Tissue Mechanics',
                     '_subcategory': 'Movement Signals',
-                    '_unit': 'Normalized Conc. / hour', # Rate
+                    '_unit': 'Normalized Conc. / MCS',  # unit of the stored value (sim units)
+                    '_display_unit': 'Normalized Conc. / hour',  # operator-facing; conversion via utils/units.py ('rate')
                     '_dimension': 'rate',
                     '_recommended_range': (0.1, 10.0),
                     '_range_evidence': {
@@ -1560,7 +1561,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate at which basal and stem cells absorb the Movement Bias chemoattractant.',
                     '_category': 'Tissue Mechanics',
                     '_subcategory': 'Movement Signals',
-                    '_unit': '1 / hour', # Rate
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.1, 10.0),
                     '_range_evidence': {
@@ -1609,7 +1610,8 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of EGF introduction from the tear film.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Production',
-                    '_unit': 'Normalized Conc. / hour',
+                    '_unit': 'Normalized Conc. / MCS',  # unit of the stored value (sim units)
+                    '_display_unit': 'Normalized Conc. / hour',  # operator-facing; conversion via utils/units.py ('rate')
                     '_dimension': 'rate',
                     '_recommended_range': (0.1, 10.0),
                     '_range_evidence': {
@@ -1658,7 +1660,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate at which basal cells consume EGF.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Consumption',
-                    '_unit': '1 / hour',
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.0, 5.0),
                     '_range_evidence': {
@@ -1707,7 +1709,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate at which stem cells consume EGF.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Consumption',
-                    '_unit': '1 / hour',
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.0, 5.0),
                     '_range_evidence': {
@@ -1755,7 +1757,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate at which superficial cells consume EGF.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Consumption',
-                    '_unit': '1 / hour',
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.0, 5.0),
                     '_range_evidence': {
@@ -1803,7 +1805,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate at which wing cells consume EGF.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Consumption',
-                    '_unit': '1 / hour',
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.0, 5.0),
                     '_range_evidence': {
@@ -1851,7 +1853,7 @@ class VCorneaProcess(Process):
                     '_description': 'Overall rate at which EGF naturally breaks down or is removed.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Dynamics',
-                    '_unit': '1 / hour',
+                    '_unit': '1/MCS',  # unit of the stored value (sim units); displayed in 1/hour via utils/units.py
                     '_dimension': 'rate',
                     '_recommended_range': (0.1, 2.0),
                     '_range_evidence': {
@@ -1903,7 +1905,7 @@ class VCorneaProcess(Process):
                     '_description': 'Diffusion coefficient for the EGF field in the superficial layer.',
                     '_category': 'Growth Factors',
                     '_subcategory': 'EGF Dynamics',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 186),
                     '_range_evidence': {
@@ -2013,7 +2015,7 @@ class VCorneaProcess(Process):
                     '_description': 'Maximum distance over which the Superficial-Wall link force applies.',
                     '_category': 'Tissue Mechanics',
                     '_subcategory': 'Boundary Interactions',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (100, 2000),
                     '_range_evidence': {
@@ -2117,7 +2119,7 @@ class VCorneaProcess(Process):
                     '_description': 'Ideal resting length of the connection between superficial cells.',
                     '_category': 'Tissue Mechanics',
                     '_subcategory': 'Cell Adhesion',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (1, 10),
                     '_range_evidence': {
@@ -2171,7 +2173,7 @@ class VCorneaProcess(Process):
                     '_description': 'Maximum distance over which the Superficial-Superficial link force applies.',
                     '_category': 'Tissue Mechanics',
                     '_subcategory': 'Cell Adhesion',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (100, 2000),
                     '_range_evidence': {
@@ -2403,7 +2405,7 @@ class VCorneaProcess(Process):
                     '_description': 'X-coordinate of the ablation injury center.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Mechanical Injury',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (0, 200),
                     '_range_evidence': {
@@ -2461,7 +2463,7 @@ class VCorneaProcess(Process):
                     '_description': 'Y-coordinate of the ablation injury center.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Mechanical Injury',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (0, 90),
                     '_range_evidence': {
@@ -2520,7 +2522,7 @@ class VCorneaProcess(Process):
                     '_description': 'Radius of the circular ablation injury area.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Mechanical Injury',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (1, 90),
                     '_range_evidence': {
@@ -2624,7 +2626,7 @@ class VCorneaProcess(Process):
                     '_description': 'X-coordinate for the center of initial chemical application.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Injury',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (0, 200),
                     '_range_evidence': {
@@ -2680,7 +2682,7 @@ class VCorneaProcess(Process):
                     '_description': 'Y-coordinate for the center of initial chemical application.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Injury',
-                    '_unit': 'µm',
+                    '_unit': 'voxel',  # unit of the stored value (sim units); displayed in µm via utils/units.py
                     '_dimension': 'length',
                     '_physiological_range': (0, 90),
                     '_range_evidence': {
@@ -2830,7 +2832,7 @@ class VCorneaProcess(Process):
                     '_literature': [3, 2, 6],
                 },
                 # ... Diffusion Coefficients SLS_*DiffCoef ...
-                 'SLS_STEMDiffCoef': {
+                'SLS_STEMDiffCoef': {
                     '_default': 5.0,
                     '_updater': 'set',
                     '_emit': True,
@@ -2838,7 +2840,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within stem cells.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                      '_range_evidence': {
@@ -2891,7 +2893,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within basal cells.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
@@ -2944,7 +2946,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within wing cells.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
@@ -2997,7 +2999,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within superficial cells.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
@@ -3050,7 +3052,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within the peripheral basement membrane region.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
@@ -3103,7 +3105,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within the limbal basement membrane region.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
@@ -3156,7 +3158,7 @@ class VCorneaProcess(Process):
                     '_description': 'Rate of chemical diffusion within the tear film.',
                     '_category': 'Injury Settings',
                     '_subcategory': 'Chemical Diffusion',
-                    '_unit': 'µm²/min',  # display label; conversion via utils/units.py keyed on _dimension
+                    '_unit': 'voxel^2/MCS',  # unit of the stored value (sim units); displayed in µm²/min via utils/units.py
                     '_dimension': 'diffusion',
                     '_physiological_range': (0, 5.0),
                     '_range_evidence': {
