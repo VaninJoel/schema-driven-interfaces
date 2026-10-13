@@ -17,9 +17,20 @@ name: vc
 channels:
   - conda-forge
   - compucell3d
+  # CC3D 4.7.0 on Windows needs vs2015_win-64, which exists only on Anaconda's
+  # `defaults` channel. Miniconda/Anaconda include `defaults` implicitly, but
+  # Miniforge does not, so it is listed explicitly (lowest priority). Using it
+  # requires accepting Anaconda's ToS once -- see INSTALL.md, Troubleshooting.
+  - defaults
 dependencies:
   - python=3.12
   - compucell3d=4.7.0
+  # Use OpenBLAS rather than MKL for numpy. On Windows, MKL's threading layer
+  # needs Intel OpenMP symbols that conda-forge's llvm-openmp `libiomp5md.dll`
+  # shim does not export, so any numpy matrix product (and therefore every
+  # matplotlib draw, e.g. the GUI's equation rendering) dies with Windows fatal
+  # exception 0xc06d007f.
+  - libblas=*=*openblas
   # GUI toolkit. CompuCell3D already pulls a PyQt5/Qt stack, but the GUIs
   # `import PyQt5` directly, so we list it explicitly rather than rely on a
   # transitive dependency that a future CC3D build could drop. The solver
