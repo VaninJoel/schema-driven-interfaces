@@ -575,9 +575,19 @@ class ParameterInfoDialog(QDialog):
         if _units is not None and dim and is_number and abs(_units.factor(dim, disp_override) - 1.0) > 1e-12:
             impl.append(f"Displayed in the GUI as <b>{_units.to_display(sim_default, dim, disp_override):g} "
                         f"{_units.display_unit_label(dim, disp_override)}</b>, converted from the stored simulation value.")
-        if sim_default is not None:
-            impl.append(f"Written to <code>Parameters.py</code> as <code>{param_name}={sim_default!r}</code> "
-                        f"(simulation units — the value the model actually runs).")
+        # The literal assignment the run will write: the CURRENT value (not the
+        # schema default), through the same conversion the Parameters.py writer
+        # uses (e.g. SimTime in days -> MCS).
+        current_params = getattr(self.parent(), 'current_params', None) or {}
+        current_value = current_params.get(param_name, sim_default)
+        if current_value is not None:
+            try:
+                from vivarium_vcornea.processes.vcornea_process import to_cc3d_value
+                written = to_cc3d_value(param_info, current_value)
+            except Exception:
+                written = current_value
+            impl.append(f"Written to <code>Parameters.py</code> as <code>{param_name}={written!r}</code> "
+                        f"(CC3D-native units — the value the model actually runs).")
         if '_conditional_display' in param_info:
             impl.append("Shown conditionally in the GUI (depends on injury/mode flags).")
         if param_info.get('_implementation_pattern'):
@@ -1941,21 +1951,24 @@ class VCorneaMainWindow(QMainWindow):
         if not cancelled_names or self.batch_output_folder is None:
             return
         from datetime import datetime
-        log_path = Path(self.batch_output_folder) / "experiment_log.csv"
         try:
-            existed = log_path.exists()
-            with open(log_path, 'a', encoding='utf-8') as fh:
-                if not existed:
-                    fh.write("run_name,created_at,simulation_success,parameters_changed,"
-                             "sim_time,has_injury,injury_type,healing_time,output_directory\n")
-                now = datetime.now().isoformat()
-                sim_time = self.current_params.get('SimTime', '')
-                is_injury = self.current_params.get('IsInjury', '')
-                injury_type = 'ablation' if self.current_params.get('InjuryType', False) else 'chemical'
-                for name in cancelled_names:
-                    fh.write(
-                        f"{name},{now},CANCELLED,,{sim_time},{is_injury},{injury_type},,{name}\n"
-                    )
+            # Same append-only, locked, fixed-column log VCorneaProcess writes,
+            # so cancellation rows can never corrupt or be clobbered by it.
+            from vivarium_vcornea.utils.experiment_log import append_rows
+            now = datetime.now().isoformat()
+            injury_type = 'ablation' if self.current_params.get('InjuryType', False) else 'chemical'
+            append_rows(self.batch_output_folder, [{
+                'run_name': name,
+                'status': 'cancelled',
+                'simulation_success': False,
+                'created_at': now,
+                'completed_at': now,
+                'sim_time': self.current_params.get('SimTime'),
+                'has_injury': self.current_params.get('IsInjury'),
+                'injury_type': injury_type,
+                'output_directory': name,
+                'error_message': 'Run interrupted by the operator before completion.',
+            } for name in cancelled_names])
         except Exception as e:
             print(f"  > Warning: could not append cancellation to experiment_log.csv: {e}")
 

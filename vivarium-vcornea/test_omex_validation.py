@@ -215,3 +215,95 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
+# =============================================================================
+# pytest entry points. The steps above only ran when the file was executed as a
+# script, so pytest collected nothing and the COMBINE check never ran in the
+# suite. These make it part of `pytest vivarium-vcornea/`.
+# =============================================================================
+import pytest  # noqa: E402
+
+from omex_generator import executed_model_overrides  # noqa: E402
+
+
+def _combine_errors(omex_path):
+    try:
+        from biosimulators_utils.combine.io import CombineArchiveReader
+        from biosimulators_utils.combine.validation import validate as validate_archive
+    except ImportError as e:  # a required check, not an optional one
+        pytest.fail("biosimulators-utils is required for the COMBINE conformance "
+                    "test: pip install -e ./vivarium-vcornea[validation] "
+                    f"({e})")
+    with tempfile.TemporaryDirectory() as extract_dir:
+        archive = CombineArchiveReader().run(str(omex_path), extract_dir)
+        errors, _warnings = validate_archive(archive, archive_dirname=extract_dir)
+    return errors
+
+
+@pytest.fixture
+def success_archive(tmp_path):
+    run_metadata, sim_params = make_synthetic_run(tmp_path, num_replicates=3)
+    return create_omex_archive(run_output_dir=tmp_path, run_metadata=run_metadata,
+                               sim_params=sim_params, include_model=False)
+
+
+def test_success_archive_builtin_structure(success_archive):
+    payload = step_inspect_archive(success_archive)
+    assert step_builtin_validators(payload)
+
+
+def test_success_archive_passes_combine_validator(success_archive):
+    assert _combine_errors(success_archive) == []
+
+
+def test_sedml_seed_is_the_replicates_not_the_batch_sentinel(tmp_path):
+    # sim_params carries the batch-level sentinel; run_metadata the seed this
+    # replicate ran with. The executable description must name the latter.
+    run_metadata, sim_params = make_synthetic_run(tmp_path)
+    run_metadata['random_seed'] = 98765
+    sim_params['random_seed'] = -1
+    omex = create_omex_archive(run_output_dir=tmp_path, run_metadata=run_metadata,
+                               sim_params=sim_params, include_model=False)
+    with zipfile.ZipFile(omex) as zf:
+        assert 'value="98765"' in zf.read('simulation.sedml').decode()
+
+
+@pytest.mark.parametrize('status', ['failed', 'cancelled', 'timed_out'])
+def test_unsuccessful_archive_omits_sedml_and_records_status(tmp_path, status):
+    run_metadata, sim_params = make_synthetic_run(tmp_path)
+    run_metadata.update(simulation_success=False, run_timeout_seconds=60,
+                        run_id='r1', exit_code=None if status != 'failed' else 2)
+    omex = create_omex_archive(run_output_dir=tmp_path, run_metadata=run_metadata,
+                               sim_params=sim_params, include_model=False, status=status)
+    with zipfile.ZipFile(omex) as zf:
+        names = zf.namelist()
+        doc = json.loads(zf.read('status.json'))
+        assert len(names) == len(set(names)), "duplicate archive entries"
+    assert 'simulation.sedml' not in names
+    assert doc['status'] == status and doc['simulation_success'] is False
+    assert doc['timed_out'] is (status == 'timed_out')
+    assert doc['run_id'] == 'r1'
+
+
+def test_bundled_model_carries_executed_parameters_and_seed(tmp_path):
+    # Source project vs. the per-replicate copy that ran: the archive must hold
+    # the copy's Parameters.py and seeded XML, but the source steppables.
+    source, executed, out = tmp_path / 'src', tmp_path / 'run', tmp_path / 'out'
+    for root, params, seed, step in ((source, 'SimTime=5760', '', 'SOURCE'),
+                                     (executed, 'SimTime=240', '<RandomSeed>7</RandomSeed>', 'REDIRECTED')):
+        (root / 'Simulation').mkdir(parents=True)
+        (root / 'vCornea_v2.cc3d').write_text('<Simulation/>')
+        (root / 'Simulation' / 'Parameters.py').write_text(params)
+        (root / 'Simulation' / 'vCornea_v2.xml').write_text(f'<CompuCell3D><Potts>{seed}</Potts></CompuCell3D>')
+        (root / 'Simulation' / 'vCornea_v2Steppables.py').write_text(step)
+    out.mkdir()
+    run_metadata, sim_params = make_synthetic_run(out)
+    omex = create_omex_archive(run_output_dir=out, run_metadata=run_metadata,
+                               sim_params=sim_params, model_path=source,
+                               model_overrides=executed_model_overrides(executed))
+    with zipfile.ZipFile(omex) as zf:
+        assert zf.read('model/Simulation/Parameters.py').decode() == 'SimTime=240'
+        assert '<RandomSeed>7</RandomSeed>' in zf.read('model/Simulation/vCornea_v2.xml').decode()
+        assert zf.read('model/Simulation/vCornea_v2Steppables.py').decode() == 'SOURCE'
+        assert 'model/vCornea_v2.cc3d' in zf.read('simulation.sedml').decode()

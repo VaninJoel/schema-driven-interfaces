@@ -392,8 +392,12 @@ def generate_sedml_document(
 
     # The RNG seed is part of the executable description, not just a note: it
     # identifies which realization of the stochastic process this archive holds.
-    # Omitted (rather than guessed) for runs that predate seed capture.
-    seed = sim_params.get('random_seed', run_metadata.get('random_seed'))
+    # Omitted (rather than guessed) for runs that predate seed capture. The seed
+    # resolved for THIS replicate lives in run_metadata; sim_params may still carry
+    # the batch-level sentinel (-1) or an operator pin that only replicate 1 used.
+    seed = run_metadata.get('random_seed')
+    if seed is None:
+        seed = sim_params.get('random_seed')
     if seed is not None and str(seed) != '-1':
         algo_params = ET.SubElement(algorithm, 'listOfAlgorithmParameters')
         seed_param = ET.SubElement(algo_params, 'algorithmParameter')
@@ -771,12 +775,42 @@ def _resolve_project_path(p):
     return Path(s)
 
 
-def _collect_model_files(model_path):
+def executed_model_overrides(executed_project):
+    """Archive-path -> file map for the parts of a per-replicate project copy that
+    define what actually ran: the generated Parameters.py and the seeded CC3DML.
+
+    Overlaid on the source project when archiving, so re-executing model/ runs this
+    replicate's parameters and seed. The copy's steppables are deliberately NOT
+    used: their output paths were rewritten to absolute replicate directories that
+    only exist on the machine that ran the batch.
+    """
+    sim = Path(executed_project) / 'Simulation'
+    overrides = {}
+    params = sim / 'Parameters.py'
+    if params.exists():
+        overrides['model/Simulation/Parameters.py'] = params
+    for xml in sorted(sim.glob('*.xml')):
+        overrides[f'model/Simulation/{xml.name}'] = xml
+    return overrides
+
+
+def _collect_model_files(model_path, overrides=None):
     """Return ([(src_path, archive_path), ...], primary_cc3d_archive_path) for the
     CC3D project: the .cc3d descriptor(s), PIFF seeds, Simulation/ steppables+XML,
     and any MaBoSS files. The primary .cc3d (preferring vCornea_v2.cc3d) is what the
-    SED-ML model/@source should point at."""
-    model_path = Path(model_path)
+    SED-ML model/@source should point at.
+
+    `overrides` maps archive paths to replacement source files (see
+    executed_model_overrides); an override for a path the project lacks is added."""
+    files, primary = _collect_source_model_files(Path(model_path))
+    if overrides:
+        files = [(Path(overrides.get(ap, src)), ap) for src, ap in files]
+        present = {ap for _, ap in files}
+        files += [(Path(src), ap) for ap, src in overrides.items() if ap not in present]
+    return files, primary
+
+
+def _collect_source_model_files(model_path):
     files, primary = [], None
     for cc3d in sorted(model_path.glob('*.cc3d')):
         ap = f"model/{cc3d.name}"
@@ -871,6 +905,10 @@ _ARCHIVE_STATUSES = {
                   'intended parameters, provenance, logs and any partial outputs '
                   'produced before the interruption, and contains no executable '
                   'SED-ML.'),
+    'timed_out': ('This run exceeded its wall-clock limit and was terminated before '
+                  'completion. The archive preserves the intended parameters, '
+                  'provenance, logs, the limit that applied and any partial outputs '
+                  'produced before termination, and contains no executable SED-ML.'),
 }
 
 
@@ -989,6 +1027,7 @@ def create_omex_archive(
     failed: bool = False,
     status: Optional[str] = None,
     parameter_audit: Optional[Dict[str, Any]] = None,
+    model_overrides: Optional[Dict[str, Path]] = None,
 ) -> Path:
     """
     Create a COMBINE/OMEX archive containing all simulation outputs.
@@ -1020,6 +1059,9 @@ def create_omex_archive(
         include_model: Whether to include the CC3D model files
         model_path: Path to CC3D project (auto-detected if None and include_model=True)
         include_data_descriptions: Whether to include dataDescription for CSV files
+        model_overrides: archive path -> file replacing the source project's copy
+            (executed_model_overrides() of the replicate's workspace), so the
+            bundled model carries the parameters and seed this run executed
 
     Returns:
         Path to the created .omex archive
@@ -1041,7 +1083,7 @@ def create_omex_archive(
     model_files = []
     model_source = "vcornea.cc3d"   # descriptive fallback if the project is absent
     if include_model and model_path and model_path.exists():
-        model_files, primary = _collect_model_files(model_path)
+        model_files, primary = _collect_model_files(model_path, model_overrides)
         if primary:
             model_source = primary
 
@@ -1083,8 +1125,11 @@ def create_omex_archive(
         'failed': "FAILED run (incomplete; not a reproducible experiment). ",
         'cancelled': ("CANCELLED run (interrupted by the operator; incomplete and not "
                       "evidence about model behaviour). "),
+        'timed_out': ("TIMED-OUT run (terminated at its wall-clock limit; incomplete, "
+                      "not a reproducible experiment). "),
     }[status]
-    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]"}[status]
+    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]",
+                  'timed_out': " [TIMED OUT]"}[status]
     auto_desc = description or (
         f"{status_phrase}CompuCell3D V-Cornea run '{run_name}'. SimTime {cfg.get('sim_time')} days; "
         f"injury={'yes' if cfg.get('has_injury') else 'no'}"
@@ -1126,6 +1171,11 @@ def create_omex_archive(
             'interrupted_by_operator': status == 'cancelled',
             'executable_sedml_present': complete,
             'run_name': run_name,
+            'run_id': run_metadata.get('run_id'),
+            'exit_code': run_metadata.get('exit_code'),
+            'timed_out': status == 'timed_out',
+            'timeout_seconds': run_metadata.get('run_timeout_seconds'),
+            'duration_seconds': run_metadata.get('duration_seconds'),
             'error_message': run_metadata.get('error_message'),
             'cancelled_at': run_metadata.get('cancelled_at'),
             'note': _ARCHIVE_STATUSES[status],
@@ -1152,9 +1202,11 @@ def create_omex_archive(
             manifest_entries.append({'location': 'parameter_audit.json',
                                      'format': FORMAT_URIS['.json']})
 
-        # 3. Output files
+        # 3. Output files (skipping any the archive already carries, e.g. the
+        #    parameter_audit.json the process also leaves in the run directory)
+        already_written = set(zf.namelist())
         for item in run_output_dir.iterdir():
-            if item.is_file() and item.suffix != '.omex':
+            if item.is_file() and item.suffix != '.omex' and item.name not in already_written:
                 zf.write(item, item.name)
                 manifest_entries.append({
                     'location': item.name,
