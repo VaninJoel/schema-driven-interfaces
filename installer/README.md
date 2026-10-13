@@ -41,12 +41,9 @@ single-file `.exe` (NSIS/Inno Setup) is a planned follow-up.
 
 ## Building
 
-Each installer must be built **on its own OS**. The recommended path is CI —
-[`.github/workflows/build-installers.yml`](../.github/workflows/build-installers.yml)
-builds all three on `ubuntu/macos/windows-latest` and attaches them to a GitHub
-Release on any `v*` tag (or via "Run workflow").
-
-Locally, for the OS you're on:
+Each installer must be built **on its own OS**, so build it on each platform you
+want to ship and attach the files in `installer/dist/` to a GitHub Release by
+hand. For the OS you're on:
 
 ```bash
 # one-time build tools (makeself on Linux/macOS; 7zip on Windows — makeself
@@ -88,11 +85,11 @@ The GUIs launch CompuCell3D with their own bundled interpreter
 The Linux path is validated end to end: build → self-extracting `.sh` → install
 to a clean prefix → `conda-unpack` → launchers + shortcuts created → GUI builds
 and a headless CompuCell3D simulation runs and produces output — all with no
-conda activation. The macOS/Windows scripts mirror this and build in CI.
+conda activation. The macOS/Windows scripts mirror this.
 
 ## Known follow-ups
 
 - **Code signing / notarization.** Unsigned installers trip Windows SmartScreen
   and macOS Gatekeeper. Add an Authenticode cert (Windows) and Apple Developer ID
-  + `notarytool` (macOS) in CI before public distribution.
+  + `notarytool` (macOS) to the build before public distribution.
 - **Size.** ~1.2 GB compressed per installer (CompuCell3D + Qt + SciPy stack).
