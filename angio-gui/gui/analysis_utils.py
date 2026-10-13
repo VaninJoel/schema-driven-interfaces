@@ -336,16 +336,32 @@ def find_experiments(output_dir: Path) -> List[Path]:
     if not output_dir.exists():
         return experiments
 
-    # Look for directories containing data.zarr
-    for item in output_dir.iterdir():
-        if item.is_dir():
-            zarr_path = item / 'data.zarr'
-            metadata_path = item / 'run_metadata.json'
-
-            if zarr_path.exists() and metadata_path.exists():
-                experiments.append(item)
+    # Runs live at any depth (each launch has its own timestamped folder), so
+    # search recursively rather than one level down. Only runs whose record says
+    # they completed are offered: a failed, timed-out or cancelled run keeps its
+    # partial Zarr for diagnosis (and in its archive), but replaying it here
+    # beside completed runs would present it as a result.
+    for zarr_path in output_dir.rglob('data.zarr'):
+        item = zarr_path.parent
+        if zarr_path.is_dir() and run_status(item) == 'success':
+            experiments.append(item)
 
     return sorted(experiments)
+
+
+def run_status(exp_dir: Path):
+    """'success' / 'failed' / 'timed_out' / 'cancelled', or None if unrecorded."""
+    exp_dir = Path(exp_dir)
+    if (exp_dir / 'cancelled.json').exists():
+        return 'cancelled'
+    try:
+        meta = json.loads((exp_dir / 'run_metadata.json').read_text())
+    except Exception:
+        return None
+    status = meta.get('simulation_status')
+    if status:
+        return status
+    return 'success' if (meta.get('execution') or {}).get('success') else 'failed'
 
 
 def detect_cell_boundaries(cell_ids: np.ndarray) -> np.ndarray:

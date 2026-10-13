@@ -636,10 +636,17 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf):
 
 def _regenerate_archives(combos, labels, scan_spec, sim_params, root, num_replicates, creator):
     """(Re)generate per-run .omex (new format) + the experiment scan.omex."""
-    def _is_new_format(omex):
+    def _is_current_archive(omex):
+        # An archive carrying status.json was written by the current worker and
+        # records the run's outcome; it is never rebuilt. (Testing for
+        # metrics.csv instead treated every failed/cancelled archive, which has
+        # no metrics, as old-format and regenerated it as a SUCCESS archive with
+        # executable SED-ML.)
         try:
             with zipfile.ZipFile(omex) as zf:
-                return 'metrics.csv' in zf.namelist() and 'metadata.rdf' in zf.namelist()
+                names = zf.namelist()
+                return 'status.json' in names or (
+                    'metrics.csv' in names and 'metadata.rdf' in names)
         except Exception:
             return False
 
@@ -648,17 +655,23 @@ def _regenerate_archives(combos, labels, scan_spec, sim_params, root, num_replic
         paths = []
         for d in dirs:
             existing = d / f"{d.name}.omex"
-            if existing.exists() and _is_new_format(existing):
-                paths.append(existing)        # reuse worker-generated new-format archive
+            if existing.exists() and _is_current_archive(existing):
+                paths.append(existing)        # reuse the worker-generated archive
                 continue
             try:
                 meta = json.loads((d / 'run_metadata.json').read_text())
             except Exception:
                 meta = {'parameters': _params(d)}
+            # Rebuilding a legacy archive: keep the outcome the run recorded.
+            status = meta.get('simulation_status')
+            if (d / 'cancelled.json').exists():
+                status = 'cancelled'
+            if status not in ('success', 'failed', 'cancelled', 'timed_out'):
+                status = 'success' if (meta.get('execution') or {}).get('success') else 'failed'
             try:
                 paths.append(og.create_omex_archive_from_zarr(
                     d / 'data.zarr', meta, meta.get('parameters', {}),
-                    archive_path=existing, creator=creator))
+                    archive_path=existing, creator=creator, status=status))
             except Exception as e:  # noqa: BLE001
                 print(f"[angio_report] per-run archive failed for {d.name}: {e}")
         omex_by_combo[c] = paths

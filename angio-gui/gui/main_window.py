@@ -1908,11 +1908,17 @@ batch_sweep_20251106_143052/
         else:
             # After the run, build the OMEX experiment scan archive + PDF reports.
             self._generate_run_reports()
+            failed = getattr(self, 'failed_combinations', 0)
+            succeeded = self.completed_combinations - failed
+            headline = ("All simulations completed successfully!" if not failed else
+                        f"{failed} of {self.completed_combinations} simulation(s) did not "
+                        f"complete (failed or timed out). Their archives are marked with "
+                        f"that status.")
             QMessageBox.information(
                 self,
                 "Batch Complete",
-                f"All simulations completed successfully!\n\n"
-                f"Total runs: {self.completed_combinations}\n"
+                f"{headline}\n\n"
+                f"Succeeded: {succeeded}/{self.completed_combinations}\n"
                 f"Output folder: {self.batch_output_folder}\n\n"
                 f"OMEX scan archive + PDF reports are being generated in the background."
             )
@@ -2028,15 +2034,20 @@ batch_sweep_20251106_143052/
         # Get base experiment name from schema parameter
         base_exp_name = self.current_params.get('exp_name', 'unnamed_run')
 
-        # Setup output directory for batch
+        # Every launch — single runs included — gets its own timestamped folder.
+        # A single run used to write straight into the output directory, so a
+        # rerun with the same name overwrote (or appended into) the earlier run,
+        # and the post-run report tool treated every past run in the output
+        # directory as part of this one.
         from datetime import datetime
-        if is_sweep or replicates > 1:
-            # Create batch folder with timestamp
-            folder_name = f"{base_exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.batch_output_folder = self.output_dir / folder_name
-            self.batch_output_folder.mkdir(parents=True, exist_ok=True)
-        else:
-            self.batch_output_folder = self.output_dir
+        folder_name = f"{base_exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.batch_output_folder = self.output_dir / folder_name
+        suffix = 1
+        while self.batch_output_folder.exists():   # two launches within one second
+            suffix += 1
+            self.batch_output_folder = self.output_dir / f"{folder_name}_{suffix}"
+        self.batch_output_folder.mkdir(parents=True, exist_ok=True)
+        self.failed_combinations = 0
 
         # Show confirmation with batch info
         sweep_info = ""
@@ -2211,8 +2222,11 @@ batch_sweep_20251106_143052/
         thread.started.connect(worker.run)
         worker.finished.connect(self.on_batch_simulation_finished)
         worker.error.connect(self.on_batch_simulation_error)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
+        # A failed run ends the thread too; previously only `finished` did, so
+        # every failed run left a QThread running for the life of the window.
+        for done in (worker.finished, worker.error):
+            done.connect(thread.quit)
+            done.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         self._active_runs += 1
         thread.start()
@@ -2362,6 +2376,7 @@ batch_sweep_20251106_143052/
             return
 
         self.completed_combinations += 1
+        self.failed_combinations = getattr(self, 'failed_combinations', 0) + 1
         self._release_run_slot()
 
         # Update progress (count as completed even though it failed)

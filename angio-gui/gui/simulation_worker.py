@@ -14,8 +14,27 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 import zarr
+
+# Default per-run wall-clock limit (seconds); override with the
+# `run_timeout_seconds` parameter. Recorded with every run.
+DEFAULT_RUN_TIMEOUT_S = 86400
+
+
+def _kill_tree(process):
+    """Kill a subprocess and all its descendants (CC3D survives its parent on
+    Windows). Falls back to killing the direct child if the helper is missing."""
+    try:
+        from vivarium_angio.utils.process_tree import kill_process_tree
+    except ImportError:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        return
+    kill_process_tree(process)
 
 
 class SimulationWorker(QObject):
@@ -70,18 +89,26 @@ class SimulationWorker(QObject):
         # reviewer can distinguish a run that finished quickly from one that was
         # cut short, and so batch cost is auditable.
         self._started_at = None
+        # Durable identity of this attempt (exp_name is a human label that a
+        # rerun can repeat); recorded in run_metadata.json and the archive.
+        self.run_id = uuid.uuid4().hex
+        try:
+            self._timeout_s = max(int(parameters.get('run_timeout_seconds',
+                                                     DEFAULT_RUN_TIMEOUT_S)), 1)
+        except (TypeError, ValueError):
+            self._timeout_s = DEFAULT_RUN_TIMEOUT_S
+        self._timed_out = False
+        self._launch_error = None
 
     @pyqtSlot()
     def cancel(self):
         """Kill the entire subprocess tree spawned by this worker.
 
         Cancelling previously called only QThread.quit(), which does nothing while
-        the worker is blocked inside subprocess.wait(): the CC3D simulation kept
+        the worker is blocked waiting on the subprocess: the CC3D simulation kept
         running to completion, consuming CPU, while the interface reported the
         batch as cancelled. Killing only our direct child is not enough either —
         it is a Python interpreter whose CC3D grandchildren survive it on Windows.
-        psutil handles the tree cross-platform; taskkill /T and process.kill() are
-        the fallbacks.
 
         A cancellation marker and a status='cancelled' archive are then written so
         an interrupted attempt is recorded rather than silently absent.
@@ -89,43 +116,15 @@ class SimulationWorker(QObject):
         self._cancelled = True
         was_running = self.process is not None and self.process.poll() is None
         if was_running:
-            pid = self.process.pid
-            killed = False
-            try:
-                import psutil
-                try:
-                    parent = psutil.Process(pid)
-                    for child in parent.children(recursive=True):
-                        try:
-                            child.kill()
-                        except psutil.NoSuchProcess:
-                            pass
-                    parent.kill()
-                    killed = True
-                except psutil.NoSuchProcess:
-                    killed = True
-            except ImportError:
-                pass
-            if not killed and sys.platform == 'win32':
-                try:
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
-                                   capture_output=True, timeout=10)
-                    killed = True
-                except Exception:
-                    pass
-            if not killed:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
+            _kill_tree(self.process)
 
         self.monitoring = False
         try:
-            import json as _json
             from datetime import datetime as _dt
             self.exp_dir.mkdir(parents=True, exist_ok=True)
-            (self.exp_dir / 'cancelled.json').write_text(_json.dumps({
+            (self.exp_dir / 'cancelled.json').write_text(json.dumps({
                 'exp_name': self.exp_name,
+                'run_id': self.run_id,
                 'status': 'cancelled',
                 'cancelled_at': _dt.now().isoformat(),
                 'was_running_at_cancel': was_running,
@@ -138,11 +137,33 @@ class SimulationWorker(QObject):
 
     @pyqtSlot()
     def run(self):
-        """Main method executed on background thread."""
-        try:
-            self._started_at = time.time()
-            self.progress.emit(0, f"Initializing simulation: {self.exp_name}")
+        """Main method executed on background thread.
 
+        Every attempt that gets as far as owning its run directory ends with a
+        run_metadata.json and a status-typed archive — success, failure, timeout
+        or cancellation — and the GUI is told success only when the archive says
+        success (one predicate, _outcome, decides both).
+        """
+        exit_code = None
+        stdout = stderr = ''
+        stdout_log_path = self.logs_dir / 'stdout.log'
+        stderr_log_path = self.logs_dir / 'stderr.log'
+        self._started_at = time.time()
+        self.progress.emit(0, f"Initializing simulation: {self.exp_name}")
+
+        # A run directory is single-use. The Zarr writer opens its store in
+        # append mode and skips steps that already exist, so a rerun into the
+        # same directory would silently mix the earlier run's snapshots into
+        # this one. Refuse before touching anything, so the earlier run's
+        # records are left intact.
+        if self.zarr_path.exists():
+            self.error.emit(
+                f"Refusing to reuse {self.zarr_path}: it already holds a run. Reusing it "
+                f"would mix that run's snapshots into this one. Choose a new experiment "
+                f"name or output folder.")
+            return
+
+        try:
             # Create temporary script for subprocess execution
             self.temp_script = self._create_simulation_script()
 
@@ -151,9 +172,6 @@ class SimulationWorker(QObject):
             # Create experiment directory structure
             self.exp_dir.mkdir(parents=True, exist_ok=True)
             self.logs_dir.mkdir(exist_ok=True)
-
-            stdout_log_path = self.logs_dir / 'stdout.log'
-            stderr_log_path = self.logs_dir / 'stderr.log'
 
             self.stdout_log = open(stdout_log_path, 'w')
             self.stderr_log = open(stderr_log_path, 'w')
@@ -168,96 +186,101 @@ class SimulationWorker(QObject):
 
             self.progress.emit(10, f"Simulation running (PID: {self.process.pid}), monitoring progress...")
 
-            # Start monitoring Zarr store for progress
+            # Monitor the Zarr store until the process exits or its wall-clock
+            # limit passes (in which case the whole tree is killed).
             self._monitor_progress()
-
-            # Wait for process to complete (24 hour timeout)
             try:
-                exit_code = self.process.wait(timeout=86400)
+                exit_code = self.process.wait(timeout=60)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                raise
-            finally:
-                # Close log files
-                self.stdout_log.close()
-                self.stderr_log.close()
-
-                # Read logs for reporting
-                with open(stdout_log_path, 'r') as f:
-                    stdout = f.read()
-                with open(stderr_log_path, 'r') as f:
-                    stderr = f.read()
-
-            # Get final step to see how far we got
-            final_step = self._get_final_step()
-
-            # Analyze exit code (including Windows CC3D crashes)
-            exit_code_msg = self._interpret_exit_code(exit_code)
-
-            # Save run metadata to experiment directory
-            self._save_run_metadata(exit_code, final_step)
-
-            # Always package the run into a COMBINE/OMEX archive (no opt-out) —
-            # successful AND failed. A failed run produces a typed archive marked
-            # failed (no executable SED-ML, status.json=failed) carrying params,
-            # provenance, logs and any partial Zarr outputs, instead of being left
-            # as a loose directory.
-            # If the operator cancelled, cancel() already killed the process tree
-            # and wrote the cancellation marker and archive. Emitting a failure
-            # here would re-report the interruption as a model failure and
-            # overwrite the cancelled archive with a failed one.
-            if self._cancelled:
-                return
-
-            run_succeeded = (exit_code == 0 and self.zarr_path.exists())
-            self._generate_omex_archive(final_step, failed=not run_succeeded)
-
-            if exit_code == 0:
-                self.progress.emit(100, "Simulation completed successfully!")
-
-                self.finished.emit({
-                    'exp_name': self.exp_name,
-                    'exp_dir': str(self.exp_dir),
-                    'zarr_path': str(self.zarr_path),
-                    'final_step': final_step,
-                    'parameters': self.parameters,
-                    'stdout': stdout,
-                    'stderr': stderr,
-                    'log_files': {
-                        'stdout': str(stdout_log_path),
-                        'stderr': str(stderr_log_path)
-                    },
-                    'success': True
-                })
-            else:
-                error_msg = (
-                    f"Simulation failed with exit code {exit_code}\n"
-                    f"{exit_code_msg}\n\n"
-                    f"Reached step: {final_step}/{int(self.sim_time)}\n\n"
-                    f"Experiment directory:\n"
-                    f"  {self.exp_dir}/\n\n"
-                    f"Log files:\n"
-                    f"  stdout: {stdout_log_path}\n"
-                    f"  stderr: {stderr_log_path}\n\n"
-                    f"Last 20 lines of stdout:\n"
-                    f"{self._get_tail(stdout, 20)}\n\n"
-                    f"Last 20 lines of stderr:\n"
-                    f"{self._get_tail(stderr, 20)}"
-                )
-                self.error.emit(error_msg)
-
-        except subprocess.TimeoutExpired:
-            self.error.emit("Simulation timed out after 24 hours")
-            if self.process:
-                self.process.kill()
+                _kill_tree(self.process)
+                exit_code = None
         except Exception as e:
             import traceback
-            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
-            self.error.emit(error_msg)
+            self._launch_error = f"{e}\n\n{traceback.format_exc()}"
         finally:
-            # Cleanup
+            for handle in (getattr(self, 'stdout_log', None), getattr(self, 'stderr_log', None)):
+                if handle is not None and not handle.closed:
+                    handle.close()
+            for path, name in ((stdout_log_path, 'stdout'), (stderr_log_path, 'stderr')):
+                try:
+                    text = path.read_text()
+                except Exception:
+                    text = ''
+                if name == 'stdout':
+                    stdout = text
+                else:
+                    stderr = text
             if self.temp_script and self.temp_script.exists():
                 self.temp_script.unlink()
+
+        final_step = self._get_final_step()
+
+        # If the operator cancelled, cancel() already killed the process tree and
+        # wrote the cancellation marker and archive. Record the run as cancelled
+        # (not failed) and emit nothing: an interruption is not a model failure.
+        if self._cancelled:
+            self._save_run_metadata(exit_code, final_step, 'cancelled')
+            return
+
+        status = self._outcome(exit_code)
+        self._save_run_metadata(exit_code, final_step, status)
+        # Always package the run into a COMBINE/OMEX archive (no opt-out), typed
+        # with its status: a non-successful run carries params, provenance, logs
+        # and any partial Zarr outputs but no executable SED-ML.
+        self._generate_omex_archive(final_step, status=status, exit_code=exit_code)
+
+        if status == 'success':
+            self.progress.emit(100, "Simulation completed successfully!")
+            self.finished.emit({
+                'exp_name': self.exp_name,
+                'exp_dir': str(self.exp_dir),
+                'zarr_path': str(self.zarr_path),
+                'final_step': final_step,
+                'parameters': self.parameters,
+                'stdout': stdout,
+                'stderr': stderr,
+                'log_files': {
+                    'stdout': str(stdout_log_path),
+                    'stderr': str(stderr_log_path)
+                },
+                'success': True
+            })
+            return
+
+        if status == 'timed_out':
+            headline = (f"Simulation exceeded its {self._timeout_s}s wall-clock limit and "
+                        f"was terminated (whole process tree killed).")
+        elif self._launch_error:
+            headline = f"Simulation could not be run:\n{self._launch_error}"
+        elif exit_code == 0:
+            headline = "Simulation process exited cleanly but produced no Zarr store."
+        else:
+            headline = (f"Simulation failed with exit code {exit_code}\n"
+                        f"{self._interpret_exit_code(exit_code)}")
+        self.error.emit(
+            f"{headline}\n\n"
+            f"Reached step: {final_step}/{int(self.sim_time)}\n\n"
+            f"Experiment directory:\n"
+            f"  {self.exp_dir}/\n\n"
+            f"Log files:\n"
+            f"  stdout: {stdout_log_path}\n"
+            f"  stderr: {stderr_log_path}\n\n"
+            f"Last 20 lines of stdout:\n"
+            f"{self._get_tail(stdout, 20)}\n\n"
+            f"Last 20 lines of stderr:\n"
+            f"{self._get_tail(stderr, 20)}"
+        )
+
+    def _outcome(self, exit_code):
+        """The run's status: the single success predicate for metadata, archive
+        and GUI signal alike."""
+        if self._launch_error:
+            return 'failed'
+        if self._timed_out:
+            return 'timed_out'
+        if exit_code == 0 and self.zarr_path.exists():
+            return 'success'
+        return 'failed'
 
     def _create_simulation_script(self):
         """Create temporary Python script to run simulation in subprocess."""
@@ -337,12 +360,24 @@ except Exception as e:
 
         The simulation writes data to the Zarr store at a configurable frequency.
         We periodically check what timesteps exist to calculate progress.
+
+        This loop is also where the wall-clock limit is enforced: it runs until
+        the process exits, so a limit applied after it (the old 24 h
+        process.wait timeout) could never fire.
         """
         self.monitoring = True
         last_reported_step = 0
+        deadline = (self._started_at or time.time()) + self._timeout_s
 
         while self.monitoring and self.process.poll() is None:
-            time.sleep(2)  # Check every 2 seconds
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                print(f"  > {self.exp_name}: exceeded {self._timeout_s}s limit; "
+                      f"terminating the process tree")
+                self._timed_out = True
+                _kill_tree(self.process)
+                break
+            time.sleep(min(2, remaining))  # Check every 2 seconds
 
             try:
                 current_step = self._get_latest_step()
@@ -433,21 +468,23 @@ except Exception as e:
         lines = text.strip().split('\n')
         return '\n'.join(lines[-num_lines:])
 
-    def _save_run_metadata(self, exit_code, final_step):
+    def _save_run_metadata(self, exit_code, final_step, status):
         """
         Save run metadata to a JSON file in the experiment directory.
 
         This creates a complete record of the simulation run including
-        parameters, timing, success status, and file locations.
+        parameters, timing, success status, and file locations. `status` is
+        the same outcome the archive records (see _outcome).
         """
-        import json
         from datetime import datetime
 
         metadata = {
             'experiment_name': self.exp_name,
+            'run_id': self.run_id,
             'timestamp': datetime.now().isoformat(),
             'parameters': self.parameters,
-            'simulation_status': 'success' if exit_code == 0 else 'failed',
+            'simulation_status': status,
+            'error_message': self._launch_error,
             'run_reference': self._build_run_reference(),  # Task B (None for single runs)
             # The seed handed to the CPM kernel for THIS run (assigned per-run by
             # the scheduler, so it is never the -1 sentinel here).
@@ -455,7 +492,11 @@ except Exception as e:
             'provenance': self._collect_provenance(),
             'execution': {
                 'exit_code': exit_code,
-                'success': exit_code == 0,
+                'exit_interpretation': (self._interpret_exit_code(exit_code)
+                                        if exit_code is not None else None),
+                'success': status == 'success',
+                'timed_out': self._timed_out,
+                'run_timeout_seconds': self._timeout_s,
                 'final_step': final_step,
                 'expected_steps': int(self.sim_time),
                 'completion_percentage': (final_step / self.sim_time * 100) if self.sim_time > 0 else 0,
@@ -537,7 +578,7 @@ except Exception as e:
             'parameter_scan': scan or None,
         }
 
-    def _generate_omex_archive(self, final_step, failed=False, status=None):
+    def _generate_omex_archive(self, final_step, failed=False, status=None, exit_code=None):
         """Package the run into a COMBINE/OMEX archive sibling to the Zarr store.
 
         Standards-compliant provenance is always-on: every run — successful or
@@ -568,7 +609,19 @@ except Exception as e:
 
             run_metadata = {
                 'experiment_id': self.exp_name,
+                'run_id': self.run_id,
                 'created_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                # Termination detail, so the audit bundle alone shows how the run
+                # ended (previously only the on-disk run_metadata.json had it).
+                'exit_code': exit_code,
+                'exit_interpretation': (self._interpret_exit_code(exit_code)
+                                        if exit_code is not None else None),
+                'timed_out': status == 'timed_out',
+                'run_timeout_seconds': self._timeout_s,
+                'started_at': (time.strftime('%Y-%m-%dT%H:%M:%S',
+                                             time.localtime(self._started_at))
+                               if self._started_at else None),
+                'error_message': self._launch_error,
                 'model_name': 'Angiogenesis',
                 'model_version': '1.0.0',
                 'parameters': self.parameters,
