@@ -6,8 +6,11 @@ is the supported way to install — one file sets up the whole stack.
 
 ## 1. Prerequisites
 
-- [Miniconda or Anaconda](https://docs.conda.io/en/latest/miniconda.html)
+- [Miniconda, Anaconda, or Miniforge](https://docs.conda.io/en/latest/miniconda.html)
   (conda ≥ 23.10 recommended — it uses the fast `libmamba` solver by default).
+  `environment.yml` lists Anaconda's `defaults` channel explicitly (CC3D needs
+  it on Windows), so Miniforge works too once its ToS is accepted — see
+  [Troubleshooting](#troubleshooting).
 - A C-capable OS that CompuCell3D 4.7.0 supports: Linux, Windows, or macOS.
 - For running the **GUIs** (PyQt5 desktop apps) you need a graphical display.
   On Linux/WSLg this works out of the box; over SSH use X11 forwarding
@@ -29,6 +32,19 @@ packages.
 > If the solve is slow on an older conda, either enable the libmamba solver
 > (`conda install -n base conda-libmamba-solver`) or use
 > `mamba env create -f environment.yml`.
+
+> **Windows:** the conda packages install fine, but the final pip step usually
+> fails with `CondaEnvException: Pip failed`. CC3D pulls in `vs2015_win-64`,
+> whose activation script (`vs2015_compiler_vars.bat`) is broken and aborts
+> the shell that conda runs pip in. Delete
+> `<env>\etc\conda\activate.d\vs2015_compiler_vars.bat`, where `<env>` is the
+> path `conda env list` shows for `vc` (e.g. `%USERPROFILE%\miniforge3\envs\vc`),
+> then re-run the pip step:
+> ```bat
+> del "%USERPROFILE%\miniforge3\envs\vc\etc\conda\activate.d\vs2015_compiler_vars.bat"
+> conda env update -n vc -f environment.yml
+> ```
+> The installer build (`installer/build.bat`) removes the same file.
 
 `vc` is just the default name — nothing depends on it. When you launch a GUI
 from this environment, both models run CompuCell3D **in the same interpreter**
@@ -79,13 +95,22 @@ conda env update -f environment.yml --prune
 ## Troubleshooting
 
 - **`CondaToSNonInteractiveError` / "Terms of Service have not been accepted"** —
-  on a fresh Miniconda/Anaconda, `conda env create` can refuse to proceed until
-  you accept the ToS for Anaconda's default channels, even though this project
-  only uses `conda-forge` and `compucell3d`. Accept them once and re-run:
+  `environment.yml` uses Anaconda's `defaults` channel (CC3D needs it on
+  Windows), and on a fresh Miniconda/Anaconda/Miniforge `conda env create`
+  refuses to proceed until you accept its ToS. Accept them once and re-run:
   ```bash
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
   ```
+- **`nothing provides vs2015_win-64 needed by cc3d`** (Windows) — the
+  `defaults` channel is missing from the solve. Use the `environment.yml` from
+  this repo unmodified (it lists `defaults`), and check that your
+  `.condarc` doesn't set `override_channels` or block `defaults`.
+- **Windows fatal exception `0xc06d007f`** in numpy/matplotlib (the V-Cornea
+  GUI crashes as it opens) — numpy is linked against MKL, which crashes with
+  conda-forge's OpenMP on Windows. `environment.yml` pins OpenBLAS to avoid
+  this; for an env created before that pin, switch it in place:
+  `conda install -n vc "libblas=*=*openblas"`.
 - **`compucell3d` not found during solve** — make sure the `compucell3d` channel
   is reachable; the `environment.yml` already lists it. Corporate proxies
   sometimes block it.
