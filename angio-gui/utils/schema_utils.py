@@ -657,24 +657,31 @@ def format_range_evidence(param_info: Dict, tier: str, fmt: str = 'html',
     ev = get_range_evidence(param_info, tier, resolve_ref)
     link = (lambda doi: f"<a href='https://doi.org/{doi}'>doi:{doi}</a>") if fmt == 'html' \
         else (lambda doi: f"[doi:{doi}](https://doi.org/{doi})")
+    # Schema text is plain text: in HTML, a '<' in a note ("D < 0 is meaningless")
+    # would otherwise open a tag and silently swallow the rest of the sentence.
+    if fmt == 'html':
+        import html as _html
+        esc = _html.escape
+    else:
+        esc = str
     if not ev['declared']:
         return f"{ev['meaning'].capitalize()}. Evidence for this range is not recorded in the schema."
     bits = [f"Basis: {ev['basis_label']}"]
     if ev['refs']:
         cites = []
         for r in ev['refs']:
-            c = r['cite']
+            c = esc(r['cite'])
             if r['doi']:
                 c += f" ({link(r['doi'])})"
             cites.append(c)
         src = '; '.join(cites)
         if ev['locator']:
-            src += f" — {ev['locator']}"
+            src += f" — {esc(ev['locator'])}"
         bits.append(f"Source: {src}")
     elif ev['locator']:
-        bits.append(f"Locator: {ev['locator']}")
+        bits.append(f"Locator: {esc(ev['locator'])}")
     if ev['note']:
-        bits.append(ev['note'])
+        bits.append(esc(ev['note']))
     return '. '.join(b.rstrip('.') for b in bits) + '.'
 
 
