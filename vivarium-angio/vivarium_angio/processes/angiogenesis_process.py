@@ -494,7 +494,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs: fluctuation_amplitude=5.0',
+                                'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: fluctuation_amplitude=5.0',
                                 'page': None,
                             },
                             'note': 'J must be ≥ 0: a negative contact energy rewards boundary creation and cells fragment despite '
@@ -521,7 +521,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'The preset set (strong 2 / moderate 4 / weak 8) spans the band; above 8 γ turns negative with '
@@ -534,7 +534,7 @@ class AngiogenesisProcess(Process):
                     '_reference_paper': {
                         **self.REFERENCES['model_specific'],
                         'value': 2.0,
-                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: ContactPlugin.param_new("EC", "EC", jee); PottsCore fluctuation_amplitude=5.0', 'page': None},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: ContactPlugin.param_new("EC", "EC", jee); PottsCore fluctuation_amplitude=5.0', 'page': None},
                         'notes': 'Value chosen for this implementation; it is not a value from either Merks paper. Merks et al. '
                                  '2008 use J(c,c) = 40 with J(c,M) = 20 at T = 50 ("standard setting"), which is adhesion-neutral '
                                  '(γ = J_cM − J_cc/2 = 0); Merks et al. 2006 Fig 7 then sweep J_cc = 20, 15, 10, 5, 1 and report '
@@ -616,7 +616,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs: fluctuation_amplitude=5.0',
+                                'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: fluctuation_amplitude=5.0',
                                 'page': None,
                             },
                             'note': 'J ≥ 0 required (negative J rewards cell–medium boundary and cells dissolve into the medium). '
@@ -639,7 +639,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Preset set (network 2 / moderate 4 / strong 8 / extreme 12). The GUI\'s own "aggregation study" '
@@ -651,7 +651,7 @@ class AngiogenesisProcess(Process):
                     '_reference_paper': {
                         **self.REFERENCES['model_specific'],
                         'value': 2.0,
-                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: ContactPlugin.param_new("Medium", "EC", jem)', 'page': None},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: ContactPlugin.param_new("Medium", "EC", jem)', 'page': None},
                         'notes': 'Value chosen for this implementation. Merks et al. 2008 use J(c,M) = 20 at T = 50, i.e. J/T = '
                                  "0.4 — the same relative value as J_EM = 2 at this model's T = 5. Together with J_EE it fixes "
                                  'the net adhesion γ = J_EM − J_EE/2 (= 1 here, 0 in the Merks standard). Raising J_EM alone '
@@ -763,7 +763,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets weak 200 / moderate 500 / strong 800. 100–800 is the window in which the default '
@@ -989,7 +989,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets 0.5 / 1.0 / 1.5 / 2.0. The gradient length L = √(D/ε) is what matters: with ε = 0.3 the '
@@ -1001,7 +1001,7 @@ class AngiogenesisProcess(Process):
                     '_reference_paper': {
                         **self.REFERENCES['model_specific'],
                         'value': 1.0,
-                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: vegf.diff_data.diff_global = vedir (site²/MCS, Δx = Δt = 1)', 'page': None},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: vegf.diff_data.diff_global = vedir (site²/MCS, Δx = Δt = 1)', 'page': None},
                         'notes': 'Merks et al. (2006, 2008) use D = 1e-13 m²/s for the chemoattractant in the ECM, deliberately '
                                  '~100× slower than VEGF-A165 (≈1e-11 m²/s, Merks 2006 Discussion) because faster diffusion gives '
                                  'gradients too shallow for network formation; they note SDF-1 (1.7e-13 m²/s) as a candidate with '
@@ -1106,7 +1106,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets 0.1 / 0.3 / 0.5. Keep veder and vesec equal if the Merks α = ε steady state (c = 1 '
@@ -1119,7 +1119,7 @@ class AngiogenesisProcess(Process):
                     '_reference_paper': {
                         **self.REFERENCES['model_specific'],
                         'value': 0.3,
-                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: decay_global = veder; decay_types["EC"] = 0.0 (no decay inside cells)', 'page': None},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: decay_global = veder; decay_types["EC"] = 0.0 (no decay inside cells)', 'page': None},
                         'notes': 'Decay only in the medium, as in Merks et al. (chemoattractant "gradually inactivates in the '
                                  'ECM"). The number is this implementation\'s: Merks 2008 use ε = 1e-3 s⁻¹ and Merks 2006 ε = '
                                  '1.8e-4 s⁻¹ (from VEGF half-lives of 30–60 min, Lauer 2002; Serini 2003), which on their scale '
@@ -1222,7 +1222,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets 0.1 / 0.3 / 0.5. Change together with veder to keep α/ε = 1.',
@@ -1233,7 +1233,7 @@ class AngiogenesisProcess(Process):
                     '_reference_paper': {
                         **self.REFERENCES['model_specific'],
                         'value': 0.3,
-                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, _run_simulation() specs: vegf.secretion_data_new("EC", vesec) (per EC site per MCS)', 'page': None},
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: vegf.secretion_data_new("EC", vesec) (per EC site per MCS)', 'page': None},
                         'notes': 'Every lattice site inside an endothelial cell secretes at this rate, as in Merks et al. (α '
                                  'inside cells, zero in the ECM). Merks 2008 set α = ε = 1e-3 s⁻¹ (0.03 per MCS on their scale), '
                                  'Merks 2006 α = ε = 1.8e-4 s⁻¹ (0.0054 per MCS). This implementation uses 0.3 for both, keeping '
@@ -1387,7 +1387,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets quick 50 / standard 100 / extended 500 / long 1,000 MCS. A practical compute window on '
@@ -1533,7 +1533,7 @@ class AngiogenesisProcess(Process):
                             'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'angiogenesis_process.py, _run_simulation() specs presets',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
                             'note': 'Presets 5 / 10 / 20 / 50. 10–50 balances I/O cost against time resolution.',
