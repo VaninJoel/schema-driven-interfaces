@@ -297,6 +297,10 @@ _ARCHIVE_STATUSES = {
                   'intended parameters, provenance, logs and any partial outputs '
                   'produced before the interruption, and contains no executable '
                   'SED-ML.'),
+    'timed_out': ('This run exceeded its wall-clock limit and was terminated before '
+                  'completion. The archive preserves the intended parameters, '
+                  'provenance, logs, the limit that applied and any partial outputs '
+                  'produced before termination, and contains no executable SED-ML.'),
 }
 
 
@@ -913,8 +917,11 @@ def create_omex_archive_from_zarr(
         'failed': "FAILED run (incomplete; not a reproducible experiment)",
         'cancelled': ("CANCELLED run (interrupted by the operator; incomplete and not "
                       "evidence about model behaviour)"),
+        'timed_out': ("TIMED-OUT run (terminated at its wall-clock limit; incomplete, "
+                      "not a reproducible experiment)"),
     }[status]
-    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]"}[status]
+    status_tag = {'success': "", 'failed': " [FAILED]", 'cancelled': " [CANCELLED]",
+                  'timed_out': " [TIMED OUT]"}[status]
     metadata_rdf = generate_omex_metadata_rdf(
         title=f"Angiogenesis simulation: {exp_name}{status_tag}",
         description=(f"Cellular Potts angiogenesis {status_phrase}: '{exp_name}'. "
@@ -958,6 +965,12 @@ def create_omex_archive_from_zarr(
             'executable_sedml_present': complete,
             'final_mcs': run_metadata.get('final_mcs') or run_metadata.get('final_step'),
             'exp_name': exp_name,
+            'run_id': run_metadata.get('run_id'),
+            'exit_code': run_metadata.get('exit_code'),
+            'timed_out': status == 'timed_out',
+            'timeout_seconds': run_metadata.get('run_timeout_seconds'),
+            'started_at': run_metadata.get('started_at'),
+            'duration_seconds': run_metadata.get('duration_seconds'),
             'cancelled_at': run_metadata.get('cancelled_at'),
             'note': _ARCHIVE_STATUSES[status],
         }

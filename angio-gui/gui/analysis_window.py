@@ -400,7 +400,13 @@ class AnalysisWindow(QMainWindow):
         self.experiment_combo.clear()
 
         for exp_path in experiments:
-            self.experiment_combo.addItem(exp_path.name, str(exp_path))
+            # Runs live in per-launch folders, so the bare directory name can
+            # repeat; label by the path under the output directory.
+            try:
+                label = exp_path.relative_to(Path(self.output_dir)).as_posix()
+            except ValueError:
+                label = exp_path.name
+            self.experiment_combo.addItem(label, str(exp_path))
 
         self.experiment_combo.blockSignals(False)
 
