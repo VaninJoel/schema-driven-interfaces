@@ -231,3 +231,100 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
+# =============================================================================
+# pytest entry points. The steps above only ran when the file was executed as a
+# script, so pytest collected nothing and the COMBINE check never ran in the
+# suite. These make it part of `pytest vivarium-angio/`.
+# =============================================================================
+import pytest  # noqa: E402
+
+
+def _combine_errors(omex_path):
+    try:
+        from biosimulators_utils.combine.io import CombineArchiveReader
+        from biosimulators_utils.combine.validation import validate as validate_archive
+    except ImportError as e:  # a required check, not an optional one
+        pytest.fail("biosimulators-utils is required for the COMBINE conformance "
+                    "test: pip install -e ./vivarium-angio[validation] "
+                    f"({e})")
+    with tempfile.TemporaryDirectory() as extract_dir:
+        archive = CombineArchiveReader().run(str(omex_path), extract_dir)
+        errors, _warnings = validate_archive(archive, archive_dirname=extract_dir)
+    return errors
+
+
+def _status_doc(omex):
+    with zipfile.ZipFile(omex) as zf:
+        return zf.namelist(), json.loads(zf.read('status.json'))
+
+
+@pytest.fixture
+def success_archive(tmp_path):
+    store = make_fake_zarr_store(tmp_path)
+    run_metadata, sim_params = make_metadata(store)
+    return create_omex_archive_from_zarr(zarr_store_path=store, run_metadata=run_metadata,
+                                         sim_params=sim_params)
+
+
+def test_success_archive_builtin_structure(success_archive):
+    payload = step_inspect_archive(success_archive)
+    assert step_builtin_validators(payload)
+
+
+def test_success_archive_passes_combine_validator(success_archive):
+    assert _combine_errors(success_archive) == []
+
+
+@pytest.mark.parametrize('status', ['failed', 'cancelled', 'timed_out'])
+def test_unsuccessful_archive_omits_sedml_and_records_status(tmp_path, status):
+    store = make_fake_zarr_store(tmp_path)
+    run_metadata, sim_params = make_metadata(store)
+    run_metadata.update(run_id='r1', exit_code=None, run_timeout_seconds=60)
+    omex = create_omex_archive_from_zarr(zarr_store_path=store, run_metadata=run_metadata,
+                                         sim_params=sim_params, status=status)
+    names, doc = _status_doc(omex)
+    assert 'simulation.sedml' not in names
+    assert doc['status'] == status and doc['simulation_success'] is False
+    assert doc['timed_out'] is (status == 'timed_out') and doc['run_id'] == 'r1'
+
+
+def _report_tool():
+    sys.path.insert(0, str(REPO_ROOT))
+    import make_omex_combo_report
+    return make_omex_combo_report
+
+
+def _run_dir(root, name, status):
+    d = root / name
+    store = make_fake_zarr_store(d, 'data')          # -> <d>/data.zarr
+    run_metadata, sim_params = make_metadata(store)
+    (d / 'run_metadata.json').write_text(json.dumps(
+        {'parameters': sim_params, 'simulation_status': status,
+         'execution': {'success': status == 'success'}}))
+    return d, run_metadata, sim_params
+
+
+@pytest.mark.parametrize('status', ['failed', 'cancelled', 'timed_out'])
+def test_report_never_rewrites_a_typed_archive_as_success(tmp_path, status):
+    # The worker's archive for an unsuccessful run has status.json but no
+    # metrics.csv. Report generation used to take that as "old format" and
+    # regenerate it as a success archive with executable SED-ML.
+    rep = _report_tool()
+    d, run_metadata, sim_params = _run_dir(tmp_path, 'run_rep01', status)
+    create_omex_archive_from_zarr(zarr_store_path=d / 'data.zarr', run_metadata=run_metadata,
+                                  sim_params=sim_params, archive_path=d / f'{d.name}.omex',
+                                  status=status)
+    rep._regenerate_archives({'run': [d]}, {'run': 'run'}, None, sim_params, tmp_path, 1, None)
+    names, doc = _status_doc(d / f'{d.name}.omex')
+    assert doc['status'] == status and 'simulation.sedml' not in names
+
+
+def test_report_rebuilds_legacy_archive_with_recorded_status(tmp_path):
+    rep = _report_tool()
+    d, _, sim_params = _run_dir(tmp_path, 'legacy_rep01', 'failed')   # no archive yet
+    rep._regenerate_archives({'legacy': [d]}, {'legacy': 'legacy'}, None, sim_params,
+                             tmp_path, 1, None)
+    names, doc = _status_doc(d / f'{d.name}.omex')
+    assert doc['status'] == 'failed' and 'simulation.sedml' not in names
