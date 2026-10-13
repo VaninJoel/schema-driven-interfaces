@@ -46,6 +46,7 @@ from analysis_utils import (
     detect_cell_boundaries,
     ZARR_AVAILABLE, SCIPY_AVAILABLE
 )
+from export_provenance import attach_to_figure, build_record, write_sidecar
 
 
 class AnalysisWindow(QMainWindow):
@@ -73,6 +74,24 @@ class AnalysisWindow(QMainWindow):
             )
 
         self.init_ui()
+
+    # ------------------------------------------------------------------
+    # Export provenance: every exported figure, table and animation names
+    # the run(s) it came from (see export_provenance.py).
+    # ------------------------------------------------------------------
+    def _export_record(self, exp_dirs, **view):
+        exp_dirs = [d for d in exp_dirs if d]
+        return build_record(exp_dirs, 'angio-gui analysis', view) if exp_dirs else None
+
+    def _current_run_record(self, view_name):
+        exp = self.current_experiment
+        if exp is None:
+            return None
+        view = {'view': view_name}
+        step = getattr(self, 'timestep_combo', None)
+        if view_name == 'visualization' and step is not None:
+            view['timestep'] = step.currentData()
+        return self._export_record([exp.exp_dir], **view)
 
     def init_ui(self):
         """Initialize the UI with tabs."""
@@ -139,6 +158,7 @@ class AnalysisWindow(QMainWindow):
 
             # Create matplotlib figure
             self.metrics_figure = Figure(figsize=(10, 6))
+            attach_to_figure(self.metrics_figure, lambda: self._current_run_record('metrics'))
             self.metrics_canvas = FigureCanvas(self.metrics_figure)
             self.metrics_toolbar = NavigationToolbar(self.metrics_canvas, self)
 
@@ -205,6 +225,7 @@ class AnalysisWindow(QMainWindow):
 
         # Visualization canvas
         self.viz_figure = Figure(figsize=(12, 6))
+        attach_to_figure(self.viz_figure, lambda: self._current_run_record('visualization'))
         self.viz_canvas = FigureCanvas(self.viz_figure)
         self.viz_toolbar = NavigationToolbar(self.viz_canvas, self)
 
@@ -349,6 +370,8 @@ class AnalysisWindow(QMainWindow):
             plot_layout = QVBoxLayout()
 
             self.comparison_figure = Figure(figsize=(12, 8))
+            attach_to_figure(self.comparison_figure, lambda: self._export_record(
+                list(self.experiments), view='experiment comparison'))
             self.comparison_canvas = FigureCanvas(self.comparison_figure)
             self.comparison_toolbar = NavigationToolbar(self.comparison_canvas, self)
 
@@ -567,6 +590,7 @@ class AnalysisWindow(QMainWindow):
             try:
                 time_series = analyze_time_series(self.current_experiment)
                 export_metrics_to_csv(time_series, Path(filename))
+                write_sidecar(filename, self._current_run_record('metrics table'))
                 QMessageBox.information(self, "Success", f"Metrics exported to:\n{filename}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to export metrics:\n{str(e)}")
@@ -785,6 +809,7 @@ class AnalysisWindow(QMainWindow):
             self.statusBar().showMessage("Encoding MP4 video...")
             progress.setLabelText("Encoding MP4 video...")
             export_animation_mp4(frames, Path(filename), fps=fps)
+            write_sidecar(filename, self._current_run_record('animation (MP4)'))
 
             progress.setValue(100)
             progress.close()
@@ -859,6 +884,7 @@ class AnalysisWindow(QMainWindow):
             self.statusBar().showMessage("Encoding GIF animation...")
             progress.setLabelText("Encoding GIF animation...")
             export_animation_gif(frames, Path(filename), fps=fps)
+            write_sidecar(filename, self._current_run_record('animation (GIF)'))
 
             progress.setValue(100)
             progress.close()
@@ -976,6 +1002,8 @@ class AnalysisWindow(QMainWindow):
             plot_layout = QVBoxLayout()
 
             self.stats_figure = Figure(figsize=(10, 6))
+            attach_to_figure(self.stats_figure, lambda: self._export_record(
+                list(getattr(self, 'replicate_experiments', [])), view='replicate statistics'))
             self.stats_canvas = FigureCanvas(self.stats_figure)
             self.stats_toolbar = NavigationToolbar(self.stats_canvas, self)
 

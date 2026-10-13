@@ -1997,7 +1997,9 @@ class VCorneaMainWindow(QMainWindow):
 
         # Then generate the OMEX PDF report(s) — per-combination plus the experiment
         # comparison — now that every .omex (and the scan.omex) has been written.
-        if not was_cancelled and succeeded > 0:
+        # A batch whose runs all failed still gets a report: it lists the failed
+        # attempts, which are part of the record.
+        if not was_cancelled and (succeeded > 0 or failed > 0):
             self._generate_run_pdfs()
 
         if was_cancelled:

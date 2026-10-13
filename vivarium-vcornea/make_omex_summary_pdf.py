@@ -81,10 +81,25 @@ def parse_archive(omex: Path):
     return infos, names, meta, sedml, manifest
 
 
+def _utils(name):
+    """A vivarium_vcornea.utils module, by package name.
+
+    vivarium-angio ships modules with the same bare names (omex_generator,
+    parameter_audit, provenance), so a bare import off sys.path can resolve to the
+    wrong package's module in any process that has loaded both. The bare import
+    is only a fallback for a checkout whose package is not installed.
+    """
+    import importlib
+    try:
+        return importlib.import_module(f'vivarium_vcornea.utils.{name}')
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / 'vivarium_vcornea' / 'utils'))
+        return importlib.import_module(name)
+
+
 def run_validation(omex: Path, sedml: str, manifest: str, names):
-    sys.path.insert(0, str((Path(__file__).resolve().parent /
-                            'vivarium_vcornea' / 'utils')))
-    from omex_generator import validate_sedml_structure, validate_omex_manifest
+    validate_sedml_structure = _utils('omex_generator').validate_sedml_structure
+    validate_omex_manifest = _utils('omex_generator').validate_omex_manifest
     s_ok = validate_sedml_structure(sedml)['valid']
     m_ok = validate_omex_manifest(
         manifest, [n for n in names if n != 'manifest.xml'])['valid']
@@ -274,7 +289,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     its documented evidence.
     """
     try:
-        import parameter_audit as _pa  # utils dir is on sys.path
+        _pa = _utils('parameter_audit')
     except Exception:
         return []
     audits = [a for a in (_pa.load_parameter_audit(s) for s in audit_sources) if a]
@@ -368,7 +383,8 @@ def build(omex: Path):
     # in DAYS; the SED-ML generator currently emits the raw value mislabelled as
     # MCS, so we recompute the true values here rather than trust the SED-ML.
     try:
-        from units import MCS_PER_DAY, MCS_PER_HOUR  # utils dir on sys.path
+        _u = _utils('units')
+        MCS_PER_DAY, MCS_PER_HOUR = _u.MCS_PER_DAY, _u.MCS_PER_HOUR
     except Exception:
         MCS_PER_DAY, MCS_PER_HOUR = 240.0, 10.0
     sim_days = (meta.get('key_parameters', {}).get('SimTime')

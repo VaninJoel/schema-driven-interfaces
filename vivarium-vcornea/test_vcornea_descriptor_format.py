@@ -1,11 +1,12 @@
-"""Every exposed angiogenesis parameter conforms to the common descriptor format.
+"""Every exposed V-Cornea parameter conforms to the common descriptor format.
 
 The field list is the one in docs/parameter_descriptor_example.py (repo root),
 so the manuscript example, the schema and this test cannot drift apart.
 
-Run:  conda run -n vc --no-capture-output pytest vivarium-angio/test_descriptor_format.py -v
+Run:  conda run -n vc --no-capture-output pytest vivarium-vcornea/test_vcornea_descriptor_format.py -v
 """
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -22,11 +23,10 @@ def _field_groups():
 
 
 def _schema():
-    # Constructing AngiogenesisProcess starts a CC3D service (known limitation,
-    # see readiness audit 4.2); it is what the GUI does to read the schema.
-    from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
-    return AngiogenesisProcess().ports_schema()
-
+    from vivarium_vcornea.processes.vcornea_process import VCorneaProcess
+    proj = os.environ.get('VCORNEA_PROJECT_PATH') or str(
+        REPO / 'vcornea_paper' / 'Local' / 'Project' / 'paper_version')
+    return VCorneaProcess({'vcornea_project_path': proj}).ports_schema()
 
 
 def check_schema(schema, groups):

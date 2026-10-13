@@ -7,19 +7,20 @@ archive with:
   1) the built-in structural checks in omex_generator.py
   2) biosimulators-utils (if installed) for COMBINE-spec compliance
 
-No vivarium / zarr / numpy / pandas imports required: Zarr stores are just
-directories on disk, so we synthesize one by writing JSON metadata + a few
-binary chunk files. This exercises the file-walking and packaging path
-without needing the zarr library.
+Zarr stores are just directories on disk, so we synthesize one by writing JSON
+metadata + a few binary chunk files; this exercises the file-walking and
+packaging path without running a simulation. Needs the vivarium-angio package
+installed (the `vc` environment); the COMBINE check needs biosimulators-utils
+(the [validation] extra).
 
 Usage
 -----
     cd vivarium-angio
-    python test_omex_validation.py
+    python test_angio_omex_validation.py
 
 Optional external check:
     pip install biosimulators-utils
-    python test_omex_validation.py
+    python test_angio_omex_validation.py
 """
 
 from __future__ import annotations
@@ -33,10 +34,11 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-UTILS_DIR = REPO_ROOT / 'vivarium_angio' / 'utils'
-sys.path.insert(0, str(UTILS_DIR))
 
-from omex_generator import (  # noqa: E402
+# Imported by package name, never as a bare `omex_generator` off sys.path: both
+# packages ship a module of that name, and a bare import let whichever test ran
+# first shadow the other package's generator in a shared pytest session.
+from vivarium_angio.utils.omex_generator import (  # noqa: E402
     create_omex_archive_from_zarr,
     validate_sedml_structure,
     validate_omex_manifest,
@@ -107,13 +109,12 @@ def step_create_archive(tmpdir: Path) -> Path:
     store = make_fake_zarr_store(tmpdir)
     run_metadata, sim_params = make_metadata(store)
     # Parameter audit from the live schema, as the GUI main window / finish() do.
-    # Constructing AngiogenesisProcess starts a CC3D service (known limitation);
-    # skipped with a note when cc3d is unavailable so the archive path still runs.
+    # Skipped with a note when cc3d is unavailable so the archive path still runs.
     parameter_audit = None
     try:
         import contextlib, io
         from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
-        from parameter_audit import build_parameter_audit
+        from vivarium_angio.utils.parameter_audit import build_parameter_audit
         with contextlib.redirect_stdout(io.StringIO()):
             schema = AngiogenesisProcess().ports_schema()
         parameter_audit = build_parameter_audit(schema, sim_params)
@@ -291,9 +292,17 @@ def test_unsuccessful_archive_omits_sedml_and_records_status(tmp_path, status):
 
 
 def _report_tool():
-    sys.path.insert(0, str(REPO_ROOT))
-    import make_omex_combo_report
-    return make_omex_combo_report
+    # Loaded under a package-specific name: vivarium-vcornea has a report tool
+    # with the same file name, and both may be imported in one pytest session.
+    import importlib.util
+    name = 'angio_make_omex_combo_report'
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / 'make_omex_combo_report.py')
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[name]
 
 
 def _run_dir(root, name, status):

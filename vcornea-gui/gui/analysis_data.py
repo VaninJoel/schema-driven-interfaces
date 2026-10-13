@@ -122,14 +122,26 @@ class AnalysisDataset:
 
     def _group(self, files):
         grouped = {}
+        # combo -> the run (replicate) directories its data came from, so exports
+        # can name their source runs (see export_provenance.py).
+        if not hasattr(self, 'combo_runs'):
+            self.combo_runs = {}
         for f in files:
             try:
                 df = pd.read_parquet(f) if f.lower().endswith('.parquet') else pd.read_csv(f)
             except Exception as e:
                 print(f"[analysis] skip {f}: {e}")
                 continue
-            grouped.setdefault(self._combo_key(f), []).append(df)
+            combo = self._combo_key(f)
+            grouped.setdefault(combo, []).append(df)
+            self.combo_runs.setdefault(combo, set()).add(str(Path(f).parent))
         return grouped
+
+    def source_runs(self, combos=None):
+        """Run directories behind `combos` (all combinations when None)."""
+        runs = getattr(self, 'combo_runs', {})
+        keys = runs.keys() if combos is None else [c for c in combos if c in runs]
+        return sorted({d for k in keys for d in runs[k]})
 
     # ---- membrane baseline ----
     def _load_membrane(self):

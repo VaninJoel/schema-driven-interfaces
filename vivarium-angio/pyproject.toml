@@ -18,7 +18,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# Backs the COMBINE/OMEX + SED-ML conformance check in test_omex_validation.py.
+# Backs the COMBINE/OMEX + SED-ML conformance check in test_angio_omex_validation.py.
 # Pinned so the standards-validation claim is reproducible on a fresh checkout,
 # not a manual pip-install someone has to know to do.
 validation = [

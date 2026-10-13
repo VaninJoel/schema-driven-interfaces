@@ -5,7 +5,7 @@
 #   ./run_local.sh vcornea         # V-Cornea only
 #   ./run_local.sh angio           # Angiogenesis only
 #   ./run_local.sh check           # verify the interpreter can import cc3d/PyQt5/both wrappers
-#   ./run_local.sh tests           # run the headless GUI test suite (tests/gui)
+#   ./run_local.sh tests           # run the full test suite (both packages + headless GUIs)
 #
 # Interpreter: $SDI_PYTHON if set, else the conda env named by $SDI_CONDA_ENV
 # (default "vc") under ~/miniconda3 or ~/anaconda3, else whatever `python` is
@@ -56,7 +56,7 @@ launch() {
 
 case "${1:-both}" in
     check)   check ;;
-    tests)   shift; cd "$ROOT" && exec "$PY" -m pytest tests/gui -q "$@" ;;
+    tests)   shift; cd "$ROOT" && exec "$PY" -m pytest -q "$@" ;;
     vcornea) launch vcornea vcornea-gui; wait ;;
     angio)   launch angio angio-gui; wait ;;
     both)    launch vcornea vcornea-gui; launch angio angio-gui; wait ;;

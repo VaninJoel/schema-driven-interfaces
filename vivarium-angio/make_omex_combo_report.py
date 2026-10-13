@@ -72,8 +72,16 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (HRFlowable, Image, PageBreak, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
-sys.path.insert(0, str((Path(__file__).resolve().parent / 'vivarium_angio' / 'utils')))
-import omex_generator as og  # noqa: E402
+# By package name: vivarium-vcornea ships a module also called omex_generator,
+# so a bare import off sys.path can resolve to the wrong package's generator in
+# any process that has loaded both. (vivarium_angio/__init__ imports nothing, so
+# this does not pull in the simulation stack.) Bare import only as a fallback for
+# a checkout whose package is not installed.
+try:
+    from vivarium_angio.utils import omex_generator as og  # noqa: E402
+except ImportError:
+    sys.path.insert(0, str((Path(__file__).resolve().parent / 'vivarium_angio' / 'utils')))
+    import omex_generator as og  # noqa: E402
 
 SEDNS = {'s': 'http://sed-ml.org/sed-ml/level1/version4',
          'h': 'http://www.w3.org/1999/xhtml'}

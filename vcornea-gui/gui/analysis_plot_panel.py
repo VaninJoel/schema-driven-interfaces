@@ -17,6 +17,7 @@ from matplotlib.figure import Figure
 
 import analysis_plots as ap
 import analysis_help
+from export_provenance import attach_to_figure, build_record
 
 
 class PlotPanel(QWidget):
@@ -77,6 +78,9 @@ class PlotPanel(QWidget):
         layout.addWidget(controls)
 
         self.figure = Figure(figsize=(11, 8))
+        # Every save (the toolbar's save button is this panel's export) embeds
+        # and sidecars the runs behind the plot as drawn.
+        attach_to_figure(self.figure, self._export_record)
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(NavigationToolbar(self.canvas, self))  # zoom/pan/save PNG
         layout.addWidget(self.canvas)
@@ -103,6 +107,26 @@ class PlotPanel(QWidget):
         self.scale.setVisible(enhanced and is_count and self.mode.currentText() != 'Statistics')
         self.injury.setVisible(enhanced)
         self.render()
+
+    def _export_record(self):
+        """Provenance of the plot as currently drawn: the selected combination
+        when one is shown alone, otherwise every combination of this kind."""
+        family = ('enhanced' if self.kind == 'surfactant'
+                  else 'paper' if self.family.currentText() == "Paper figure" else 'enhanced')
+        mode = self.mode.currentText().lower() if not self.mode.isHidden() else None
+        # Mirrors render(): thickness and paper/individual counts draw the selected
+        # combination; count comparison/statistics and surfactant draw them all.
+        single = (self.kind == 'thickness'
+                  or (self.kind == 'count' and (family == 'paper' or mode == 'individual')))
+        combos = [self._selected_combo()] if single else list(self._combo_keys)
+        view = {'plot': self.kind, 'style': family, 'mode': mode,
+                'time_unit': self.unit.currentText().lower(),
+                'scale': self.scale.currentText() if not self.scale.isHidden() else None,
+                'injury_centered': (self.injury.isChecked()
+                                    if not self.injury.isHidden() else None),
+                'combinations': [self.ds.combo_names.get(c, c) for c in combos if c]}
+        runs = self.ds.source_runs(combos)
+        return build_record(runs, 'vcornea-gui analysis', view) if runs else None
 
     def _selected_combo(self):
         i = self.combo.currentIndex()

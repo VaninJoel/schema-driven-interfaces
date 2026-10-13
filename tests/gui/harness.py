@@ -23,7 +23,7 @@ GUIS = {
 # simulation_worker, analysis_*). Loading one GUI must evict the other's.
 _GUI_MODULE_NAMES = ('main_window', 'schema_utils', 'simulation_worker', 'analysis_window',
                      'analysis_plots', 'analysis_plot_panel', 'analysis_data', 'analysis_utils',
-                     'analysis_help', 'equation_render')
+                     'analysis_help', 'equation_render', 'export_provenance')
 
 
 def load_gui(name):
