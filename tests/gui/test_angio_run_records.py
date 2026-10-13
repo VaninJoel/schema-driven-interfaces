@@ -109,6 +109,18 @@ def test_rerun_into_existing_store_is_refused(angio, tmp_path):
     assert first.metadata_path.read_text() == before   # earlier record untouched
 
 
+def test_info_panel_keeps_schema_text_with_angle_brackets(angio):
+    """Schema notes are plain text: 'D < 0 is meaningless' must survive HTML
+    rendering instead of opening a tag that swallows the rest of the note."""
+    from PyQt5.QtGui import QTextDocument
+    from schema_utils import format_range_evidence
+    from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
+    info = AngiogenesisProcess().ports_schema()['inputs']['vedir']
+    doc = QTextDocument()
+    doc.setHtml(format_range_evidence(info, 'mathematical'))
+    assert 'D < 0 is meaningless' in doc.toPlainText()
+
+
 def test_analysis_lists_only_completed_runs_at_any_depth(angio, tmp_path):
     import analysis_utils
     for sub, status in (('batch_a/ok', 'success'), ('batch_a/bad', 'failed'),
