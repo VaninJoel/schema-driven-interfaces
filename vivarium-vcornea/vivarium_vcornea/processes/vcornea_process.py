@@ -4793,52 +4793,6 @@ class VCorneaProcess(Process):
         
         # Append the unique run_id instead of the timestamp
         return f"{base_name}_{run_id}" if run_id else f"{base_name}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # """Generate a descriptive run name based on parameter changes."""
-        
-        # # If user provided a custom name, use it
-        # if self.parameters.get('run_name'):
-        #     return self.parameters['run_name']
-        
-        # # If no parameters changed, use default name
-        # if not parameter_changes:
-        #     timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        #     return f"default_run_{timestamp}"
-        
-        # # Generate descriptive name based on key parameter changes
-        # name_parts = []
-        # max_params = self.parameters.get('max_params_in_name', 3)
-        
-        # # Prioritize certain parameters for naming
-        # priority_params = [
-        #     'SLS_Concentration', 'InjuryTime', 'SimTime', 'IsInjury', 'InjuryType',
-        #     'EGF_STEM_HalfMaxValue', 'EGF_BASAL_HalfMaxValue'
-        # ]
-        
-        # # First, add high-priority parameters
-        # for param in priority_params:
-        #     if param in parameter_changes and len(name_parts) < max_params:
-        #         change = parameter_changes[param]
-        #         name_parts.append(self._format_param_for_name(param, change))
-        
-        # # Then add other parameters if we have space
-        # for param, change in parameter_changes.items():
-        #     if param not in priority_params and len(name_parts) < max_params:
-        #         name_parts.append(self._format_param_for_name(param, change))
-        
-        # # If we have many changes, add a count
-        # if len(parameter_changes) > max_params:
-        #     name_parts.append(f"plus{len(parameter_changes) - max_params}more")
-        
-        # # Combine parts
-        # if name_parts:
-        #     base_name = "_".join(name_parts)
-        # else:
-        #     base_name = "modified_params"
-        
-        # # Add timestamp for uniqueness
-        # timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        # return f"{base_name}_{timestamp}"
 
     def _format_param_for_name(self, param, change):
         """Format a parameter change for inclusion in the run name."""

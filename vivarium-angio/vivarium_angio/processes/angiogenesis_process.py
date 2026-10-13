@@ -1,15 +1,9 @@
 from vivarium.core.process import Process
-import os
 import warnings
 import sys
 from io import StringIO
 from time import time
-from multiprocessing import Process as MultiProcess, Queue
 import zarr
-import pandas as pd
-import scipy.ndimage as ndimage
-import skimage.measure as measure
-from skimage.morphology import medial_axis
 
 # Suppress std output while importing the CC3D modules
 original_stdout = sys.stdout
@@ -57,15 +51,6 @@ class StoreManager():
         self.expname = None
         self.exparams = None
 
-    def create_store(self):
-        """Create a new Zarr store (not needed in new structure)."""
-        root = zarr.open(self.store_path, mode='w')
-
-    def get_experiments(self):
-        """Get list of timesteps (not experiments) at root level."""
-        root = zarr.open(self.store_path, mode='r')
-        return list(root.keys())
-
     def setup_exp(self, expname:str, exparams:dict):
         """
         Store experiment parameters in root attributes.
@@ -80,15 +65,6 @@ class StoreManager():
         root = zarr.open(self.store_path, mode='a')
         root.attrs['exp_name'] = expname
         root.attrs['params'] = exparams
-
-    def get_exp_params(self, expname:str=None):
-        """Get experiment parameters from root attributes."""
-        root = zarr.open(self.store_path, mode='r')
-        if 'params' in root.attrs:
-            return root.attrs['params']
-        else:
-            print(f'No parameters found in Zarr store')
-            return None
 
     def write_data(self, data:np.ndarray, step:int):
         """
@@ -111,112 +87,6 @@ class StoreManager():
         mcs_group = root.require_group(str(step))
         # Zarr v3 API: use array assignment instead of create_dataset with compression
         mcs_group['data'] = data
-
-    def get_exp_length(self, expname:str=None):
-        """Get number of timesteps in the Zarr store."""
-        root = zarr.open(self.store_path, mode='r')
-        # Count numeric keys (timesteps) at root level
-        timesteps = [k for k in root.keys() if k.isdigit()]
-        length = len(timesteps)
-        return length
-
-    def grab_cellview(self, expname:str, step:int):
-        """Get cell data for a specific timestep."""
-        root = zarr.open(self.store_path, mode='r')
-        mcs_group = root[str(step)]['data']
-        cell_data = mcs_group[:,:,:,0]
-        cell_data = np.squeeze(cell_data)
-        return cell_data
-
-    def grab_fieldview(self, expname:str, step:int):
-        """Get field data for a specific timestep."""
-        root = zarr.open(self.store_path, mode='r')
-        mcs_group = root[str(step)]['data']
-        field_data = mcs_group[:,:,:,2]
-        field_data = np.squeeze(field_data)
-        return field_data
-
-    def analyse_one_step(self, step:int, queue:bool=False, expname:str=None):
-        """Analyze cell data for a specific timestep."""
-        expname = self.expname if expname is None else expname
-        root = zarr.open(self.store_path, mode='r')
-        mcs_group = root[str(step)]['data']
-        cell_data = self.grab_cellview(expname, step)
-        cell_data = np.squeeze(cell_data)
-
-        cell_data = np.where(cell_data != 0, 1, 0)
-        i_cell_data = np.where(cell_data == 0, 1, 0)
-        
-        labeled_image, num_labels = ndimage.label(i_cell_data)
-        regions = measure.regionprops(labeled_image)
-        regions = sorted(regions, key=lambda x: x.area, reverse=True)
-        area_list = []
-        for i, region in enumerate(regions, start=1):
-            if region.bbox[0] == 0 or region.bbox[1] == 0 or region.bbox[2] == 399 or region.bbox[3] == 399:
-                continue
-            if region.area > 10 and region.area < 10000:
-                area_list.append(region.area)
-        area_arr = np.array(area_list)
-
-        skel, distance =  medial_axis(cell_data, return_distance=True)
-        dist_on_skel = distance * skel
-        sort_px_list = np.sort(dist_on_skel.ravel())
-        nonzero_pixels = sort_px_list[sort_px_list > 0]
-        nonzero_pixels = nonzero_pixels[::-1]
-        pix_array = np.array(nonzero_pixels)
-        n_regions = area_arr.shape[0]
-        mean_l_area = np.mean(area_arr) if n_regions > 0 else 0
-        std_l_area = np.std(area_arr) if n_regions > 0 else 0
-
-        results_dict = {"expname": expname,
-                        "step": step,
-                        "n_regions": n_regions,
-                        "mean_l_area": mean_l_area, 
-                        "std_l_area": std_l_area,
-                        "len_network": pix_array.shape[0], 
-                        "mean_n_width": np.mean(pix_array),
-                        "std_n_width": np.std(pix_array)}
-        
-        if not queue:
-            return results_dict
-        else:
-            queue.put(results_dict)
-        
-    def analyse_step_range(self, expname:str ,start:int, end:int):
-        results = []
-        processes = []
-        queue = Queue()
-        for step in range(start, end):
-            p = MultiProcess(target=self.analyse_one_step, args=(step, queue, expname))
-            p.start()
-            processes.append(p)
-        
-        for p in processes:
-            p.join()
-        
-        while not queue.empty():
-            results.append(queue.get())
-        
-        return pd.DataFrame(results)
-    
-    def analyse_exp_list(self, exp_list:list):
-        results = []
-        processes = []
-        queue = Queue()
-        
-        for expname in exp_list:
-            step  = self.get_exp_length(expname)
-            p = MultiProcess(target=self.analyse_one_step, args=(step, queue, expname))
-            p.start()
-            processes.append(p)
-        
-        for p in processes:
-            p.join()
-        
-        while not queue.empty():
-            results.append(queue.get())
-
-        return pd.DataFrame(results)
 
 class WriterSteppable(SteppableBasePy):
     """
