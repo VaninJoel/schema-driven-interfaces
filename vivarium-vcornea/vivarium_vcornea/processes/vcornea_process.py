@@ -6,11 +6,39 @@ import tempfile
 import shutil
 import json
 import glob
+import time
 import uuid
 from pathlib import Path
 from vivarium.core.process import Process
 
 # TODO Redefine the defaults based on the paper and the actual references for the parameters
+
+# Conversion factors from schema time units to MCS (CC3D's native time unit).
+# Mirrors the constants in ports_schema(): 1 MCS = 6 min => 240 MCS / day, 10 MCS / hour.
+UNIT_TO_MCS_MULTIPLIER = {
+    'days': 240,
+    'hours': 10,
+    'minutes': 1.0 / 6.0,
+}
+
+
+def to_cc3d_value(param_info, value):
+    """Convert a schema-layer value into the CC3D-native value written to Parameters.py.
+
+    The schema exposes user-friendly units (days, hours) so the GUI can present
+    physiological numbers; CC3D itself only speaks Monte Carlo Steps. Time
+    parameters are scaled by their `_unit`; everything else passes through
+    unchanged. Module-level so the GUI can show exactly what will be written
+    without constructing a process.
+    """
+    if not param_info:
+        return value
+    multiplier = UNIT_TO_MCS_MULTIPLIER.get(param_info.get('_unit', ''))
+    if multiplier is None or not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    converted = value * multiplier
+    return int(round(converted)) if isinstance(param_info.get('_default'), int) else converted
+
 
 class VCorneaProcess(Process):
     """
@@ -4244,6 +4272,12 @@ class VCorneaProcess(Process):
         
         running_processes = []
         replicate_outputs = []
+        # Replicates that never reached a running process. They are finalized in
+        # Phase 3 like every other attempt, so a launch failure still leaves
+        # run_metadata.json, an experiment-log row and a failure-typed archive
+        # (requirement 2.5.4: every attempt keeps its identity and evidence).
+        launch_failures = []
+        timeout_s = self._run_timeout_seconds()
 
         # ======================================================
         # PHASE 1: SETUP AND LAUNCH ALL REPLICATES
@@ -4253,11 +4287,16 @@ class VCorneaProcess(Process):
             replicate_id = i + 1
             run_output_dir = batch_output_dir / f"replicate_{replicate_id}"
             run_output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Prepare metadata and files for this replicate
             run_metadata = self._create_run_metadata(sim_params, parameter_changes, run_name)
+            # Durable identity of this attempt. run_name is a human label shared by
+            # every replicate of a combination; run_id distinguishes each attempt,
+            # including reruns into the same output directory.
+            run_metadata['run_id'] = uuid.uuid4().hex
             run_metadata['replicate_id'] = replicate_id
             run_metadata['total_replicates'] = num_replicates
+            run_metadata['run_timeout_seconds'] = timeout_s
             # Task B: per-run back-reference so a sweep/replicate run's archive is not
             # an orphan (parent experiment, swept-parameter point, replicate index).
             run_metadata['run_reference'] = self._build_run_reference(
@@ -4287,10 +4326,27 @@ class VCorneaProcess(Process):
             # fail, after which copytree raises WinError 183 ("file already
             # exists") and kills the replicate at launch.
             temp_dir = run_output_dir / f"vcornea_sim_{uuid.uuid4().hex[:6]}"
+            job = {
+                'replicate_id': replicate_id,
+                'output_dir': run_output_dir,
+                'temp_dir': temp_dir,
+                'temp_project': Path(temp_dir),
+                'metadata': run_metadata,
+                # The parameters THIS replicate executed (its own seed included).
+                # Everything recorded about the run is derived from these, never
+                # from the batch-level sim_params.
+                'replicate_params': replicate_params,
+                'process': None,
+                'stdout_log': None,
+                'stderr_log': None,
+                'before_snapshot': set(),
+                'exit_code': None,
+                'timed_out': False,
+            }
 
             try:
                 # Setup the simulation environment in a temporary directory
-                temp_project = Path(temp_dir)
+                temp_project = job['temp_project']
 
                 # Copy project with ignore function to skip problematic files
                 def ignore_files(directory, files):
@@ -4319,62 +4375,46 @@ class VCorneaProcess(Process):
                 # project. Snapshotting only the temp dir made "files generated"
                 # permanently empty and the audit meaningless.
                 temp_sim_dir = temp_project / "Simulation"
-                before_snapshot = (self._take_directory_snapshot(temp_sim_dir)
-                                   | self._take_directory_snapshot(run_output_dir))
+                job['before_snapshot'] = (self._take_directory_snapshot(temp_sim_dir)
+                                          | self._take_directory_snapshot(run_output_dir))
 
                 # Launch the simulation and get the process handle
+                job['started_at'] = time.time()
                 process, stdout_log, stderr_log = self._run_cc3d_simulation(temp_project, run_output_dir)
-
-                if process:
-                    # Store the handle and related info
-                    running_processes.append({
-                        'process': process,
-                        'replicate_id': replicate_id,
-                        'output_dir': run_output_dir,
-                        'temp_dir': temp_dir,
-                        'temp_project': temp_project,
-                        'metadata': run_metadata,
-                        'stdout_log': stdout_log,
-                        'stderr_log': stderr_log,
-                        # Carried forward to Phase 3; previously computed and
-                        # dropped, which silently disabled the audit.
-                        'before_snapshot': before_snapshot,
-                    })
-                    print(f"  > Replicate {replicate_id} launched (PID: {process.pid}).")
-                else:
+                if not process:
                     raise RuntimeError("Process launch failed.")
+                job.update(process=process, stdout_log=stdout_log, stderr_log=stderr_log)
+                running_processes.append(job)
+                print(f"  > Replicate {replicate_id} launched (PID: {process.pid}).")
 
             except Exception as e:
                 print(f"  > FAILED to launch replicate {replicate_id}: {e}")
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                run_metadata['simulation_success'] = False
-                run_metadata['error_message'] = f"Failed during setup/launch phase: {e}"
-                # Immediately add a failure report for this replicate
-                replicate_outputs.append({
-                    'replicate_id': replicate_id, 'success': False,
-                    'output_directory': str(run_output_dir),
-                    'error_message': run_metadata['error_message'], 'results': None
-                })
+                # The partial workspace is kept: it is the evidence of how far
+                # setup got. Its uuid suffix keeps it from colliding with reruns.
+                job['launch_error'] = f"Failed during setup/launch phase: {e}"
+                launch_failures.append(job)
 
         # ======================================================
         # PHASE 2: CONCURRENT PROCESS MONITORING WITH FUTURES
         # ======================================================
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        import time
+        from ..utils.process_tree import kill_process_tree
 
         def monitor_process(job):
             """Monitor a single process until completion and return job with results."""
             process = job['process']
-            
-            timeout_s = int(self.parameters.get('run_timeout_seconds', 86400) or 86400)
             try:
-                # Wait for this specific process to complete
                 exit_code = process.wait(timeout=timeout_s)
             except subprocess.TimeoutExpired:
                 print(f"  > TIMEOUT ERROR: Replicate {job['replicate_id']} exceeded the "
                       f"{timeout_s}s ({timeout_s / 3600:.1f}h) limit.")
-                process.kill()  # Terminate the runaway process
-                exit_code = -9  # specific exit code for timeouts
+                # The whole tree: under `conda run` the CC3D interpreter is a
+                # grandchild, and killing only the direct child leaves it running.
+                kill_process_tree(process)
+                try:
+                    exit_code = process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    exit_code = None
                 job['timed_out'] = True
 
             # Mirror of the Phase-1 baseline: both the temp project and the
@@ -4382,167 +4422,140 @@ class VCorneaProcess(Process):
             temp_sim_dir = job['temp_project'] / "Simulation"
             job['after_snapshot'] = (self._take_directory_snapshot(temp_sim_dir)
                                      | self._take_directory_snapshot(job['output_dir']))
-
             job['exit_code'] = exit_code
             job['completed_at'] = time.time()
-            
-            # Close log files
-            job['stdout_log'].close()
-            job['stderr_log'].close()
-            
             return job
 
         print("\n--- Phase 2: Monitoring all processes concurrently ---")
-
-        # Check if any processes were successfully launched
-        if not running_processes:
-            print("  > ERROR: No replicates were successfully launched. Returning empty results.")
-            return {
-                'outputs': {
-                    'run_name': run_name,
-                    'batch_output_dir': str(batch_output_dir),
-                    'replicates': replicate_outputs,
-                    'success': False,
-                    'error_message': 'All replicates failed to launch'
+        completed_jobs = []
+        if running_processes:
+            with ThreadPoolExecutor(max_workers=len(running_processes)) as executor:
+                future_to_job = {
+                    executor.submit(monitor_process, job): job
+                    for job in running_processes
                 }
-            }
-
-        # Use ThreadPoolExecutor to monitor all processes concurrently
-        with ThreadPoolExecutor(max_workers=len(running_processes)) as executor:
-            # Submit monitoring tasks for all processes
-            future_to_job = {
-                executor.submit(monitor_process, job): job 
-                for job in running_processes
-            }
-            
-            completed_jobs = []
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_job):
-                job = future_to_job[future]
-                try:
-                    completed_job = future.result()
-                    completed_jobs.append(completed_job)
-                    print(f"  > Replicate {completed_job['replicate_id']} (PID: {completed_job['process'].pid}) finished with exit code {completed_job['exit_code']}")
-                except Exception as e:
-                    print(f"  > Error monitoring replicate {job['replicate_id']}: {e}")
-                    job['exit_code'] = -1  # Mark as failed
-                    job['error'] = str(e)
-                    completed_jobs.append(job)
-
-        print(f"  > All {len(completed_jobs)} processes completed")
+                for future in as_completed(future_to_job):
+                    job = future_to_job[future]
+                    try:
+                        completed_job = future.result()
+                        completed_jobs.append(completed_job)
+                        print(f"  > Replicate {completed_job['replicate_id']} (PID: {completed_job['process'].pid}) finished with exit code {completed_job['exit_code']}")
+                    except Exception as e:
+                        print(f"  > Error monitoring replicate {job['replicate_id']}: {e}")
+                        job['error'] = str(e)
+                        job['completed_at'] = time.time()
+                        completed_jobs.append(job)
+            print(f"  > All {len(completed_jobs)} processes completed")
+        else:
+            print("  > ERROR: No replicates were successfully launched.")
 
         # ======================================================
-        # PHASE 3: COLLECT RESULTS FROM ALL COMPLETED PROCESSES
+        # PHASE 3: FINALIZE EVERY ATTEMPT (launched or not)
         # ======================================================
         print("\n--- Phase 3: Collecting results from completed processes ---")
+        from ..utils.omex_generator import executed_model_overrides
 
-        for job in completed_jobs:
+        for job in sorted(completed_jobs + launch_failures, key=lambda j: j['replicate_id']):
             replicate_id = job['replicate_id']
             run_output_dir = job['output_dir']
             temp_project = job['temp_project']
             run_metadata = job['metadata']
+            replicate_params = job['replicate_params']
             exit_code = job['exit_code']
-            
+
             print(f"  > Processing results for replicate {replicate_id}...")
 
-            # Close log files
-            job['stdout_log'].close()
-            job['stderr_log'].close()
+            for log_handle in (job.get('stdout_log'), job.get('stderr_log')):
+                if log_handle is not None and not log_handle.closed:
+                    log_handle.close()
 
-            # Before/after snapshots taken in Phases 1 and 2. These were previously
-            # read from the job dict (where they had never been stored) and then
-            # immediately overwritten with an empty baseline, so every file present
-            # at the end counted as "generated" and the audit could not actually
-            # distinguish a simulator that produced nothing from a wrapper that
-            # collected nothing.
-            before_files = job.get('before_snapshot', set())
-            after_files = job.get('after_snapshot')
-            if after_files is None:
-                temp_sim_dir = temp_project / "Simulation"
-                after_files = (self._take_directory_snapshot(temp_sim_dir)
-                               | self._take_directory_snapshot(run_output_dir))
-
-            # Process based on exit code AND whether real output files were
-            # produced. CC3D can exit 0 even when it crashed before writing
-            # any data (e.g. UNC-cwd failures on Windows) — relying on the
-            # exit code alone caused silent "successes" with empty results.
-            if exit_code == 0:
+            # Evidence first, for EVERY outcome. A failed or timed-out replicate
+            # needs its generated Parameters.py and partial outputs at least as
+            # much as a successful one: they are what makes the failure
+            # diagnosable. The before/after snapshots (Phases 1 and 2) separate
+            # files the simulator produced from files the wrapper collected.
+            files_moved, generated_files = [], []
+            if temp_project.exists():
                 print(f"    - Collecting output files...")
-                files_moved = self._collect_output_files(temp_project, run_output_dir, sim_params)
+                try:
+                    files_moved = self._collect_output_files(
+                        temp_project, run_output_dir, replicate_params)
+                except Exception as e:
+                    print(f"    - Warning: output collection failed: {e}")
                 print(f"    - Copying Parameters.py for reference...")
                 self._copy_parameters_file(temp_project, run_output_dir)
-                generated_files = self._get_generated_files_list(temp_project, before_files, after_files)
+                after_files = job.get('after_snapshot')
+                if after_files is None:
+                    after_files = (self._take_directory_snapshot(temp_project / "Simulation")
+                                   | self._take_directory_snapshot(run_output_dir))
+                generated_files = self._get_generated_files_list(
+                    temp_project, job.get('before_snapshot', set()), after_files)
 
-                # Real-output gate: a successful run must have produced at least
-                # one cell_count CSV. If none reached run_output_dir, treat the
-                # replicate as failed even though the subprocess returned 0.
-                has_real_outputs = any(
-                    'cell_count' in str(f).lower() for f in files_moved
-                ) or any(p.name.startswith('cell_count_') for p in run_output_dir.glob('cell_count_*'))
+            started = job.get('started_at')
+            completed = job.get('completed_at') or time.time()
+            run_metadata.update({
+                'exit_code': exit_code,
+                'timed_out': bool(job.get('timed_out')),
+                'started_at': pd.Timestamp.fromtimestamp(started).isoformat() if started else None,
+                'simulation_completed_at': pd.Timestamp.now().isoformat(),
+                'duration_seconds': round(completed - started, 3) if started else None,
+                'files_collected': files_moved,
+                'files_generated': generated_files,
+            })
 
-                if has_real_outputs:
-                    print(f"    - Parsing simulation results...")
-                    results = self._parse_simulation_results(run_output_dir, sim_params)
-                    run_metadata.update({
-                        'simulation_success': True,
-                        'simulation_completed_at': pd.Timestamp.now().isoformat(),
-                        'healing_time': results.get('healing_time'),
-                        'files_collected': files_moved,
-                        'files_generated': generated_files,
-                    })
-                    replicate_outputs.append({
-                        'replicate_id': replicate_id,
-                        'success': True,
-                        'output_directory': str(run_output_dir),
-                        'error_message': None,
-                        'results': results,
-                        'files_generated': generated_files,
-                        'files_collected': files_moved,
-                    })
-                    print(f"    - Replicate {replicate_id} completed successfully")
-                else:
-                    error_message = (
-                        f"Simulation process exited cleanly (code {exit_code}) but produced no "
-                        f"cell_count_*.csv output. The CC3D simulation likely failed silently "
-                        f"during startup (check stderr.log for UNC path / missing .cc3d / conda "
-                        f"environment errors)."
-                    )
-                    run_metadata.update({
-                        'simulation_success': False,
-                        'simulation_completed_at': pd.Timestamp.now().isoformat(),
-                        'error_message': error_message,
-                        'files_collected': files_moved,
-                        'files_generated': generated_files,
-                    })
-                    replicate_outputs.append({
-                        'replicate_id': replicate_id,
-                        'success': False,
-                        'output_directory': str(run_output_dir),
-                        'error_message': error_message,
-                        'results': None,
-                        'files_generated': generated_files,
-                        'files_collected': files_moved,
-                    })
-                    print(f"    - Replicate {replicate_id} FAILED: no output files produced (despite exit 0)")
-
+            # Outcome. Exit code 0 is necessary but not sufficient: CC3D can exit
+            # cleanly after crashing on startup (e.g. UNC-cwd failures on
+            # Windows), so success also requires a cell_count CSV.
+            has_real_outputs = any(
+                'cell_count' in str(f).lower() for f in files_moved
+            ) or any(run_output_dir.glob('cell_count_*'))
+            results = None
+            if job.get('launch_error'):
+                status, error_message = 'failed', job['launch_error']
+            elif job.get('timed_out'):
+                status = 'timed_out'
+                error_message = (
+                    f"Replicate exceeded its {timeout_s}s wall-clock limit and was "
+                    f"terminated (whole process tree killed). Partial outputs, if any, "
+                    f"are preserved.")
+            elif job.get('error'):
+                status = 'failed'
+                error_message = f"Monitoring the simulation process failed: {job['error']}"
+            elif exit_code != 0:
+                status = 'failed'
+                error_message = (f"Simulation process failed with exit code {exit_code}. "
+                                 f"Check stderr.log in the output directory.")
+            elif not has_real_outputs:
+                status = 'failed'
+                error_message = (
+                    f"Simulation process exited cleanly (code {exit_code}) but produced no "
+                    f"cell_count_*.csv output. The CC3D simulation likely failed silently "
+                    f"during startup (check stderr.log for UNC path / missing .cc3d / conda "
+                    f"environment errors)."
+                )
             else:
-                # Non-zero exit
-                error_message = f"Simulation process failed with exit code {exit_code}. Check stderr.log in the output directory."
-                run_metadata.update({
-                    'simulation_success': False,
-                    'error_message': error_message,
-                })
-                replicate_outputs.append({
-                    'replicate_id': replicate_id,
-                    'success': False,
-                    'output_directory': str(run_output_dir),
-                    'error_message': error_message,
-                    'results': None,
-                    'files_generated': [],
-                    'files_collected': [],
-                })
-                print(f"    - Replicate {replicate_id} failed with exit code {exit_code}")
+                status, error_message = 'success', None
+                print(f"    - Parsing simulation results...")
+                results = self._parse_simulation_results(run_output_dir, replicate_params)
+                run_metadata['healing_time'] = results.get('healing_time')
+
+            run_metadata.update({
+                'simulation_status': status,
+                'simulation_success': status == 'success',
+                'error_message': error_message,
+            })
+            replicate_outputs.append({
+                'replicate_id': replicate_id,
+                'success': status == 'success',
+                'status': status,
+                'output_directory': str(run_output_dir),
+                'error_message': error_message,
+                'results': results,
+                'files_generated': generated_files,
+                'files_collected': files_moved,
+            })
+            print(f"    - Replicate {replicate_id}: {status}"
+                  + (f" ({error_message})" if error_message else ""))
 
             # Parameter audit: join the schema's documentation of every parameter
             # with the values this run executed (default vs. value, position
@@ -4555,7 +4568,7 @@ class VCorneaProcess(Process):
             try:
                 from ..utils.parameter_audit import build_parameter_audit, audit_summary_line
                 parameter_audit = build_parameter_audit(
-                    self.ports_schema(), sim_params,
+                    self.ports_schema(), replicate_params,
                     schema_fingerprint=run_metadata.get('schema_fingerprint'))
                 with open(run_output_dir / "parameter_audit.json", 'w') as f:
                     json.dump(parameter_audit, f, indent=2, default=str)
@@ -4564,39 +4577,40 @@ class VCorneaProcess(Process):
             except Exception as e:
                 print(f"    - Warning: Could not build parameter audit: {e}")
 
-            # Save metadata and clean up
+            # Save metadata
             with open(run_output_dir / "run_metadata.json", 'w') as f:
-                json.dump(run_metadata, f, indent=2)
+                json.dump(run_metadata, f, indent=2, default=str)
 
-            # Always produce a typed COMBINE/OMEX archive — successful AND failed.
-            # A failed run gets an archive marked failed (no executable SED-ML, a
-            # machine-readable status), carrying params/provenance, logs and any
-            # partial outputs. This keeps the run's provenance honest about failure
-            # rather than leaving it as a loose directory: the original concern (an
-            # .omex for a failed run is misleading provenance) is addressed by making
-            # the archive explicitly NOT a reproducible success, not by skipping it.
-            run_succeeded = bool(run_metadata.get('simulation_success'))
+            # Always produce a typed COMBINE/OMEX archive — for every outcome. A
+            # non-successful run gets an archive marked with its status (no
+            # executable SED-ML, a machine-readable status.json), carrying
+            # params/provenance, logs and any partial outputs. The bundled model is
+            # the source project with this replicate's generated Parameters.py and
+            # seeded CC3DML overlaid, so re-executing it runs THIS replicate.
             try:
                 from ..utils.omex_generator import create_omex_archive
                 omex_path = create_omex_archive(
                     run_output_dir=run_output_dir,
                     run_metadata=run_metadata,
-                    sim_params=sim_params,
+                    sim_params=replicate_params,
                     include_model=True,   # bundle the CC3D project so model/@source resolves
+                    model_path=self.project_path,
+                    model_overrides=(executed_model_overrides(temp_project)
+                                     if temp_project.exists() else None),
                     creator=self.parameters.get('creator'),  # experimenter (provenance); None -> omitted
-                    failed=not run_succeeded,
+                    status=status,
                     parameter_audit=parameter_audit,
                 )
                 run_metadata['omex_archive'] = str(omex_path.name)
                 # Re-save metadata with OMEX info
                 with open(run_output_dir / "run_metadata.json", 'w') as f:
-                    json.dump(run_metadata, f, indent=2)
-                print(f"    - Generated {'FAILED ' if not run_succeeded else ''}OMEX archive: {omex_path.name}")
+                    json.dump(run_metadata, f, indent=2, default=str)
+                print(f"    - Generated {'' if status == 'success' else status.upper() + ' '}OMEX archive: {omex_path.name}")
             except Exception as e:
                 print(f"    - Warning: Could not generate OMEX archive: {e}")
                 run_metadata['omex_archive'] = None
 
-            self._update_experiment_log(output_base, run_metadata)
+            self._update_experiment_log(output_base, run_metadata, run_output_dir)
             # Keep the working directory inside the run output dir for
             # inspection. The user requested this layout; we no longer wipe
             # it after collection because the CC3D project copy, the
@@ -4605,17 +4619,25 @@ class VCorneaProcess(Process):
             # shutil.rmtree(job['temp_dir'], ignore_errors=True)
 
         print(f"--- Result collection completed ---")
-        overall_success = all(rep['success'] for rep in replicate_outputs if 'success' in rep)
+        overall_success = bool(replicate_outputs) and all(
+            rep['success'] for rep in replicate_outputs)
 
         return {
             'outputs': {
-                'replicate_results': sorted(replicate_outputs, key=lambda r: r['replicate_id']), 
+                'replicate_results': sorted(replicate_outputs, key=lambda r: r['replicate_id']),
                 'simulation_success': overall_success,
                 'output_directory': str(batch_output_dir),
                 'parameter_changes': parameter_changes,
                 'run_metadata': self._create_run_metadata(sim_params, parameter_changes, run_name)
             }
         }
+
+    def _run_timeout_seconds(self):
+        """Per-replicate wall-clock limit, recorded with every run."""
+        try:
+            return max(int(self.parameters.get('run_timeout_seconds', 86400) or 86400), 1)
+        except (TypeError, ValueError):
+            return 86400
 
     def _auto_discover_vcornea(self):
         """Auto-discover vCornea installation using common patterns."""
@@ -4877,7 +4899,10 @@ class VCorneaProcess(Process):
             'parameters_changed': len(parameter_changes),
             'parameter_changes': parameter_changes,
             'simulation_config': {
-                'vcornea_project_path': str(self.parameters['vcornea_project_path']),
+                # The resolved project, not the parameter: when the path was
+                # auto-discovered the parameter is None, and recording "None"
+                # left the archive unable to locate or bundle the model.
+                'vcornea_project_path': str(self.project_path),
                 'cc3d_conda_env_name': self.parameters['cc3d_conda_env_name'],
                 'sim_time': sim_params.get('SimTime', 7700),
                 'has_injury': sim_params.get('IsInjury', False),
@@ -4924,48 +4949,25 @@ class VCorneaProcess(Process):
 
         return metadata
 
-    def _update_experiment_log(self, output_base, run_metadata):
-        """Update the master experiment log with this run's information."""
-        log_file = output_base / "experiment_log.csv"
-        
-        # Create log entry
-        log_entry = {
-            'run_name': run_metadata['run_name'],
-            'created_at': run_metadata['created_at'],
-            'simulation_success': run_metadata['simulation_success'],
-            'parameters_changed': run_metadata['parameters_changed'],
-            'sim_time': run_metadata['simulation_config']['sim_time'],
-            'has_injury': run_metadata['simulation_config']['has_injury'],
-            'injury_type': run_metadata['simulation_config']['injury_type'],
-            'healing_time': run_metadata.get('healing_time', ''),
-            'output_directory': run_metadata['run_name']
-        }
-        #TODO: Add all the parameters used in the run to the log
-        # Add key parameter changes to the log
-        for param, change in run_metadata.get('parameter_changes', {}).items():
-            # if param in ['SLS_Concentration', 'InjuryTime', 'EGF_STEM_HalfMaxValue']:
-            log_entry[f'{param}_value'] = change['current_value']
-            log_entry[f'{param}_default'] = change['default_value']
-        
-        # Read existing log or create new DataFrame
-        if log_file.exists():
-            try:
-                df = pd.read_csv(log_file)
-                # Append new entry
-                new_df = pd.concat([df, pd.DataFrame([log_entry])], ignore_index=True)
-            except Exception as e:
-                print(f"Warning: Could not read existing log file: {e}")
-                new_df = pd.DataFrame([log_entry])
-        else:
-            new_df = pd.DataFrame([log_entry])
-        
-        # Save updated log
+    def _update_experiment_log(self, output_base, run_metadata, run_output_dir=None):
+        """Append this replicate to the cross-run experiment log.
+
+        Append-only, fixed columns, under a lock (see utils/experiment_log.py):
+        sweep workers run in separate processes and share the log, and the old
+        read-modify-rewrite could interleave writers or, on a failed read,
+        replace the whole log with a single row.
+        """
+        from ..utils.experiment_log import append_rows, row_from_run_metadata
         try:
-            new_df.to_csv(log_file, index=False)
+            out_dir = run_output_dir if run_output_dir is not None else run_metadata.get('run_name')
+            try:
+                out_dir = os.path.relpath(out_dir, output_base)
+            except (TypeError, ValueError):
+                pass  # different drive on Windows: keep it absolute
+            log_file = append_rows(output_base, [row_from_run_metadata(run_metadata, out_dir)])
             print(f"Updated experiment log: {log_file}")
         except Exception as e:
             print(f"Warning: Could not update experiment log: {e}")
-
     def _resolve_run_seed(self, sim_params, replicate_id):
         """Return (seed, origin) for one replicate. Never returns the sentinel.
 
@@ -5123,33 +5125,12 @@ class VCorneaProcess(Process):
         with open(steppables_file, 'w') as f:
             f.write(content)
 
-    # Conversion factors from schema time units to MCS (CC3D's native time unit).
-    # Mirrors the constants in ports_schema(): 1 MCS = 6 min => 240 MCS / day, 10 MCS / hour.
-    _UNIT_TO_MCS_MULTIPLIER = {
-        'days': 240,
-        'hours': 10,
-        'minutes': 1.0 / 6.0,
-    }
-
     def _to_cc3d_units(self, param_name, value, schema=None):
-        """Convert a schema-layer parameter value into CC3D-native units (MCS for time).
-
-        The schema exposes user-friendly units (days, hours) so the GUI can present
-        physiological numbers; CC3D itself only speaks Monte Carlo Steps. This
-        helper looks up the parameter's `_unit` in the schema and applies the
-        appropriate multiplier. Non-time parameters pass through unchanged.
-        """
+        """Convert a schema-layer parameter value into CC3D-native units (MCS for
+        time). See to_cc3d_value."""
         if schema is None:
             schema = self.ports_schema()
-        info = schema.get('inputs', {}).get(param_name)
-        if not info:
-            return value
-        unit = info.get('_unit', '')
-        multiplier = self._UNIT_TO_MCS_MULTIPLIER.get(unit)
-        if multiplier is None or not isinstance(value, (int, float)) or isinstance(value, bool):
-            return value
-        converted = value * multiplier
-        return int(round(converted)) if isinstance(info.get('_default'), int) else converted
+        return to_cc3d_value(schema.get('inputs', {}).get(param_name), value)
 
     def _read_existing_parameters(self, params_file):
         """Parse an existing Parameters.py into a {name: value} dict.

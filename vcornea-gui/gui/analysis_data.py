@@ -51,12 +51,68 @@ class AnalysisDataset:
 
     # ---- discovery / grouping ----
     def _collect(self):
+        """Find output files, keeping only those from runs that succeeded.
+
+        Excluded (and listed in self.excluded_runs, dir -> status):
+          * anything inside a vcornea_sim_* workspace — the per-replicate CC3D
+            project copy, which would otherwise surface as a phantom combination;
+          * replicates whose record says failed / timed_out / cancelled. Their
+            partial outputs stay on disk and in their archives for diagnosis, but
+            plotting them beside completed runs would present them as results.
+        Runs with no status record (older versions) are kept.
+        """
         base = self.exp_dir
-        count = [str(p) for p in base.rglob("cell_count_*.csv")]
-        thick = [str(p) for p in base.rglob("thickness_rep_*.parquet")]
-        surf = [str(p) for p in base.rglob("surfactant_*.csv")]
-        meta = [p for p in base.rglob("run_metadata.json")]
+        self.excluded_runs = {}
+        status_cache = {}
+
+        def keep(p):
+            rel = p.relative_to(base).parts[:-1]
+            if any(part.startswith('vcornea_sim_') for part in rel):
+                return False
+            run_dir = p.parent
+            if run_dir not in status_cache:
+                status_cache[run_dir] = self._run_status(run_dir)
+            status = status_cache[run_dir]
+            if status not in (None, 'success'):
+                self.excluded_runs[str(run_dir)] = status
+                return False
+            return True
+
+        count = [str(p) for p in base.rglob("cell_count_*.csv") if keep(p)]
+        thick = [str(p) for p in base.rglob("thickness_rep_*.parquet") if keep(p)]
+        surf = [str(p) for p in base.rglob("surfactant_*.csv") if keep(p)]
+        meta = [p for p in base.rglob("run_metadata.json") if keep(p)]
+        if self.excluded_runs:
+            print(f"[analysis] excluded {len(self.excluded_runs)} unsuccessful run(s): "
+                  + ", ".join(f"{Path(d).name}={s}" for d, s in sorted(self.excluded_runs.items())))
         return count, thick, surf, meta
+
+    def _run_status(self, run_dir):
+        """'success' / 'failed' / 'timed_out' / 'cancelled', or None if unrecorded.
+
+        The replicate's own run_metadata.json status wins (a replicate that
+        finished before its batch was stopped is still a completed run). Without
+        one, a cancelled.json / timed_out.json marker between run_dir and the
+        analysed experiment root marks it interrupted.
+        """
+        run_dir = Path(run_dir)
+        meta_path = run_dir / 'run_metadata.json'
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except Exception:
+                meta = {}
+            if meta.get('simulation_status'):
+                return meta['simulation_status']
+            if meta.get('simulation_success') is False:
+                return 'failed'
+        for d in [run_dir, *run_dir.parents]:
+            for marker, status in (('cancelled.json', 'cancelled'), ('timed_out.json', 'timed_out')):
+                if (d / marker).exists():
+                    return status
+            if d == self.exp_dir:
+                break
+        return None
 
     @staticmethod
     def _combo_key(path):

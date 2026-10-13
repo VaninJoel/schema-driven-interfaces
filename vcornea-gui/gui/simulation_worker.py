@@ -87,38 +87,50 @@ class SimulationWorker(QObject):
                     pass
 
         # Write an audit marker so the run is recognizable as user-cancelled
-        # rather than crashed or never started. We catch all errors because
-        # the exp_dir may not exist yet if the worker was killed very early.
-        try:
-            import json as _json
-            from datetime import datetime as _datetime
-            self.exp_dir.mkdir(parents=True, exist_ok=True)
-            marker = self.exp_dir / 'cancelled.json'
-            marker.write_text(_json.dumps({
-                'exp_name': self.exp_name,
-                'status': 'cancelled',
-                'cancelled_at': _datetime.now().isoformat(),
-                'was_running_at_cancel': was_running,
-                'reason': 'User clicked Cancel in the GUI',
-            }, indent=2))
-        except Exception as e:
-            print(f"  > Could not write cancelled.json for {self.exp_name}: {e}")
+        # rather than crashed or never started.
+        self._write_status_marker('cancelled', 'cancelled.json',
+                                  'User clicked Cancel in the GUI',
+                                  was_running_at_cancel=was_running)
 
         # Package the interrupted run. The wrapper process was just killed, so it
         # never reached its own archiving step — without this a cancelled run is
         # the ONLY outcome that leaves no archive, which is exactly the gap
         # requirement 2.5.4 warns about when it names interrupted attempts
         # alongside failed and timed-out ones.
-        self._generate_cancelled_archives()
+        # Replicates the wrapper already finalized keep their own outcome: one
+        # that completed before the cancel is a completed run, not a cancelled one.
+        self._generate_interrupted_archives(
+            'cancelled', 'Run interrupted by the operator before completion.',
+            only_unfinalized=True)
 
-    def _generate_cancelled_archives(self):
-        """Write a status='cancelled' OMEX archive for each replicate directory.
+    def _write_status_marker(self, status, filename, reason, **extra):
+        """Drop a small JSON audit marker in the experiment dir. Best-effort: the
+        exp_dir may not exist yet if the worker was stopped very early."""
+        try:
+            from datetime import datetime as _datetime
+            self.exp_dir.mkdir(parents=True, exist_ok=True)
+            (self.exp_dir / filename).write_text(json.dumps({
+                'exp_name': self.exp_name,
+                'status': status,
+                f'{status}_at': _datetime.now().isoformat(),
+                'reason': reason,
+                **extra,
+            }, indent=2))
+        except Exception as e:
+            print(f"  > Could not write {filename} for {self.exp_name}: {e}")
 
-        Best-effort and deliberately quiet about missing pieces: a run cancelled
+    def _generate_interrupted_archives(self, status, reason, only_unfinalized=False):
+        """Write a status-typed OMEX archive (cancelled / timed_out) for each
+        replicate directory.
+
+        Best-effort and deliberately quiet about missing pieces: a run stopped
         seconds after launch may have no replicate directories, no outputs and no
         metadata, and the marker file alone is then the record. Whatever partial
         outputs DO exist are preserved and marked interrupted, so they can never be
         mistaken for a completed experiment.
+
+        only_unfinalized: skip replicates whose run_metadata.json already carries
+        a final simulation_status (VCorneaProcess finished and archived them).
         """
         try:
             from vivarium_vcornea.utils.omex_generator import create_omex_archive
@@ -142,6 +154,8 @@ class SimulationWorker(QObject):
                 meta_path = target / 'run_metadata.json'
                 if meta_path.exists():
                     metadata = json.loads(meta_path.read_text())
+                    if only_unfinalized and metadata.get('simulation_status'):
+                        continue
                 else:
                     metadata = {
                         'run_name': self.exp_dir.name,
@@ -150,23 +164,28 @@ class SimulationWorker(QObject):
                         'key_parameters': {},
                     }
                 metadata.update({
-                    'simulation_status': 'cancelled',
+                    'simulation_status': status,
                     'simulation_success': False,
-                    'cancelled_at': _dt.now().isoformat(),
-                    'error_message': 'Run interrupted by the operator before completion.',
+                    'timed_out': status == 'timed_out',
+                    f'{status}_at': _dt.now().isoformat(),
+                    'error_message': reason,
                     'creator': self.parameters.get('creator'),
                 })
                 metadata.setdefault('provenance', run_provenance())
+                if target != self.exp_dir:
+                    # Replicate-level record now agrees with its archive. (exp_dir's
+                    # own run_metadata.json is the worker's record; leave it.)
+                    meta_path.write_text(json.dumps(metadata, indent=2, default=str))
                 create_omex_archive(
                     run_output_dir=target,
                     run_metadata=metadata,
                     sim_params=self.parameters,
                     include_model=False,   # the run never proved the project ran
-                    status='cancelled',
+                    status=status,
                 )
-                print(f"  > Cancelled-run archive written for {target.name}")
+                print(f"  > {status} archive written for {target.name}")
             except Exception as e:
-                print(f"  > Could not archive cancelled run {target.name}: {e}")
+                print(f"  > Could not archive {status} run {target.name}: {e}")
 
     # Headroom between the per-replicate limit enforced inside VCorneaProcess and
     # this outer wait. The two must NOT expire together: when a replicate times out
@@ -274,9 +293,23 @@ class SimulationWorker(QObject):
                 self.error.emit(error_msg)
 
         except subprocess.TimeoutExpired:
-            if self.process:
-                self.process.kill()
+            # Kill the whole tree (the wrapper plus its CC3D grandchildren), then
+            # record the outcome: any replicate the wrapper had not finalized gets
+            # a timed_out archive instead of being left as a bare directory.
+            try:
+                from vivarium_vcornea.utils.process_tree import kill_process_tree
+                kill_process_tree(self.process)
+            except ImportError:
+                if self.process:
+                    self.process.kill()
             limit = self._outer_timeout()
+            self._write_status_marker('timed_out', 'timed_out.json',
+                                      f'Batch exceeded its {limit}s wall-clock limit',
+                                      timeout_seconds=limit)
+            self._generate_interrupted_archives(
+                'timed_out',
+                f'Batch exceeded its {limit}s wall-clock limit and was terminated.',
+                only_unfinalized=True)
             self.error.emit(
                 f"Simulation timed out after {limit}s ({limit / 3600:.1f}h) and was "
                 f"terminated. This is the batch-level limit (per-replicate limit "
