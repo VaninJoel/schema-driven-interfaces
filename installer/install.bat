@@ -1,7 +1,7 @@
 @echo off
-REM On-target installer (Windows). Bundled into the self-extracting .exe by
-REM build.bat and run after extraction, with the working directory set to the
-REM extracted payload (vc_env.tar.gz + payload\ + this script).
+REM On-target installer (Windows). Shipped inside the release .zip built by
+REM build.bat; the user extracts the zip and double-clicks this script, so the
+REM working directory is the extracted folder (vc_env.tar.gz + payload\ + this script).
 REM
 REM Relocates the conda-pack'd environment, repairs prefixes (conda-unpack),
 REM installs the app code, and creates launchers + Start-menu/Desktop shortcuts.
