@@ -1622,7 +1622,7 @@ batch_sweep_20251106_143052/
 
         <div class="section" style="text-align: center; margin-top: 20px;">
             <p><strong>For questions, issues, or contributions:</strong></p>
-            <p>Contact your lab administrator or check the project <a href="https://github.com/VaninJoel/vivarium-angio/tree/main">repository</a> </p>
+            <p>Contact your lab administrator or check the project <a href="https://github.com/VaninJoel/schema-driven-interfaces">repository</a> </p>
         </div>
         """
 

@@ -30,9 +30,12 @@ self-extracting installer. The installer ships the same bytes we test.
 
 | OS      | Artifact                                          | User action                       |
 |---------|---------------------------------------------------|-----------------------------------|
-| Linux   | `SchemaDrivenInterfaces-<ver>-Linux-x86_64.sh`    | `bash <file>.sh` → desktop entry  |
-| macOS   | `SchemaDrivenInterfaces-<ver>-macOS-<arch>.sh`    | run installer → `.command` on Desktop |
-| Windows | `SchemaDrivenInterfaces-<ver>-Windows-x86_64.zip` | extract → double-click `install.bat` → Start-menu shortcut |
+| Linux   | `SchemaDrivenInterfaces-Linux-x86_64.sh`          | `bash <file>.sh` → desktop entry  |
+| macOS   | `SchemaDrivenInterfaces-macOS-<arch>.sh`          | `bash <file>.sh` → `.command` on Desktop |
+| Windows | `SchemaDrivenInterfaces-Windows-x86_64.zip`       | extract → double-click `install.bat` → Start-menu shortcut |
+
+Filenames carry no version, so the README's `releases/latest/download/<name>`
+links keep working across releases; the version is the release tag.
 
 The Linux/macOS installers are [makeself](https://makeself.io/) self-extracting
 archives (one double-click file). The Windows installer is currently a `.zip`

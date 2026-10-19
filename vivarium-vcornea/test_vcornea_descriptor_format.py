@@ -1,11 +1,10 @@
 """Every exposed V-Cornea parameter conforms to the common descriptor format.
 
-The field list is the one in docs/parameter_descriptor_example.py (repo root),
-so the manuscript example, the schema and this test cannot drift apart.
+FIELD_GROUPS is the common format shared by both models; the same dictionary
+is in vivarium-angio/test_angio_descriptor_format.py, and the two must be kept identical.
 
 Run:  conda run -n vc --no-capture-output pytest vivarium-vcornea/test_vcornea_descriptor_format.py -v
 """
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -14,12 +13,47 @@ REPO = Path(__file__).resolve().parents[1]
 CONTROL_EXEMPT = ('_reference_paper', '_literature', '_fitting_method')
 
 
+FIELD_GROUPS = {
+    'execution contract': {                   # consumed by the simulator / Vivarium
+        'required': ['_default', '_updater', '_emit', '_scope', '_parameter_type'],
+        'optional': ['_validation_pattern', '_max_length', '_auto_generate',
+                     '_debug_parameter'],
+    },
+    'identity and meaning': {                 # developer -> operator
+        'required': ['_display_name', '_description', '_category', '_subcategory',
+                     '_expert_level'],
+        'optional': ['_long_description', '_conceptual_hint', '_biological_meaning',
+                     '_model_context', '_implementation_pattern', '_ontology_term'],
+    },
+    'units': {
+        'required': ['_unit', '_dimension'],
+        'optional': ['_unit_long', '_display_unit', '_conversion_factor',
+                     '_value_mapping'],
+    },
+    'admissible and supported values': {      # three tiers + their rationale
+        'required': ['_range_evidence'],   # always present, one entry per tier; None = tier not declared
+        'optional': ['_mathematical_range', '_physiological_range',
+                     '_recommended_range', '_warning_threshold', '_presets'],
+    },
+    'relationships and expected effect': {
+        'required': ['_related_parameters', '_dependencies', '_affects_output'],
+        'optional': ['_expected_behavior', '_equations', '_output_files',
+                     '_performance_impact', '_storage_impact'],
+    },
+    'evidence': {                             # run -> auditor
+        'required': ['_reference_paper', '_literature', '_fitting_method'],
+        'optional': ['_measurable', '_experimental_assay'],
+    },
+    'presentation': {                         # GUI only; never affects execution
+        'required': [],
+        'optional': ['_hidden_basic', '_depends_on_display', '_conditional_display',
+                     '_gui_hints'],
+    },
+}
+
+
 def _field_groups():
-    spec = importlib.util.spec_from_file_location(
-        'descriptor_example', REPO / 'docs' / 'parameter_descriptor_example.py')
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.FIELD_GROUPS
+    return FIELD_GROUPS
 
 
 def _schema():

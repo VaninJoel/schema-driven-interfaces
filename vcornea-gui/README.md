@@ -60,24 +60,24 @@ For batch runs (parameter sweeps / replicates) these files live under
 
 ---
 
-## Requirements
+## Installation
 
-- Python 3.10+
-- Python packages: `PyQt5`, `numpy`, `pandas`, `matplotlib`, `scipy`, `seaborn`, `pyarrow`
-  (install with `pip install -r requirements.txt`)
-- **CompuCell3D** (CC3D) installed and importable — required to run simulations.
-- The **`vivarium-vcornea`** package, expected as a sibling folder next to this
-  repository (`../vivarium-vcornea`). `run_gui.py` adds it to the path automatically
-  if present. It provides `VCorneaProcess`, whose schema drives the GUI.
+- **No coding:** download the desktop installer for your OS from the
+  [repository README](../README.md).
+- **From source:** follow [INSTALL.md](../INSTALL.md) — one conda environment
+  (`vc`) provides CompuCell3D 4.7.0, Python 3.12, PyQt5 and the sibling
+  `vivarium-vcornea` package, whose `VCorneaProcess` schema drives this GUI.
 
-> The Analyze Results window only needs the Python packages above — you can explore
-> existing run outputs without a CC3D installation.
+> The Analyze Results window only needs the Python packages — you can explore
+> existing run outputs without a CompuCell3D installation.
 
 ---
 
 ## Quick Start
 
 ```bash
+conda activate vc
+cd vcornea-gui
 python run_gui.py
 ```
 
@@ -92,8 +92,10 @@ python run_gui.py
 
 - Live plotting is not enabled in the black-box workflow.
 - Use parameter sweeps with comma-separated values.
+- Every parameter's meaning, units, ranges and evidence: click its ⓘ button, or see
+  Supplementary Table S2 of the paper.
 - CC3D installation is required for simulation execution.
 
 ---
 
-**Last Updated:** June 2026
+See the [repository README](../README.md#how-to-cite) for citation and license (MIT).
