@@ -22,16 +22,14 @@ REPO="$(cd "$HERE/.." && pwd)"
 ENV_NAME="${SDI_ENV_NAME:-sdi-dist}"
 STAGE="$HERE/stage"
 DIST="$HERE/dist"
-# NB: strip \r too — pyproject.toml may have CRLF line endings, and a stray
-# carriage return in the artifact filename makes actions/upload-artifact reject it.
-VERSION="$(grep -m1 '^version' "$REPO/vivarium-vcornea/pyproject.toml" | tr -d ' "\r' | cut -d= -f2 || echo 0.1.0)"
-
 case "$(uname -s)" in
     Linux)  OSTAG="Linux-$(uname -m)";;
     Darwin) OSTAG="macOS-$(uname -m)";;
     *)      OSTAG="$(uname -s)-$(uname -m)";;
 esac
-INSTALLER="$DIST/SchemaDrivenInterfaces-${VERSION}-${OSTAG}.sh"
+# No version in the filename: the README links to releases/latest/download/<name>,
+# which only resolves if every release uses the same name. The tag carries the version.
+INSTALLER="$DIST/SchemaDrivenInterfaces-${OSTAG}.sh"
 
 # shellcheck disable=SC1091
 source "$(conda info --base)/etc/profile.d/conda.sh"

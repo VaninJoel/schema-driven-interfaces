@@ -98,56 +98,14 @@ The angiogenesis model simulates endothelial cell (EC) migration and VEGF (Vascu
 
 ## Installation
 
-### Prerequisites
-
-- Anaconda or Miniconda
-- Python 3.12
-- CompuCell3D 
-
-### Step 1: Create Isolated Conda Environment
-
-**We strongly recommend using a dedicated conda environment to avoid package conflicts.**
+Installed by the repository's single conda environment (CompuCell3D 4.7.0,
+Python 3.12, Vivarium, Zarr, and this package in editable mode) — see
+[INSTALL.md](../INSTALL.md):
 
 ```bash
-# Create new environment for vivarium-angio
-conda create -n vivarium_angio python=3.12 -y
-conda activate vivarium_angio
-```
-
-### Step 2: Install CompuCell3D
-
-```bash
-# Install CC3D via conda (recommended)
-conda install -c conda-forge mamba
-mamba install -c conda-forge -c compucell3d compucell3d=4.7.0 -y
-```
-
-**Alternative**: If you have CC3D installed via binary installer, ensure it's accessible in your Python path.
-
-### Step 3: Install Vivarium and Dependencies
-
-```bash
-# Install vivarium
-pip install vivarium-core
-
-# Install required packages
-pip install zarr numpy pandas
-```
-
-### Step 4: Install Vivarium-Angio
-
-```bash
-# Clone or navigate to the vivarium-angio directory
-cd /path/to/vivarium-angio
-
-# Install in development mode
-pip install -e .
-```
-
-### Verify Installation
-
-```bash
-python -c "import vivarium; import cc3d; import zarr; print('✓ All dependencies installed')"
+conda env create -f environment.yml   # from the repository root
+conda activate vc
+python -c "import vivarium, cc3d, zarr, vivarium_angio; print('OK')"
 ```
 
 ---
@@ -246,7 +204,7 @@ python run_angiogenesis_sequential.py
 
 ### Visualizing Parameter Effects
 
-To understand the impact of the `jem` parameter (EC-Medium adhesion), you can run the `plot_results.py` script. You may need to install matplotlib first (`pip install matplotlib`).
+To understand the impact of the `jem` parameter (EC-Medium adhesion), you can run the `plot_results.py` script.
 
 ```bash
 python experiments/plot_results.py
@@ -384,7 +342,7 @@ This creates separate zarr stores per experiment, eliminating file locking issue
 
 **Solution:**
 ```bash
-conda activate vivarium_angio
+conda activate vc
 pip install zarr
 ```
 
@@ -448,87 +406,33 @@ This implementation successfully demonstrates:
 ```
 vivarium-angio/
 ├── vivarium_angio/
-│   ├── processes/
-│   │   └── angiogenesis_process.py     # Main process
-│   ├── composites/
-│   │   └── angiogenesis_composer.py    # Vivarium composer
-│   └── __init__.py
-├── experiments/
-│   ├── run_angiogenesis.py             # Single run example
-│   ├── run_angiogenesis_parallel.py    # Recommended parallel runner
-│   ├── run_angiogenesis_sequential.py  # Sequential runner
-│   ├── verify_zarr_data.py             # Original data verification script
-│   ├── verify_aggregation.py           # Script to count cell clusters
-│   ├── plot_results.py                 # Script to generate comparison plot
-│   ├── aggregation_comparison_detailed.png # Output plot
-│   └── temp_store.zarr/                # Output data
-├── .gitignore                          # Git ignore file
-├── LICENSE                             # MIT License file
-├── README.md                           # This file
-└── pyproject.toml                      # Project configuration
+│   ├── processes/angiogenesis_process.py   # AngiogenesisProcess + its parameter schema
+│   ├── composites/angiogenesis_composer.py # Vivarium composer
+│   └── utils/                              # OMEX/SED-ML export, parameter audit, provenance
+├── experiments/                            # stand-alone example scripts (no GUI)
+├── make_omex_combo_report.py               # PDF report from a run's OMEX archive
+├── test_angio_*.py                         # tests (run with `pytest` from the repo root)
+└── pyproject.toml
 ```
+
+The full parameter schema is tabulated in Supplementary Table S1 of the paper.
 
 ---
 
 ## Citation
 
-If you use this architecture pattern in your work, please cite:
+Please cite the accompanying article and the archived software release — see the
+[repository README](../README.md#how-to-cite) and [`CITATION.cff`](../CITATION.cff).
+The angiogenesis model is adapted from Merks et al. (2006, 2008):
 
-**Integration:**
-```bibtex
-@article{vanin2025accessible,
-  title={From Expert Model to User Application: Architectural Patterns for Accessible CompuCell3D Simulations},  
-  journal={In Preparation},
-  year={2025}, 
-  author={Joel Vanin and Lorenzo Veschini and Michael Getz and Catherine Mahony and James A. Glazier}
-}
-```
-**Angiogenesis:**
-```bibtex
-@article{MERKS200644,
-  title={Cell elongation is key to in silico replication of in vitro vasculogenesis and subsequent remodeling},
-  journal = {Developmental Biology},
-  volume = {289}, 
-  number = {1},
-  pages = {44-54},
-  year = {2006},
-  issn = {0012-1606},
-  doi = {https://doi.org/10.1016/j.ydbio.2005.10.003},
-  url = {https://www.sciencedirect.com/science/article/pii/S0012160605007098},
-  author = {Roeland M.H. Merks and Sergey V. Brodsky and Michael S. Goligorksy and Stuart A. Newman and James A. Glazier},
-}
-```
+> Merks RMH, Brodsky SV, Goligorksy MS, Newman SA, Glazier JA. *Cell elongation is
+> key to in silico replication of in vitro vasculogenesis and subsequent remodeling.*
+> Developmental Biology. 2006;289(1):44–54. doi:[10.1016/j.ydbio.2005.10.003](https://doi.org/10.1016/j.ydbio.2005.10.003)
 
-**CompuCell3D:**
-```bibtex
-@article{SWAT2012325,
-  title={Multi-scale modeling of tissues using CompuCell3D},  
-  journal={Methods in Cell Biology},
-  volume={110},
-  pages={325--366},
-  year={2012},
-  doi = {https://doi.org/10.1016/B978-0-12-388403-9.00013-8},
-  author={Maciej H. Swat and Gilberto L. Thomas and Julio M. Belmonte and Abbas Shirinifard and Dimitrij Hmeljak and James A. Glazier},
-}
-```
-
-**Vivarium:**
-```bibtex
-@article{10.1093/bioinformatics/btac049,
-  title={Vivarium: an interface and engine for integrative multiscale modeling in computational biology},
-  journal = {Bioinformatics},
-  volume = {38},
-  number = {7},
-  pages = {1972-1979},
-  year = {2022},
-  month = {02},
-  issn = {1367-4803},
-  doi = {10.1093/bioinformatics/btac049},
-  url = {https://doi.org/10.1093/bioinformatics/btac049},
-  eprint = {https://academic.oup.com/bioinformatics/article-pdf/38/7/1972/49010117/btac049.pdf},
-  author = {Agmon, Eran and Spangler, Ryan K and Skalnik, Christopher J and Poole, William and Peirce, Shayn M and Morrison, Jerry H and Covert, Markus W}, 
-}
-```
+CompuCell3D: Swat et al., *Methods Cell Biol.* 2012;110:325–66,
+doi:[10.1016/B978-0-12-388403-9.00013-8](https://doi.org/10.1016/B978-0-12-388403-9.00013-8).
+Vivarium: Agmon et al., *Bioinformatics* 2022;38(7):1972–9,
+doi:[10.1093/bioinformatics/btac049](https://doi.org/10.1093/bioinformatics/btac049).
 
 ---
 
@@ -545,7 +449,7 @@ Contributions are welcome! Please:
 ---
 
 ## License
-[Open Source MIT License](./LICENSE)
+MIT — see the repository [LICENSE](../LICENSE).
 
 
 ---
@@ -562,7 +466,7 @@ Contributions are welcome! Please:
 
 For issues, questions, or discussions:
 - Open an issue on GitHub
-- Contact: jvanin@iu.edu
+- [GitHub Issues](https://github.com/VaninJoel/schema-driven-interfaces/issues)
 - Documentations: 
   - [CompuCell3D](https://compucell3dreferencemanual.readthedocs.io/en/latest/) 
   - [Vivarium](https://vivarium-core.readthedocs.io/en/latest/)

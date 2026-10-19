@@ -25,7 +25,6 @@
 - [Technical Details](#technical-details)
 - [Future Directions](#future-directions)
 - [Citation](#citation)
-- [Contact](#contact)
 
 ---
 
@@ -87,7 +86,7 @@ Angio-GUI represents a modular architectural strategy for transforming complex C
 - **Schema-driven GUI**: Automatically generated controls from Vivarium ports_schema()
 - **Biologically meaningful inputs**: Cell adhesion energies, chemotaxis strength, VEGF production
 - **Validation**: Input constraints prevent biologically implausible values
-- **Parameter presets**: Normal, High VEGF, Low VEGF, Fast Simulation configurations
+- **Parameter presets**: Default, High Cell Aggregation, High Network Branching, Fast Simulation
 - **Expertise levels**: Adjust parameter visibility (Basic, Intermediate, Advanced)
 
 ### **Flexible Execution Modes**
@@ -209,7 +208,7 @@ Angio-GUI implements the **Integrated Architecture** pattern described in our me
 - **Schema-driven GUI**: Automatically generates widgets from schema
 - **Composable**: Can be combined with other Vivarium processes
 
-#### **2. Core Simulation Module (`angio-core/`)**
+#### **2. Core Simulation Module (`vivarium-angio/`)**
 - Built around `CC3DSimService` for direct programmatic control
 - Custom `WriterSteppable` with task-aware execution
 - Task directives: `write`, `skip_write` (extensible to dynamic steering)
@@ -243,7 +242,7 @@ Angio-GUI implements the **Integrated Architecture** pattern described in our me
 
 ### Comparison with Decoupled Architecture
 
-This integrated approach trades implementation complexity for performance and flexibility. For simpler conversion of existing CC3D projects with minimal refactoring, see our **decoupled subprocess-based architecture** (corneal epithelium example in the companion paper).
+This integrated approach trades implementation complexity for performance and flexibility. For simpler conversion of existing CC3D projects with minimal refactoring, see our **decoupled subprocess-based architecture** (the [V-Cornea GUI](../vcornea-gui/), Section 4 of the paper).
 
 | Feature | Integrated (This GUI) | Decoupled (vCornea) |
 |---------|----------------------|---------------------|
@@ -259,45 +258,16 @@ This integrated approach trades implementation complexity for performance and fl
 
 ## 📦 Installation
 
-### Prerequisites
-
-- **Python 3.12**
-- **CompuCell3D 4.7** (with conda installation recommended)
-- **Operating System**: Linux, macOS, or Windows
-
-### Step 1: Install CompuCell3D
+- **No coding:** download the desktop installer for your OS from the
+  [repository README](../README.md).
+- **From source:** follow [INSTALL.md](../INSTALL.md) (one conda environment, `vc`,
+  provides CompuCell3D 4.7.0, Python 3.12 and every dependency), then:
 
 ```bash
-# Using conda (recommended)
-conda create -n cc3d-env -c compucell3d -c conda-forge cc3d
-conda activate cc3d-env
-```
-
-### Step 2: Clone Repository
-
-```bash
-git clone https://github.com/VaninJoel/angio-gui.git
+conda activate vc
 cd angio-gui
-```
-
-### Step 3: Install Python Dependencies
-
-```bash
-pip install PyQt5 numpy scipy zarr matplotlib vivarium-core
-```
-
-**Optional (for video export):**
-```bash
-pip install imageio imageio-ffmpeg  # For MP4 export
-```
-
-### Step 4: Verify Installation
-
-```bash
 python run_gui.py
 ```
-
-You should see the main application window open.
 
 ---
 
@@ -311,7 +281,7 @@ You should see the main application window open.
    ```
 
 2. **Select a Preset (Optional):**
-   - Choose "Normal" for standard parameters
+   - Choose "Default Configuration" for standard parameters
    - Or "Fast Simulation" for quick testing
 
 3. **Configure Basic Parameters:**
@@ -359,43 +329,11 @@ Experiment: adhesion_sweep
 
 ### Parameter Reference
 
-#### Cell Adhesion Parameters
-- **`jee`** (EC-EC adhesion): Strength of endothelial cell-cell bonds
-  - Range: 0-10 | Default: 2.0
-  - Higher values → stronger cohesion, less migration
-
-- **`jem`** (EC-Medium adhesion): Cell-substrate interaction
-  - Range: 0-10 | Default: 2.0
-  - Higher values → cells prefer medium over neighbors
-
-#### Chemotaxis Parameters
-- **`lchem`** (chemotaxis lambda): Overall strength of VEGF response
-  - Range: 0-1000 | Default: 500.0
-  - Higher values → stronger directional migration
-
-- **`lsc`** (chemotaxis saturation): VEGF concentration at half-maximal response
-  - Range: 0.01-10 | Default: 0.1
-  - Controls sensitivity curve
-
-- **`vedir`** (directed velocity): Movement speed toward VEGF gradient
-  - Range: 0-2 | Default: 1.0
-
-- **`veder`** (random velocity): Baseline random motility
-  - Range: 0-1 | Default: 0.3
-
-#### VEGF Parameters
-- **`vesec`** (VEGF secretion): Production rate per cell
-  - Range: 0-1 | Default: 0.3
-  - Higher values → stronger chemical fields
-
-#### Simulation Control
-- **`sim_time`**: Total Monte Carlo Steps (MCS)
-  - Range: 10-1000 | Default: 100
-
-- **`write_frequency`**: How often to save snapshots
-  - Range: 1-100 | Default: 10
-  - Every N steps (e.g., 10 = save at 10, 20, 30...)
-  - Lower values = more temporal resolution but slower
+Every exposed parameter — its meaning, units, default, implementation-admissible
+range, evidence-supported range and the sources behind them — is defined in
+`AngiogenesisProcess.ports_schema()` and tabulated in
+Supplementary Table S1 of the paper. The same information is shown in the app: click the
+ⓘ button next to any parameter.
 
 ### Batch Execution
 
@@ -712,22 +650,16 @@ This application embodies the **CURE principles** for trustworthy computational 
 - **Plugin System**: Easy to add custom metrics, visualizations
 - **ML Integration**: Ready for surrogate modeling, active learning
 
-### Reproducibility Checklist
+### What each run records
 
-When publishing results from Angio-GUI:
-
-- [ ] Archive code on Zenodo with DOI
-- [ ] Include `run_metadata.json` as supplementary material
-- [ ] Document software versions:
-  - CompuCell3D version (`cc3d --version`)
-  - Python version (`python --version`)
-  - Key dependencies (`pip list > requirements.txt`)
-- [ ] Share Zarr stores (or subsampled versions) on data repositories
-- [ ] Record random seeds if stochastic behavior is critical
-- [ ] Include Git commit SHA in manuscript methods
-
-**Example Methods Section:**
-> "Simulations were performed using Angio-GUI v1.0.0 (DOI:10.5281/zenodo.XXXXXX) with CompuCell3D 4.3.0 and Python 3.9.7. All parameters and complete simulation outputs are available at Zenodo (DOI:10.5281/zenodo.YYYYYY). The simulation code and GUI are version-controlled at github.com/VaninJoel/angio-gui (commit SHA: abc123)."
+Every run (including failed and cancelled ones) gets a durable run identity and a
+folder containing `run_metadata.json` (resolved parameters, seed, replicate and
+sweep position, schema fingerprint, software and environment identity, status,
+timing), `parameter_audit.json` (each value checked against its documented
+ranges), `logs/stdout.log` / `logs/stderr.log`, the `data.zarr` trajectory, and a
+COMBINE/OMEX archive (`<run>.omex`) described by SED-ML. When publishing results,
+share the `.omex` archives of the runs you report and cite the archived software
+release.
 
 ---
 
@@ -902,107 +834,29 @@ composite.run(1000)  # 1000 time units
 
 ## 📚 Citation
 
-If you use Angio-GUI in your research, please cite:
+If you use Angio-GUI, please cite the accompanying article and the archived
+software release — see the [repository README](../README.md#how-to-cite) and
+[`CITATION.cff`](../CITATION.cff).
 
-```bibtex
-@article{AngiogenesisGUI2025,
-  title={From Expert Model to User Application: Architectural Patterns for Accessible CompuCell3D Simulations},
-  author={Vanin, Joel and [Co-authors]},
-  journal={[Journal TBD]},
-  year={2025},
-  note={Software available at: https://github.com/VaninJoel/angio-gui}
-}
-```
-
-**Underlying angiogenesis model:**
-The CC3D model wrapped by this GUI is based on the vasculogenesis model of Merks et al.:
+**Underlying angiogenesis model** (adapted; not a re-validation of the original results):
 > Merks RMH, Brodsky SV, Goligorksy MS, Newman SA, Glazier JA. *Cell elongation is
 > key to in silico replication of in vitro vasculogenesis and subsequent remodeling.*
 > Developmental Biology. 2006;289(1):44–54. doi:[10.1016/j.ydbio.2005.10.003](https://doi.org/10.1016/j.ydbio.2005.10.003)
 
-```bibtex
-@article{Merks2006,
-  title={Cell elongation is key to in silico replication of in vitro vasculogenesis and subsequent remodeling},
-  author={Merks, Roeland M H and Brodsky, Sergey V and Goligorksy, Michael S and Newman, Stuart A and Glazier, James A},
-  journal={Developmental Biology},
-  volume={289},
-  number={1},
-  pages={44--54},
-  year={2006},
-  publisher={Elsevier},
-  doi={10.1016/j.ydbio.2005.10.003}
-}
-```
+**CompuCell3D:** Swat MH et al. *Multi-scale modeling of tissues using CompuCell3D.*
+Methods Cell Biol. 2012;110:325–66. doi:[10.1016/B978-0-12-388403-9.00013-8](https://doi.org/10.1016/B978-0-12-388403-9.00013-8)
 
-**CompuCell3D Citation:**
-```bibtex
-@article{Swat2012,
-  title={Multi-Scale Modeling of Tissues Using CompuCell3D},
-  author={Swat, Maciej H and Thomas, Gilberto L and Belmonte, Julio M and others},
-  journal={Methods in Cell Biology},
-  volume={110},
-  pages={325--366},
-  year={2012},
-  publisher={Elsevier}
-}
-```
-
-**Vivarium Citation:**
-```bibtex
-@article{Vivarium2020,
-  title={Vivarium: an interface and engine for integrative multiscale modeling in computational biology},
-  author={Agmon, Eran and Spangler, Ryan K and Skalnik, Christopher J and others},
-  journal={bioRxiv},
-  year={2020},
-  publisher={Cold Spring Harbor Laboratory}
-}
-```
+**Vivarium:** Agmon E et al. *Vivarium: an interface and engine for integrative
+multiscale modeling in computational biology.* Bioinformatics. 2022;38(7):1972–9.
+doi:[10.1093/bioinformatics/btac049](https://doi.org/10.1093/bioinformatics/btac049)
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see [LICENSE](LICENSE) file for details.
-
-**Third-Party Components:**
-- **CompuCell3D**: Licensed under respective terms
-- **PyQt5**: GPL v3 (note: commercial license available for proprietary use)
-- **Vivarium**: MIT License
-- **Zarr, NumPy, SciPy, Matplotlib**: BSD-style licenses
-
----
-
-## 📞 Contact & Support
-
-- **Primary Contact**: Joel Vanin <joelvanin@example.com>
-- **Issues**: [GitHub Issues](https://github.com/VaninJoel/angio-gui/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/VaninJoel/angio-gui/discussions)
-- **Forum**: [CompuCell3D Forum](https://compucell3d.org/Forum)
-
----
-
-## 🎓 Educational Use
-
-This application is ideal for:
-- **Computational Biology Courses**: Hands-on exploration of cellular behavior
-- **Systems Biology Labs**: Hypothesis testing without coding barrier
-- **Clinical Research**: Parameter exploration for translational studies
-- **Software Engineering Education**: GUI design, threading, data management examples
-
-**Teaching Modules Available:**
-1. **Introduction to Angiogenesis Modeling**
-2. **Parameter Sensitivity Analysis Workshop**
-3. **Reproducible Computational Science Workflows**
-4. **Multi-Scale Modeling with Vivarium**
-
----
-
-## 🙏 Acknowledgments
-
-- **CompuCell3D Team**: For the powerful simulation framework
-- **Vivarium Project**: For composable modeling standards
-- **Open Source Community**: Python, Qt, Zarr, NumPy, SciPy, Matplotlib
-- **Funding**: [Grant agencies if applicable]
+MIT — see the repository [LICENSE](../LICENSE). Third-party components
+(CompuCell3D, PyQt5, Vivarium, Zarr, NumPy, SciPy, Matplotlib) are distributed
+under their own licenses.
 
 ---
 
@@ -1043,19 +897,5 @@ This application is ideal for:
 - **Compress Zarr** with blosc for 3-5x space savings (default)
 
 ### Getting Help
-1. **Check FAQ**: [GitHub Wiki](https://github.com/VaninJoel/angio-gui/wiki)
-2. **Search Issues**: [Existing solutions](https://github.com/VaninJoel/angio-gui/issues?q=is%3Aissue)
-3. **CC3D Forum**: [Community support](https://compucell3d.org/Forum)
-4. **Report Bug**: Include `run_metadata.json`, logs, and system info
-
----
-
-**Built with ❤️ for the computational biology community**
-
-*Making sophisticated simulations accessible, reproducible, and extensible.*
-
----
-
-**Last Updated:** January 2025
-**Version:** 1.0.0
-**Compatibility:** CompuCell3D 4.x, Python 3.8+, Vivarium 1.x
+- **Bugs and questions**: [GitHub Issues](https://github.com/VaninJoel/schema-driven-interfaces/issues) — please attach the run's `run_metadata.json`, `logs/stderr.log` and your OS.
+- **CompuCell3D questions**: [CompuCell3D documentation](https://compucell3dreferencemanual.readthedocs.io/en/latest/)

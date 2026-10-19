@@ -574,7 +574,7 @@ def schema_to_json_serializable(schema: Dict) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# Range evidence (docs/parameter_descriptor_format.md, group 4)
+# Range evidence (descriptor format, group 4)
 #
 # Each range tier is a (min, max) tuple; the justification for each tier lives
 # beside it in `_range_evidence`:

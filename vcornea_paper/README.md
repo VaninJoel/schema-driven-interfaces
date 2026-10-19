@@ -1,5 +1,7 @@
 # V-Cornea: A Computational Model of Corneal Epithelium Homeostasis, Injury, and Recovery
 
+> **In this repository:** this folder is an unmodified copy of the published model from [github.com/VaninJoel/vCornea](https://github.com/VaninJoel/vCornea). The repository's `vc` conda environment ([INSTALL.md](../INSTALL.md)) already provides CompuCell3D and every library below, so you can skip *Setup and Installation* and open the projects in `Local/Project/` directly, or run them through the [V-Cornea GUI](../vcornea-gui/).
+
 This repository contains the source code and simulation files for **V-Cornea**, an agent-based computational model of the corneal epithelium, as described in the manuscript:
 
 > Vanin J, Getz M, Mahony C, Knudsen TB, Glazier JA (2025) V-Cornea: A computational model of corneal epithelium homeostasis, injury, and recovery. PLoS Comput Biol 21(12): e1013410. [https://doi.org/10.1371/journal.pcbi.1013410](https://doi.org/10.1371/journal.pcbi.1013410)

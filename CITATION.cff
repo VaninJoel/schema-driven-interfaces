@@ -1,0 +1,54 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite the accompanying article
+  (preferred-citation below) and the archived software release.
+title: "Schema-Driven Interfaces: Angio-GUI and V-Cornea GUI"
+abstract: >-
+  Schema-driven graphical interfaces, provenance capture and COMBINE/OMEX run
+  archives for two CompuCell3D models exposed as Vivarium processes:
+  Angio-GUI (integrated, API-driven pattern) and the V-Cornea GUI (decoupled,
+  subprocess-based pattern).
+type: software
+license: MIT
+repository-code: "https://github.com/VaninJoel/schema-driven-interfaces"
+version: 1.0.0
+authors:
+  - family-names: Vanin
+    given-names: Joel
+  - family-names: Getz
+    given-names: Michael
+  - family-names: Sego
+    given-names: Timothy J.
+  - family-names: Mahony
+    given-names: Catherine
+  - family-names: Glazier
+    given-names: James A.
+  - family-names: Veschini
+    given-names: Lorenzo
+keywords:
+  - CompuCell3D
+  - Vivarium
+  - agent-based modeling
+  - schema-driven GUI
+  - provenance
+  - COMBINE/OMEX
+  - reproducibility
+preferred-citation:
+  type: article
+  title: >-
+    Addressing the Usability Gap in In Silico Experiments: Schema-Driven
+    Interfaces and Provenance for Reproducible Simulations
+  authors:
+    - family-names: Vanin
+      given-names: Joel
+    - family-names: Getz
+      given-names: Michael
+    - family-names: Sego
+      given-names: Timothy J.
+    - family-names: Mahony
+      given-names: Catherine
+    - family-names: Glazier
+      given-names: James A.
+    - family-names: Veschini
+      given-names: Lorenzo
+  status: submitted
