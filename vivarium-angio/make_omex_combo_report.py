@@ -287,10 +287,16 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     summarised in a line, so a report stays short when the run stayed inside
     its documented evidence.
     """
+    # By package name, like omex_generator above: the bare name is only on
+    # sys.path when the package is NOT installed, so a bare import alone failed
+    # in every installed copy and silently dropped this whole section.
     try:
-        import parameter_audit as _pa  # utils dir is on sys.path
-    except Exception:
-        return []
+        from vivarium_angio.utils import parameter_audit as _pa
+    except ImportError:
+        try:
+            import parameter_audit as _pa  # checkout without the package installed
+        except Exception:
+            return []
     audits = [a for a in (_pa.load_parameter_audit(s) for s in audit_sources) if a]
     if not audits:
         return []
