@@ -9,6 +9,7 @@ Run:  conda run -n vc --no-capture-output pytest vivarium-vcornea/test_vcornea_c
 """
 import importlib.util
 import json
+import zipfile
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -32,10 +33,15 @@ def _report_tool():
     return sys.modules[name]
 
 
-def _replicate(root, combo, rid, status):
+def _replicate(root, combo, rid, status, thickness=False):
     d = root / combo / f'replicate_{rid}'
     d.mkdir(parents=True)
     (d / 'cell_count_240.csv').write_text(CSV)
+    if thickness:   # as the model writes it: top-cell height (voxels) per X-bin, hourly
+        import pandas as pd
+        pd.DataFrame([{'Time': float(h), 'Bin': b, 'Height': 40.0 + b + h}
+                      for h in range(3) for b in range(10)]
+                     ).to_parquet(d / 'thickness_rep_241.parquet')
     meta = {'run_name': combo, 'run_id': f'{combo}-{rid}',
             'created_at': datetime.now().isoformat(),
             'replicate_id': rid, 'total_replicates': 2,
@@ -93,3 +99,24 @@ def test_archive_outcome_reads_status_and_error(tmp_path):
     oc = rep.archive_outcome(omex)
     assert oc['status'] == 'timed_out' and oc['exit_code'] == 3
     assert oc['replicate'] == 'replicate_2' and 'broke' in oc['error']
+
+
+def test_thickness_is_the_gui_analysis_not_a_raw_height_average(tmp_path):
+    """The report's thickness figures are drawn by the V-Cornea GUI's own analysis
+    (per-X-bin top position, membrane-subtracted thickness in µm), not a plot of
+    raw Height averaged over the whole domain."""
+    rep = _report_tool()
+    omex = _replicate(tmp_path, 'combo_001', 1, 'success', thickness=True)
+    ds, ap = rep._thickness_dataset({'combo_001': [omex]}, tmp_path / 'work')
+    gui = HERE.parent / 'vcornea-gui' / 'gui'
+    assert Path(ap.__file__).resolve() == (gui / 'analysis_plots.py').resolve()
+
+    d = ds.thickness_um['combo_001'][0]
+    assert sorted(d['Bin'].unique()) == list(range(10))     # per bin, not one mean
+    expected = (d['Height'] - d['Bin'].map(ds.membrane_bins)) * 2
+    assert (d['Thickness'] - expected).abs().max() < 1e-9
+
+    names = zipfile.ZipFile(omex).namelist()
+    figs = rep.make_thickness_plots([('replicate_1', omex, names)],
+                                    tmp_path / 'figs', 'combo_001')
+    assert len(figs) == 2 and all(Path(png).stat().st_size > 0 for png, _, _ in figs)
