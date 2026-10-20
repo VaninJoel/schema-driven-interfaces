@@ -47,6 +47,11 @@ unsigned, so Windows SmartScreen ("More info → Run anyway") and macOS Gatekeep
 may ask for confirmation the first time. Prefer to run from the source code
 instead? See [Run from source](#run-from-source-developers).
 
+**Where your runs are saved:** by default in your Documents folder, under
+`Documents/SchemaDrivenInterfaces/vcornea-gui/experiments` and
+`Documents/SchemaDrivenInterfaces/angio-gui/experiments`. Use **Browse...** in
+the app to choose another folder. Reinstalling or updating never deletes saved runs.
+
 ---
 
 ## Run from source (developers)

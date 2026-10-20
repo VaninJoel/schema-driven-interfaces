@@ -36,8 +36,36 @@ call "%PREFIX%\python.exe" "%~dp0repair_env.py" "%PREFIX%" "vc_env.tar.gz"
 echo   - installing application files...
 set "SDI=%PREFIX%\share\sdi"
 if not exist "%SDI%" mkdir "%SDI%"
+REM Reinstall replaces the app files, but never a user's runs or settings: an
+REM earlier version saved runs to payload\<app>\experiments by default.
+for %%A in (angio-gui vcornea-gui) do (
+    if exist "%SDI%\payload\%%A\experiments" (
+        if not exist "%SDI%\keep\%%A" mkdir "%SDI%\keep\%%A"
+        move "%SDI%\payload\%%A\experiments" "%SDI%\keep\%%A\" >nul
+    )
+    if exist "%SDI%\payload\%%A\.gui_settings.json" (
+        if not exist "%SDI%\keep\%%A" mkdir "%SDI%\keep\%%A"
+        move "%SDI%\payload\%%A\.gui_settings.json" "%SDI%\keep\%%A\" >nul
+    )
+)
+REM A folder still in place means the move failed (e.g. open in Explorer):
+REM stop here rather than let rmdir below delete it.
+for %%A in (angio-gui vcornea-gui) do if exist "%SDI%\payload\%%A\experiments" (
+    echo ERROR: could not move your saved runs out of "%SDI%\payload\%%A\experiments".
+    echo Close any window or program using that folder and run install.bat again.
+    echo Nothing was deleted. Press any key to close.
+    pause >nul
+    exit /b 1
+)
 if exist "%SDI%\payload" rmdir /s /q "%SDI%\payload"
 xcopy /e /i /q payload "%SDI%\payload" >nul
+for %%A in (angio-gui vcornea-gui) do (
+    if exist "%SDI%\keep\%%A\experiments" move "%SDI%\keep\%%A\experiments" "%SDI%\payload\%%A\" >nul
+    if exist "%SDI%\keep\%%A\.gui_settings.json" move "%SDI%\keep\%%A\.gui_settings.json" "%SDI%\payload\%%A\" >nul
+)
+REM Non-recursive: only removes them if empty, so nothing kept is ever lost.
+for %%A in (angio-gui vcornea-gui) do if exist "%SDI%\keep\%%A" rmdir "%SDI%\keep\%%A" 2>nul
+if exist "%SDI%\keep" rmdir "%SDI%\keep" 2>nul
 set "APPS=%SDI%\payload"
 
 REM --- Launchers (pythonw => no console window) ---

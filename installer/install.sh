@@ -46,8 +46,25 @@ echo "  - verifying environment integrity..."
 echo "  - installing application files..."
 SDI="$PREFIX/share/sdi"
 mkdir -p "$SDI"
+# Reinstall replaces the app files, but never a user's runs or settings: an
+# earlier version saved runs to payload/<app>/experiments by default.
+KEEP="$SDI/keep"
+for app in angio-gui vcornea-gui; do
+    for item in experiments .gui_settings.json; do
+        if [ -e "$SDI/payload/$app/$item" ]; then
+            mkdir -p "$KEEP/$app"; mv "$SDI/payload/$app/$item" "$KEEP/$app/"
+        fi
+    done
+done
 rm -rf "$SDI/payload"
 cp -r payload "$SDI/payload"
+for app in angio-gui vcornea-gui; do
+    for item in experiments .gui_settings.json; do
+        if [ -e "$KEEP/$app/$item" ]; then mv "$KEEP/$app/$item" "$SDI/payload/$app/"; fi
+    done
+done
+# Non-recursive: only removes them if empty, so nothing kept is ever lost.
+rmdir "$KEEP"/* "$KEEP" 2>/dev/null || true
 APPS="$SDI/payload"
 
 # --- Launchers on PATH ---

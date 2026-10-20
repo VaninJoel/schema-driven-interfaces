@@ -291,7 +291,8 @@ python run_gui.py
    - **Simulation**: `sim_time` (MCS), `write_frequency`
 
 4. **Set Output Directory:**
-   - Default: `./experiments/`
+   - Default: `Documents/SchemaDrivenInterfaces/angio-gui/experiments/` for the
+     installed app; `angio-gui/experiments/` when run from a source checkout
    - Or click "Browse..." to select custom location
 
 5. **Enter Experiment Name:**
