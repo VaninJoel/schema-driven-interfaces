@@ -42,6 +42,10 @@ GUI (PyQt5) → Vivarium process (VCorneaProcess) → CC3D subprocess
 
 ## Outputs
 
+Runs are saved under the output directory shown in the window (change it with
+**Browse...**). The default is `Documents/SchemaDrivenInterfaces/vcornea-gui/experiments/`
+for the installed app, and `vcornea-gui/experiments/` when run from a source checkout.
+
 Each run writes outputs to a dedicated folder:
 
 ```

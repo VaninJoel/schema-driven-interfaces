@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QTextBrowser, QFileDialog, QProgressBar, QDoubleSpinBox,
     QCheckBox, QLineEdit, QSpinBox, QDialog, QDialogButtonBox, QScrollArea
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QStandardPaths
 
 # Import angiogenesis process with comprehensive schema
 from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
@@ -55,6 +55,20 @@ from schema_utils import (
 # from widgets.validation_indicator import ValidationIndicator
 # from widgets.reference_display import ReferenceDisplay
 
+
+
+def default_output_dir(app_name):
+    """Where runs go until the user picks a folder with Browse...
+
+    In a source checkout, the app's own experiments/ folder (git-ignored). In an
+    installed copy, the user's Documents folder: the installer replaces the
+    application files on every reinstall, so runs must not live inside them.
+    """
+    app_dir = Path(__file__).absolute().parent.parent
+    if (app_dir.parent / '.git').exists():
+        return app_dir / 'experiments'
+    docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    return Path(docs or Path.home()) / 'SchemaDrivenInterfaces' / app_name / 'experiments'
 
 
 def _int_from_text(text):
@@ -542,8 +556,7 @@ class AngiogenesisMainWindow(QMainWindow):
 
         # If no saved state, use default output directory
         if not hasattr(self, 'output_dir') or self.output_dir is None:
-            self.output_dir = Path(__file__).parent.parent / 'experiments'
-            self.output_dir = self.output_dir.resolve()  # Convert to absolute path
+            self.output_dir = default_output_dir('angio-gui').resolve()  # Convert to absolute path
 
         # =====================================================================
         # BATCH EXECUTION STATE

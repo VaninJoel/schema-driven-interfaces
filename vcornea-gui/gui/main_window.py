@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QCheckBox, QLineEdit, QSpinBox, QDialog, QDialogButtonBox, QSizePolicy,
     QScrollArea
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QStandardPaths
 
 # Import vCornea process with comprehensive schema
 from vivarium_vcornea.processes.vcornea_process import VCorneaProcess
@@ -63,6 +63,20 @@ from schema_utils import (
 # from widgets.validation_indicator import ValidationIndicator
 # from widgets.reference_display import ReferenceDisplay
 
+
+
+def default_output_dir(app_name):
+    """Where runs go until the user picks a folder with Browse...
+
+    In a source checkout, the app's own experiments/ folder (git-ignored). In an
+    installed copy, the user's Documents folder: the installer replaces the
+    application files on every reinstall, so runs must not live inside them.
+    """
+    app_dir = Path(__file__).absolute().parent.parent
+    if (app_dir.parent / '.git').exists():
+        return app_dir / 'experiments'
+    docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    return Path(docs or Path.home()) / 'SchemaDrivenInterfaces' / app_name / 'experiments'
 
 
 def _int_from_text(text):
@@ -747,7 +761,7 @@ class VCorneaMainWindow(QMainWindow):
         # absolute() instead of resolve() so a mapped drive letter (e.g. X:)
         # survives instead of being normalized to its UNC target.
         if not hasattr(self, 'output_dir') or self.output_dir is None:
-            self.output_dir = (Path(__file__).parent.parent / 'experiments').absolute()
+            self.output_dir = default_output_dir('vcornea-gui').absolute()
 
         # =====================================================================
         # BATCH EXECUTION STATE
