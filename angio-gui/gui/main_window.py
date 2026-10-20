@@ -1789,11 +1789,14 @@ batch_sweep_20251106_143052/
         self.base_parameters = {}
 
         for param_name, value in self.current_params.items():
-            # Convert value to string for checking
-            value_str = str(value)
+            # A sweep is a comma-separated list typed into a model parameter's
+            # field. Anything else in current_params (e.g. the operator's
+            # creator record, whose str() contains a comma) is never swept.
+            value_str = value if isinstance(value, str) else None
 
             # Check for comma-separated values
-            if isinstance(value_str, str) and ',' in value_str:
+            if (value_str is not None and ',' in value_str
+                    and param_name in self.schema['inputs']):
                 try:
                     # Parse comma-separated list
                     value_list = [self._convert_to_number(v.strip()) for v in value_str.split(',')]
