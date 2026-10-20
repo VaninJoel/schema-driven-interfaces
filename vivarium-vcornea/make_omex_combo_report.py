@@ -264,63 +264,98 @@ def make_csv_plots(reps, tmpdir):
     return out
 
 
-def make_thickness_plots(reps, tmpdir):
-    """Spatial-mean thickness over time (per replicate + mean) and a Bin×Time
-    heatmap of the replicate-averaged Height."""
-    dfs = []
-    for label, omex, names in reps:
-        nm = _find_name(names, 'thickness', '.parquet')
-        if not nm:
-            continue
-        try:
-            df = _read_table(omex, nm)
-        except Exception:
-            continue
-        if {'Time', 'Bin', 'Height'}.issubset(df.columns):
-            dfs.append((label, df))
-    if not dfs:
-        return []
-    out = []
-    # spatial-mean Height vs Time, per replicate + across-replicate mean
-    fig, ax = plt.subplots(figsize=(6.7, 2.5), dpi=150)
-    per_rep_means = []
-    for label, df in dfs:
-        g = df.groupby('Time')['Height'].mean()
-        ax.plot(g.index, g.values, alpha=0.3, lw=0.8, color='#1a3c5e')
-        per_rep_means.append(g)
-    allm = pd.concat(per_rep_means, axis=1)
-    ax.plot(allm.index, allm.mean(axis=1).values, color='#1a3c5e', lw=1.8,
-            label=f"mean across {len(dfs)} replicate(s)")
-    ax.set_xlabel('Time (hours)', fontsize=8)
-    ax.set_ylabel('Spatial-mean Height', fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.grid(True, alpha=0.3, lw=0.4)
-    ax.legend(fontsize=7, frameon=False)
-    ax.set_title("thickness — spatial-mean Height vs Time", fontsize=8.5, color='#1a3c5e')
-    fig.tight_layout()
-    p1 = tmpdir / "thick_line.png"
-    fig.savefig(p1, bbox_inches='tight'); plt.close(fig)
-    out.append((p1, f"thickness: spatial-mean Height vs Time — {len(dfs)} replicate(s), "
-                "bold = across-replicate mean"))
+def _gui_analysis():
+    """The V-Cornea GUI's own analysis modules (analysis_data, analysis_plots).
 
-    # heatmap of replicate-averaged Height (Bin × Time)
-    cat = pd.concat([df for _, df in dfs], ignore_index=True)
-    piv = cat.groupby(['Bin', 'Time'])['Height'].mean().unstack('Time')
-    fig, ax = plt.subplots(figsize=(6.7, 2.5), dpi=150)
-    im = ax.imshow(piv.values, aspect='auto', origin='lower', cmap='viridis',
-                   extent=[float(piv.columns.min()), float(piv.columns.max()),
-                           float(piv.index.min()), float(piv.index.max())])
-    ax.set_xlabel('Time (hours)', fontsize=8)
-    ax.set_ylabel('Spatial bin', fontsize=8)
-    ax.tick_params(labelsize=7)
-    cb = fig.colorbar(im, ax=ax); cb.ax.tick_params(labelsize=6); cb.set_label('Height', fontsize=7)
-    ax.set_title("thickness — replicate-averaged Height (Bin × Time)",
-                 fontsize=8.5, color='#1a3c5e')
+    The thickness figures are drawn by the same functions as the GUI's Analyze
+    Results > Thickness tab, so the report shows the same quantity, in the same
+    units, as the model's analysis: per-X-bin tissue top position, and thickness
+    = (top position - membrane baseline) in µm. The GUI ships next to this tool
+    (repository checkout and installed payload alike). None if unavailable.
+    """
+    gui = Path(__file__).resolve().parent.parent / 'vcornea-gui' / 'gui'
+    if not (gui / 'analysis_plots.py').exists():
+        return None
+    # analysis_plots imports analysis_data by bare name; angio-gui has a module
+    # of the same name, so make sure the one loaded is V-Cornea's.
+    for name in ('analysis_data', 'analysis_plots'):
+        mod = sys.modules.get(name)
+        if mod is not None and Path(getattr(mod, '__file__', '') or '').parent != gui:
+            del sys.modules[name]
+    if str(gui) not in sys.path:
+        sys.path.insert(0, str(gui))
+    try:
+        import analysis_data
+        import analysis_plots
+        return analysis_data, analysis_plots
+    except Exception as e:  # noqa: BLE001
+        print(f"[combo_report] V-Cornea analysis modules unavailable ({e}); "
+              "thickness figures omitted")
+        return None
+
+
+def _thickness_dataset(combos, tmpdir):
+    """An analysis_data.AnalysisDataset over the thickness data INSIDE the archives.
+
+    combos: {combo_key: [omex, ...]}. Each archive's thickness parquet and
+    run_metadata.json are unpacked to <tmpdir>/<combo>/replicate_<i>/, the layout
+    the GUI analyses, so nothing is read from the loose run folders.
+    """
+    ga = _gui_analysis()
+    if ga is None:
+        return None, None
+    root = Path(tmpdir) / 'thickness_dataset'
+    for ck, omex_paths in combos.items():
+        for i, omex in enumerate(omex_paths, 1):
+            with zipfile.ZipFile(omex) as zf:
+                names = zf.namelist()
+                tn = _find_name(names, 'thickness', '.parquet')
+                if not tn or 'run_metadata.json' not in names:
+                    continue
+                d = root / ck / f'replicate_{i}'
+                d.mkdir(parents=True, exist_ok=True)
+                (d / Path(tn).name).write_bytes(zf.read(tn))
+                (d / 'run_metadata.json').write_bytes(zf.read('run_metadata.json'))
+    if not root.exists():
+        return None, None
+    ds = ga[0].AnalysisDataset(root)
+    return (ds, ga[1]) if ds.thickness_data else (None, None)
+
+
+def _render(draw, png, size):
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=size, dpi=150)
+    draw(fig)
     fig.tight_layout()
-    p2 = tmpdir / "thick_heat.png"
-    fig.savefig(p2, bbox_inches='tight'); plt.close(fig)
-    out.append((p2, "thickness: replicate-averaged Height across spatial bins over "
-                "time (heatmap). Packaged in the archive but NOT indexed by the SED-ML."))
+    fig.savefig(png, bbox_inches='tight')
+    return png
+
+
+def make_thickness_plots(reps, tmpdir, combo='combination'):
+    """The GUI's thickness views for one combination: the paper figure (Vanin et
+    al. 2025, Fig 8) and the limbal vs central thickness over time."""
+    ds, ap = _thickness_dataset({combo: [omex for _, omex, _ in reps]}, tmpdir)
+    if ds is None:
+        return []
+    n = len(ds.thickness_data.get(combo, []))
+    stable_day = ap._default_stable_day(ds)
+    out = []
+    p = _render(lambda fig: ap.paper_thickness(fig, ds, combo=combo, unit='days'),
+                Path(tmpdir) / 'thick_paper.png', (6.7, 6.4))
+    out.append((p, 6.4, (
+        "Tissue thickness, drawn by the V-Cornea GUI's own analysis (Analyze Results "
+        "&rarr; Thickness, paper view; Vanin et al. 2025, Fig 8). Top: tissue top "
+        "position (vertical centre of mass of the top cells) in each of the 10 X-bins "
+        f"over time, as the model records it; faint lines are the {n} replicate(s), "
+        "solid lines their mean. Bottom: from the stability time (day "
+        f"{stable_day:g}) on, top position (blue) and thickness (red) across X; "
+        "thickness = (top position &minus; membrane baseline) &times; 2 &micro;m/voxel.")))
+    p = _render(lambda fig: ap.enhanced_thickness(fig, ds, unit='days'),
+                Path(tmpdir) / 'thick_regions.png', (6.7, 4.6))
+    out.append((p, 4.6, (
+        "Epithelial thickness in &micro;m over time in the limbus (bin 0) and the "
+        "central/peripheral cornea (bins 4&ndash;9), averaged over replicates "
+        "(Analyze Results &rarr; Thickness, comparison view).")))
     return out
 
 
@@ -634,7 +669,7 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
 
     # Replicate-aware plots
     csv_plots = make_csv_plots(rep_plot_in, tmpdir)
-    thick_plots = make_thickness_plots(rep_plot_in, tmpdir)
+    thick_plots = make_thickness_plots(rep_plot_in, tmpdir, combo_key)
     if csv_plots or thick_plots:
         S.append(PageBreak())
         S.append(Paragraph("Results (replicate-aware, from the packaged data)", H2))
@@ -642,8 +677,12 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
             f"Plotted from the CSV/parquet inside the {len(reps)} replicate archive(s). "
             "Thin lines are individual replicates; the bold line is the across-replicate "
             "mean. Time is shown in hours (as stored in the data).", N))
-        for png, cap in csv_plots + thick_plots:
+        for png, cap in csv_plots:
             S.append(Image(str(png), width=6.7 * inch, height=2.6 * inch))
+            S.append(Paragraph(cap, SUB))
+            S.append(Spacer(1, 4))
+        for png, height, cap in thick_plots:
+            S.append(Image(str(png), width=6.7 * inch, height=height * inch))
             S.append(Paragraph(cap, SUB))
             S.append(Spacer(1, 4))
 
@@ -677,10 +716,10 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
 
 def _combo_metric_frames(omex_paths):
     """Replicate-MEAN frames for a combo's metrics, read from its per-run OMEX.
-    Returns {'cell_count': df(Time index + cols), 'surfactant': df, 'thickness':
-    df('Height')} (whichever are present), plus (label, reps, sim_days, inj_days,
-    has_injury) from the run metadata."""
-    cc, surf, thick = [], [], []
+    Returns {'cell_count': df(Time index + cols), 'surfactant': df} (whichever
+    are present), plus (label, reps, sim_days, inj_days, has_injury) from the run
+    metadata. Thickness is analysed separately (_thickness_dataset)."""
+    cc, surf = [], []
     label = reps = sim_days = inj_days = None
     has_injury = False
     for omex in omex_paths:
@@ -699,30 +738,24 @@ def _combo_metric_frames(omex_paths):
                 inj_days = m.get('key_parameters', {}).get('InjuryTime')
             cn = _find_name(names, 'cell_count', '.csv')
             sn = _find_name(names, 'surfactant', '.csv')
-            tn = _find_name(names, 'thickness', '.parquet')
             if cn:
                 d = pd.read_csv(io.BytesIO(zf.read(cn)))
                 cc.append(d.rename(columns={_time_key(d): 'Time'}).set_index('Time'))
             if sn:
                 d = pd.read_csv(io.BytesIO(zf.read(sn)))
                 surf.append(d.rename(columns={_time_key(d): 'Time'}).set_index('Time'))
-            if tn:
-                d = pd.read_parquet(io.BytesIO(zf.read(tn)))
-                if {'Time', 'Height'}.issubset(d.columns):
-                    thick.append(d.groupby('Time')['Height'].mean().to_frame('Height'))
     frames = {}
     if cc:
         frames['cell_count'] = pd.concat(cc).groupby(level=0).mean(numeric_only=True)
     if surf:
         frames['surfactant'] = pd.concat(surf).groupby(level=0).mean(numeric_only=True)
-    if thick:
-        frames['thickness'] = pd.concat(thick).groupby(level=0).mean(numeric_only=True)
     return frames, label, reps, sim_days, inj_days, has_injury
 
 
 def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     """Cross-combination comparison PDF (OMEX-internal): one line per combo for
-    each cell type, surfactant, and mean thickness, plus a summary metrics table.
+    each cell type and surfactant, the GUI's limbal vs central thickness view, and
+    a summary metrics table.
 
     combos: {combo: SUCCESSFUL per-run archives}. unsuccessful: {combo:
     [archive_outcome()]} for every other attempt, listed and excluded."""
@@ -772,15 +805,34 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
                   "Surfactant across combinations", "surf.png")
     if p:
         plots.append((p, "Surfactant Total Amount: replicate-mean per combination vs Time"))
-    p = line_plot('thickness', 'Height', 'Spatial-mean Height',
-                  "Mean thickness across combinations", "thick.png")
-    if p:
-        plots.append((p, "Thickness (spatial-mean Height): replicate-mean per combination vs Time"))
+    plots = [(png, 2.7, cap) for png, cap in plots]
+    ds, ap = _thickness_dataset(combos, tmpdir)
+    if ds is not None:
+        p = _render(lambda fig: ap.enhanced_thickness(fig, ds, unit='days'),
+                    tmpdir / 'thick.png', (6.7, 4.6))
+        plots.append((p, 4.6, (
+            "Epithelial thickness in &micro;m over time in the limbus (bin 0) and the "
+            "central/peripheral cornea (bins 4&ndash;9), one line per combination "
+            "(replicate mean), drawn by the V-Cornea GUI's own analysis (Analyze "
+            "Results &rarr; Thickness, comparison view). Thickness = (top position "
+            "&minus; membrane baseline) &times; 2 &micro;m/voxel. Time in days.")))
+
+    def central_thickness(ck):
+        """(minimum after injury, final) central thickness in µm, replicate mean."""
+        if ds is None or ck not in ds.thickness_um:
+            return None, None
+        d = pd.concat(ds.thickness_um[ck], ignore_index=True)
+        d = d[d['Bin'].isin(ap.CENTRAL_BINS)]
+        if d.empty:
+            return None, None
+        s = d.groupby('Time')['Thickness'].mean()
+        post = s[s.index >= inj_hours] if (has_injury and inj_hours) else s
+        return (post.min() if len(post) else s.min()), s.iloc[-1]
 
     # summary metrics table (computed from the replicate-mean series)
     def metrics(ck):
         f = data[ck]['frames']
-        cc = f.get('cell_count'); su = f.get('surfactant'); th = f.get('thickness')
+        cc = f.get('cell_count'); su = f.get('surfactant')
         wing0 = wing_min = wing_end = None
         if cc is not None and 'Wing' in cc:
             w = cc['Wing']
@@ -792,9 +844,8 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
                 wing0 = w.iloc[0]; wing_min = w.min()
             wing_end = w.iloc[-1]
         peak_surf = su['Total Amount'].max() if (su is not None and 'Total Amount' in su) else None
-        min_h = th['Height'].min() if (th is not None and 'Height' in th) else None
         rec = (wing_end / wing0 * 100) if (wing0 and wing_end is not None and wing0) else None
-        return wing0, wing_min, wing_end, rec, peak_surf, min_h
+        return (wing0, wing_min, wing_end, rec, peak_surf) + central_thickness(ck)
 
     ss = getSampleStyleSheet()
     H = ParagraphStyle('H', parent=ss['Heading1'], fontSize=15, spaceAfter=2,
@@ -936,23 +987,26 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
 
     S.append(Paragraph("Summary Metrics (from replicate-mean series)", H2))
     mrows = [["Combination", "Wing baseline", "Wing min", "Wing final", "Recovery %",
-              "Peak surfactant", "Min mean-Height"]]
+              "Peak surfactant", "Central thickness min (&micro;m)",
+              "Central thickness final (&micro;m)"]]
     for ck in order:
-        w0, wmin, wend, rec, ps, mh = metrics(ck)
-        mrows.append([data[ck]['label'], fmt(w0), fmt(wmin), fmt(wend), fmt(rec), fmt(ps), fmt(mh)])
-    S.append(prows(mrows, [1.9 * inch] + [0.81 * inch] * 6))
+        mrows.append([data[ck]['label']] + [fmt(x) for x in metrics(ck)])
+    S.append(prows(mrows, [1.55 * inch] + [0.74 * inch] * 7))
     S.append(Paragraph(
         "Wing baseline = pre-injury mean; Wing min = minimum after injury (damage depth); "
-        "Recovery % = final / baseline. Metrics are on the across-replicate mean.", SUB))
+        "Recovery % = final / baseline. Central thickness = mean over bins 4&ndash;9, "
+        "minimum after injury and at the end of the run. Metrics are on the "
+        "across-replicate mean.", SUB))
 
     if plots:
         S.append(PageBreak())
         S.append(Paragraph("Metric Comparisons (one line per combination)", H2))
         S.append(Paragraph(
             "Each line is a combination's across-replicate mean, read from the per-run "
-            "OMEX archives. Time in hours; the dashed red line marks injury.", N))
-        for png, cap in plots:
-            S.append(Image(str(png), width=6.7 * inch, height=2.7 * inch))
+            "OMEX archives. Time in hours (thickness: days); the dashed red line marks "
+            "injury.", N))
+        for png, height, cap in plots:
+            S.append(Image(str(png), width=6.7 * inch, height=height * inch))
             S.append(Paragraph(cap, SUB)); S.append(Spacer(1, 4))
 
     try:
