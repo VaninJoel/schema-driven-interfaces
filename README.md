@@ -28,6 +28,18 @@ Every run, in both apps, receives a durable run identity and is packaged as a
 COMBINE/OMEX archive (SED-ML) containing its resolved parameters, parameter audit,
 environment record, logs, outputs and status — including failed and cancelled runs.
 
+### 📄 See what a run produces
+
+These are two real runs, one per case study, made with the v1.0.0 installer and
+default parameters. Each has a human-readable audit report and the full run archive.
+
+| Case study | Audit report | Run archive |
+|---|---|---|
+| **Angio-GUI** | [📄 Angio-GUI example report (PDF)](examples/Angio-GUI_example_run_report.pdf) | [Angio-GUI_example_run.omex](examples/Angio-GUI_example_run.omex) |
+| **V-Cornea GUI** | [📄 V-Cornea example report (PDF)](examples/V-Cornea_example_run_report.pdf) | [V-Cornea_example_run.omex](examples/V-Cornea_example_run.omex) |
+
+The [examples/](examples/) folder explains what each report and archive contains.
+
 ---
 
 ## ⬇️ Download & install — no coding required
@@ -89,6 +101,7 @@ COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 | [`vivarium-vcornea/`](vivarium-vcornea/) | `VCorneaProcess`: the Vivarium process (and its parameter schema) that orchestrates the V-Cornea model — decoupled pattern. |
 | [`vcornea-gui/`](vcornea-gui/) | **V-Cornea GUI**: the schema-driven PyQt5 application for the V-Cornea model. |
 | [`vcornea_paper/`](vcornea_paper/) | The published **V-Cornea** CompuCell3D model (Vanin et al. 2025, *PLOS Comput Biol* 21(12):e1013410), unmodified, in its `Local/` and `HPC/` layouts. |
+| [`examples/`](examples/) | One example run per case study: audit report (PDF) and run archive (OMEX). |
 | [`tests/`](tests/) | Repository-level tests (headless GUIs). |
 | [`installer/`](installer/) | Scripts that build the self-contained desktop installers. |
 

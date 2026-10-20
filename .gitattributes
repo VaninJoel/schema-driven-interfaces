@@ -1,0 +1,5 @@
+# Never line-ending-convert binary artifacts (autocrlf would corrupt them).
+*.pdf binary
+*.omex binary
+*.zip binary
+*.png binary
