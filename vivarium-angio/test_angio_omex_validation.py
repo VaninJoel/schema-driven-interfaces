@@ -407,3 +407,29 @@ def test_report_rebuilds_legacy_archive_with_recorded_status(tmp_path):
                              tmp_path, 1, None)
     names, doc = _status_doc(d / f'{d.name}.omex')
     assert doc['status'] == 'failed' and 'simulation.sedml' not in names
+
+
+def test_report_shows_parameter_credibility(tmp_path):
+    # The credibility section imported parameter_audit by bare name, which is only
+    # importable when the package is NOT installed, so in every installed copy the
+    # section silently vanished from the report although every archive carries
+    # the audit (model/parameter_audit.json).
+    import zipfile
+    from reportlab.lib.styles import getSampleStyleSheet
+    from vivarium_angio.utils.parameter_audit import build_parameter_audit
+    from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
+    rep = _report_tool()
+    schema = AngiogenesisProcess().ports_schema()
+    params = {k: v['_default'] for k, v in schema['inputs'].items() if '_default' in v}
+    params['lchem'] = 1000                       # above the recommended 100-800
+    audit = build_parameter_audit(schema, params)
+    omex = tmp_path / 'run.omex'
+    with zipfile.ZipFile(omex, 'w') as zf:       # where the run's archive keeps it
+        zf.writestr('model/parameter_audit.json', json.dumps(audit))
+
+    ss = getSampleStyleSheet()
+    flow = rep._parameter_credibility_block([omex], ss['Heading2'], ss['Normal'],
+                                            lambda rows, widths: rows)
+    assert flow, "credibility section missing from the report"
+    rows = [r for f in flow if isinstance(f, list) for r in f]
+    assert any(r[0].startswith('Chemotaxis') or 'lchem' in str(r[0]) for r in rows[1:])
