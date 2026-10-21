@@ -433,3 +433,26 @@ def test_report_shows_parameter_credibility(tmp_path):
     assert flow, "credibility section missing from the report"
     rows = [r for f in flow if isinstance(f, list) for r in f]
     assert any(r[0].startswith('Chemotaxis') or 'lchem' in str(r[0]) for r in rows[1:])
+
+
+def test_report_statistics_are_across_replicates(tmp_path):
+    """The experiment report draws each combination as mean ± SD across its
+    replicates and summarises endpoints with mean, SD, 95% CI and Kruskal-Wallis."""
+    import pandas as pd
+    rep = _report_tool()
+    n, m, sd, half = rep._summary([1.0, 2.0, 3.0])
+    assert (n, m, sd) == (3, 2.0, 1.0)
+    assert abs(half - 4.302653 / 3 ** 0.5) < 1e-5
+    assert rep._kruskal_p([[1, 2, 3], [7, 8, 9], [14, 15, 16]]) < 0.05
+    assert rep._kruskal_p([[1, 1], [1, 1]]) is None
+    assert rep._short_labels(['lchem=100', 'lchem=500']) == (['100', '500'], 'lchem')
+
+    frames = [pd.DataFrame({'Time': [0, 10, 20], 'num_clusters': [1.0, 2.0, v]})
+              for v in (3.0, 5.0)]
+    per_t = rep._per_time(frames, 'num_clusters')
+    assert per_t.shape == (3, 2) and per_t.std(axis=1).iloc[-1] > 0
+    p = rep._metric_compare_plot('num_clusters', [('lchem=100', frames)], tmp_path, 'c.png')
+    assert p.stat().st_size > 0
+    p = rep._endpoint_plot([('num_clusters', {'lchem=100': [3.0, 5.0], 'lchem=500': [6.0, 7.0]})],
+                           ['lchem=100', 'lchem=500'], tmp_path, 'e.png')
+    assert p.stat().st_size > 0

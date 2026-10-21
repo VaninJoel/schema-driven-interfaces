@@ -387,7 +387,7 @@ CENTRAL_BINS = (4, 5, 6, 7, 8, 9)  # post-transition (paper leaves Bins 1–3 un
 def enhanced_thickness(fig, ds, combo=None, unit='days', injury_centered=False, stable_day=None):
     """Cross-combination thickness comparison (the betterment the paper view can't
     show). Two panels — limbal vs central epithelial thickness over time, one line
-    per combination.
+    per combination (replicate mean) with a ±1 SD band across replicates.
 
     NOTE: literature reference bands intentionally omitted for now (meaningful for
     control runs but not injury runs); re-add via REF_*_THICK if desired."""
@@ -403,14 +403,23 @@ def enhanced_thickness(fig, ds, combo=None, unit='days', injury_centered=False, 
     ]
     for ax, title, region_bins in regions:
         for combo_key, df_list in ds.thickness_um.items():
-            cm_df = _combo_concat(df_list)
-            cm_df = cm_df[cm_df['Bin'].isin(region_bins)]
-            if cm_df.empty:
+            # each replicate's region thickness (mean over the region's bins) per time,
+            # then mean ± SD across replicates
+            reps = []
+            for df in df_list:
+                d = df[df['Bin'].isin(region_bins)]
+                if not d.empty:
+                    d = d.assign(t=ds.time_axis(d, unit, ic))
+                    reps.append(d.groupby('t')['Thickness'].mean())
+            if not reps:
                 continue
-            cm_df['t'] = ds.time_axis(cm_df, unit, ic)
-            # mean thickness across the region's bins at each time, averaged over replicates
-            agg = cm_df.groupby('t')['Thickness'].mean().reset_index()
-            ax.plot(agg['t'], agg['Thickness'], lw=2, label=ds.combo_names.get(combo_key, combo_key))
+            per_t = pd.concat(reps, axis=1)
+            mean, sd = per_t.mean(axis=1), per_t.std(axis=1)
+            name = ds.combo_names.get(combo_key, combo_key)
+            line, = ax.plot(mean.index, mean.values, lw=2, label=f"{name} (n={len(reps)})")
+            if len(reps) > 1:
+                ax.fill_between(mean.index, mean - sd, mean + sd, color=line.get_color(),
+                                alpha=0.15, lw=0)
         if ic:
             ax.axvline(0, color='red', ls='--', lw=1.5)
         ax.set_title(title)

@@ -120,3 +120,47 @@ def test_thickness_is_the_gui_analysis_not_a_raw_height_average(tmp_path):
     figs = rep.make_thickness_plots([('replicate_1', omex, names)],
                                     tmp_path / 'figs', 'combo_001')
     assert len(figs) == 2 and all(Path(png).stat().st_size > 0 for png, _, _ in figs)
+
+
+def test_replicate_statistics():
+    """Endpoints are summarised across replicates as mean, SD and a t-based 95% CI,
+    and compared across combinations with Kruskal-Wallis."""
+    rep = _report_tool()
+    n, m, sd, half = rep._summary([1.0, 2.0, 3.0, None, float('nan')])
+    assert (n, m, sd) == (3, 2.0, 1.0)
+    assert abs(half - 4.302653 / 3 ** 0.5) < 1e-5      # t(0.975, df=2) * SD / sqrt(n)
+    assert rep._summary([5.0])[2] != rep._summary([5.0])[2]   # SD undefined for n = 1
+    assert rep._kruskal_p([[1, 2, 3], [7, 8, 9], [14, 15, 16]]) < 0.05
+    assert rep._kruskal_p([[1, 1], [1, 1]]) is None          # all identical: not testable
+    assert rep._kruskal_p([[1, 2, 3]]) is None                # one group: nothing to compare
+    assert '(n=2 of 3)' in rep._fmt_stat([1.0, 2.0, None])
+    assert rep._short_labels(['SLS=1500.0', 'SLS=2000.0']) == (['1500', '2000'], 'SLS')
+
+
+def test_experiment_report_has_statistics_and_paper_thickness(tmp_path, monkeypatch):
+    """The experiment report summarises per-replicate endpoints (table + dot plot)
+    and carries the GUI's paper thickness figure for every combination."""
+    rep = _report_tool()
+    combos = {c: [_replicate(tmp_path, c, r, 'success', thickness=True) for r in (1, 2)]
+              for c in ('combo_001', 'combo_002')}
+    seen = {'paper': [], 'panels': None}
+    ap = rep._gui_analysis()[1]
+    real_paper, real_end = ap.paper_thickness, rep.endpoint_plot
+
+    def paper_spy(fig, ds, combo=None, **kw):
+        seen['paper'].append(combo)
+        return real_paper(fig, ds, combo=combo, **kw)
+
+    def end_spy(panels, labels, *a, **kw):
+        seen['panels'] = (panels, labels)
+        return real_end(panels, labels, *a, **kw)
+
+    monkeypatch.setattr(ap, 'paper_thickness', paper_spy)
+    monkeypatch.setattr(rep, 'endpoint_plot', end_spy)
+    out = rep.build_experiment_report(tmp_path, combos, tmp_path / 'exp.pdf')
+    assert out.stat().st_size > 0
+    assert seen['paper'] == ['combo_001', 'combo_002']
+    panels, labels = seen['panels']
+    assert labels == ['combo_001', 'combo_002']
+    # one value per replicate, not one per combination
+    assert all(len(v) == 2 for _, groups in panels for v in groups.values())
