@@ -456,3 +456,32 @@ def test_report_statistics_are_across_replicates(tmp_path):
     p = rep._endpoint_plot([('num_clusters', {'lchem=100': [3.0, 5.0], 'lchem=500': [6.0, 7.0]})],
                            ['lchem=100', 'lchem=500'], tmp_path, 'e.png')
     assert p.stat().st_size > 0
+
+
+def test_unreadable_timestep_is_not_silently_dropped(tmp_path, monkeypatch):
+    """A timestep that cannot be read used to be skipped, so that replicate's
+    series quietly lost a row: its 'final' value became an earlier step and the
+    across-replicate mean at that step was taken without it. Reads are retried;
+    a step that stays unreadable makes the replicate's metrics unavailable
+    (it is then excluded and listed), never a series with a hole."""
+    from vivarium_angio.utils import omex_generator as og
+    monkeypatch.setattr('time.sleep', lambda s: None)
+    calls = []
+
+    def flaky():                                  # fails once, then reads
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError('file in use')
+        return 'data'
+    assert og._read_step(flaky, 10, strict=True) == 'data' and len(calls) == 2
+
+    d = _zarr_run(tmp_path, 'scan_combo001_rep01', 'success', 4)
+    assert len(og.extract_zarr_metrics(d / 'data.zarr').splitlines()) == 3   # header + 2 steps
+    chunks = [p for p in (d / 'data.zarr' / '10').rglob('*') if p.is_file()
+              and p.name not in ('zarr.json', '.zarray', '.zgroup', '.zattrs')]
+    assert chunks
+    for c in chunks:                              # corrupt step 10's array data
+        c.write_bytes(b'not a chunk')
+    assert og.extract_zarr_metrics(d / 'data.zarr') is None
+    # the lenient reader used for snapshots still yields the readable steps
+    assert [s for s, _ in og._load_zarr_steps(d / 'data.zarr')] == [0]

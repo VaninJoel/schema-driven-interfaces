@@ -778,10 +778,14 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
             + ", ".join(missing) + "." if missing else ""), SUB))
 
     # summary statistics: each metric's final-step value per replicate, summarised
-    # across the replicates of each combination
-    finals = {label: {m: [df.sort_values('Time')[m].iloc[-1] for df in frames if m in df]
-                      for m in METRICS}
-              for label, frames in combo_frames}
+    # across the replicates of each combination. "Final" is the combination's last
+    # step; a replicate without that step counts as missing (the cell shows n),
+    # never as its own earlier value.
+    def _finals(frames, m):
+        t_end = max(df['Time'].max() for df in frames)
+        return [(lambda v: float(v.iloc[0]) if len(v) else np.nan)(df.loc[df['Time'] == t_end, m])
+                for df in frames if m in df]
+    finals = {label: {m: _finals(frames, m) for m in METRICS} for label, frames in combo_frames}
     clabels = [label for label, _ in combo_frames]
     S.append(PageBreak())
     S.append(Paragraph("Summary Statistics (final step, per replicate)", H2))

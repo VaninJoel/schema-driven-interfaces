@@ -152,63 +152,87 @@ def _read_v3_array(array_dir):
     return out
 
 
-def _load_zarr_steps(store):
+def _read_step(read, step, strict, attempts=3):
+    """read() one timestep, retrying a transient failure (a file briefly locked by
+    another process, a momentary allocation failure). If every attempt fails:
+    raise when strict, else return None so the caller skips the step."""
+    import time
+    for i in range(attempts):
+        try:
+            return read()
+        except Exception as e:  # noqa: BLE001
+            if i == attempts - 1:
+                if strict:
+                    raise RuntimeError(f"timestep {step} unreadable: {e}") from e
+                return None
+            time.sleep(0.5 * (i + 1))
+
+
+def _load_zarr_steps(store, strict=False):
     """Yield (step:int, data:ndarray) for each timestep group. Tries the `zarr`
-    package first; falls back to the manual v3 reader."""
+    package first; falls back to the manual v3 reader.
+
+    strict: a timestep that cannot be read raises (after retries) instead of
+    being skipped. Metric series must be strict: a skipped step would silently
+    shorten one replicate's trajectory, so its 'final' value and any
+    across-replicate mean at that step would be computed without it."""
     store = Path(store)
     try:
         import numpy as np
         import zarr
         root = zarr.open(str(store), mode='r')
         steps = sorted(int(k) for k in root.keys() if str(k).isdigit())
-        if steps:
-            for s in steps:
-                try:
-                    yield s, np.asarray(root[str(s)]['data'])
-                except Exception:
-                    continue
-            return
     except Exception:
-        pass
+        steps = []
+    if steps:
+        for s in steps:
+            data = _read_step(lambda: np.asarray(root[str(s)]['data']), s, strict)
+            if data is not None:
+                yield s, data
+        return
     # Manual v3 fallback: digit-named group dirs each holding data/zarr.json
     step_dirs = sorted((p for p in store.iterdir() if p.is_dir() and p.name.isdigit()),
                        key=lambda p: int(p.name))
     for p in step_dirs:
         adir = p / 'data'
         if (adir / 'zarr.json').exists():
-            try:
-                yield int(p.name), _read_v3_array(adir)
-            except Exception:
-                continue
+            data = _read_step(lambda: _read_v3_array(adir), p.name, strict)
+            if data is not None:
+                yield int(p.name), data
 
 
 def extract_zarr_metrics(zarr_store_path):
     """Best-effort scalar time-series from the Zarr store (each timestep `data`
     array is [X,Y,Z,3]: cell-type / cell-id / VEGF). Returns CSV text
-    (`Time,<metrics>`) or None if numpy/scipy unavailable or no timestep data."""
+    (`Time,<metrics>`) or None if numpy/scipy unavailable, no timestep data, or a
+    timestep cannot be read (a series with a hole would be averaged as if whole)."""
     try:
         import numpy as np
         from scipy.ndimage import label
     except Exception:
         return None
     rows = ["Time," + ",".join(ANGIO_METRIC_COLUMNS)]
-    for step, data in _load_zarr_steps(zarr_store_path):
-        if data is None or data.ndim < 4 or data.shape[-1] < 3:
-            continue
-        cell_types = data[..., 0]
-        vegf = data[..., 2]
-        mask = (cell_types == EC_CELL_TYPE)
-        total = cell_types.size
-        density = (int(mask.sum()) / total) if total else 0.0
-        flat = mask
-        while flat.ndim > 2:
-            flat = flat.squeeze(-1) if flat.shape[-1] == 1 else flat.any(axis=-1)
-        try:
-            lab, num = label(flat)
-            largest = int(np.bincount(lab.ravel())[1:].max()) if num else 0
-        except Exception:
-            num, largest = 0, 0
-        rows.append(f"{step},{num},{density:.6f},{largest},{float(np.mean(vegf)):.6f}")
+    try:
+        for step, data in _load_zarr_steps(zarr_store_path, strict=True):
+            if data is None or data.ndim < 4 or data.shape[-1] < 3:
+                continue
+            cell_types = data[..., 0]
+            vegf = data[..., 2]
+            mask = (cell_types == EC_CELL_TYPE)
+            total = cell_types.size
+            density = (int(mask.sum()) / total) if total else 0.0
+            flat = mask
+            while flat.ndim > 2:
+                flat = flat.squeeze(-1) if flat.shape[-1] == 1 else flat.any(axis=-1)
+            try:
+                lab, num = label(flat)
+                largest = int(np.bincount(lab.ravel())[1:].max()) if num else 0
+            except Exception:
+                num, largest = 0, 0
+            rows.append(f"{step},{num},{density:.6f},{largest},{float(np.mean(vegf)):.6f}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[omex] metrics not extracted from {zarr_store_path}: {e}")
+        return None
     return ("\n".join(rows) + "\n") if len(rows) > 1 else None
 
 

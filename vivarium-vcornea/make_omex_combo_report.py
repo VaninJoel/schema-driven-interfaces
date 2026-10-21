@@ -991,19 +991,28 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         """{endpoint key: [value per replicate]} for one combination."""
         f = data[ck]['frames']
         e = {k: [] for k, _, _ in ENDPOINTS}
-        for r in f.get('cell_count_reps', []):
-            if 'Wing' not in r:
-                continue
-            pre, post = _split(r['Wing'])
+
+        def at_end(series_list):
+            """Each series' value at the combination's last time point; NaN (counted
+            as missing) for a series that does not reach it, never an earlier value."""
+            if not series_list:
+                return []
+            t_end = max(s.index.max() for s in series_list)
+            return [float(s.loc[t_end]) if t_end in s.index else np.nan for s in series_list]
+
+        wings = [r['Wing'] for r in f.get('cell_count_reps', []) if 'Wing' in r]
+        for w, w_end in zip(wings, at_end(wings)):
+            pre, post = _split(w)
             w0 = pre.mean() if len(pre) else np.nan
             e['wing0'].append(w0)
             e['wing_min'].append(post.min() if len(post) else np.nan)
-            e['wing_rec'].append(r['Wing'].iloc[-1] / w0 * 100 if w0 else np.nan)
-        for s in central_series(ck):
+            e['wing_rec'].append(w_end / w0 * 100 if w0 else np.nan)
+        central = central_series(ck)
+        for s, s_end in zip(central, at_end(central)):
             pre, post = _split(s)
             e['th0'].append(pre.mean() if len(pre) else np.nan)
             e['th_min'].append(post.min() if len(post) else np.nan)
-            e['th_end'].append(s.iloc[-1])
+            e['th_end'].append(s_end)
             e['th_rec'].append(recovery_days(s))
         for r in f.get('surfactant_reps', []):
             if 'Total Amount' in r:
