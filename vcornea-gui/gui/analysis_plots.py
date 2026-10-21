@@ -170,7 +170,8 @@ def paper_count(fig, ds, combo=None, unit='days', stable_day=None):
 def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
     """Faithful port of Plot Scripts/plot_manager.py:plot_thickness (Fig 8):
     per-X-bin tissue TOP POSITION over time, and stable boxplots of both top
-    position (blue) and thickness=Height-membrane (red) across X (µm)."""
+    position (blue) and thickness=Height-membrane (red) across X (µm). A bin the
+    model records as Height 0 (no epithelium left) has thickness 0, not negative."""
     import seaborn as sns  # noqa: F401 (kept for parity; palette below uses mpl)
     fig.clear()
     combo = combo or (list(ds.thickness_data)[0] if ds.thickness_data else None)
@@ -201,7 +202,8 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
         ax0.plot(_tconv(bm['Time'], unit), bm['Height'] * 2, lw=1, color=cmap[b],
                  label=f"x {b*bins_size}-{(b+1)*bins_size-1} µm")
         stable_b = combined[(combined['Bin'] == b) & (combined['Time'] >= stable_h)]
-        bin_actual.append((stable_b['Height'].mean() - bin_memb.get(b, 10.0)) * 2)   # thickness µm
+        th_b = ((stable_b['Height'] - bin_memb.get(b, 10.0)) * 2).clip(lower=0.0)   # thickness µm
+        bin_actual.append(th_b.mean())
         bin_relative.append(stable_b['Height'].mean() * 2)                            # top position µm
         pos = bin_x[b] * 2
         x_um.append(pos)
@@ -214,7 +216,7 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
                         capprops=dict(color='black', linewidth=0.5),
                         flierprops=dict(marker='.', markerfacecolor=face, markersize=1,
                                         markeredgewidth=0.5, alpha=0.5))
-        _bp((stable_b['Height'] - bin_memb.get(b, 10.0)) * 2, 'tab:red')   # thickness
+        _bp(th_b, 'tab:red')                                               # thickness
         _bp(stable_b['Height'] * 2, 'tab:blue')                            # top position
 
     # NOTE: literature reference lines (REF_*_TOP) intentionally omitted for now —

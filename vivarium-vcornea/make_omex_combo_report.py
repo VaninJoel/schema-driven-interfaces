@@ -984,7 +984,7 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         ('th_min', "Central thickness, minimum after injury (&micro;m)", 1),
         ('th_end', "Central thickness, final (&micro;m)", 1),
         ('th_rec', "Central thickness, days to recover 90% of pre-injury", 1),
-        ('surf_peak', "Peak surfactant (total amount)", 0),
+        ('surf_half', "Surfactant clearance half-life (h)", 1),
     ]
 
     def endpoints(ck):
@@ -1015,8 +1015,10 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
             e['th_end'].append(s_end)
             e['th_rec'].append(recovery_days(s))
         for r in f.get('surfactant_reps', []):
-            if 'Total Amount' in r:
-                e['surf_peak'].append(r['Total Amount'].max())
+            if 'Total Amount' in r:   # Time is in hours; the peak is the applied dose
+                a = r['Total Amount']
+                below = a[(a.index > a.idxmax()) & (a <= a.max() / 2.0)] if a.max() > 0 else a[:0]
+                e['surf_half'].append(below.index[0] - a.idxmax() if len(below) else np.nan)
         return e
 
     ends = {ck: endpoints(ck) for ck in order}
@@ -1169,7 +1171,7 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     corner = "Endpoint" + (" &nbsp;/&nbsp; " + xname if xname else "")
     mrows = [[corner]
              + [f"{t}<br/>(n={data[ck]['reps']})" for t, ck in zip(ticks, order)]
-             + ["Kruskal&ndash;Wallis p"]]
+             + ["Kruskal&ndash;<br/>Wallis p"]]
     for key, name, nd in ENDPOINTS:
         groups = [ends[ck][key] for ck in order]
         if not any(_finite(g) for g in groups):
@@ -1178,7 +1180,10 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     S.append(prows(mrows, [lw * inch] + [cw * inch] * len(order) + [pw * inch]))
     S.append(Paragraph(
         "Pre-injury = before the injury time; minimum after injury = damage depth. "
-        "Central thickness = mean over bins 4&ndash;9 (&micro;m, the GUI's analysis). "
+        "Central thickness = mean over bins 4&ndash;9 (&micro;m, the GUI's analysis; a "
+        "bin with no epithelium left counts as 0). "
+        "Surfactant half-life: hours from the applied peak until the total amount is "
+        "down to half of it. "
         "Days to recover: from injury until central thickness, after its minimum, is "
         "back to 90% of its pre-injury mean (0 = never fell below 90%; replicates that "
         "did not recover within the run are left out and the remaining n is shown). "

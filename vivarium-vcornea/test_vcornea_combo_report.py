@@ -33,10 +33,12 @@ def _report_tool():
     return sys.modules[name]
 
 
-def _replicate(root, combo, rid, status, thickness=False):
+def _replicate(root, combo, rid, status, thickness=False, surfactant=None):
     d = root / combo / f'replicate_{rid}'
     d.mkdir(parents=True)
     (d / 'cell_count_240.csv').write_text(CSV)
+    if surfactant:   # 'Total Amount,Time' rows, Time in hours
+        (d / 'surfactant_240.csv').write_text(surfactant)
     if thickness:   # as the model writes it: top-cell height (voxels) per X-bin, hourly
         import pandas as pd
         pd.DataFrame([{'Time': float(h), 'Bin': b, 'Height': 40.0 + b + h}
@@ -113,7 +115,7 @@ def test_thickness_is_the_gui_analysis_not_a_raw_height_average(tmp_path):
 
     d = ds.thickness_um['combo_001'][0]
     assert sorted(d['Bin'].unique()) == list(range(10))     # per bin, not one mean
-    expected = (d['Height'] - d['Bin'].map(ds.membrane_bins)) * 2
+    expected = ((d['Height'] - d['Bin'].map(ds.membrane_bins)) * 2).clip(lower=0.0)
     assert (d['Thickness'] - expected).abs().max() < 1e-9
 
     names = zipfile.ZipFile(omex).namelist()
@@ -164,3 +166,27 @@ def test_experiment_report_has_statistics_and_paper_thickness(tmp_path, monkeypa
     assert labels == ['combo_001', 'combo_002']
     # one value per replicate, not one per combination
     assert all(len(v) == 2 for _, groups in panels for v in groups.values())
+
+
+def test_eroded_bin_has_zero_thickness_and_surfactant_half_life(tmp_path, monkeypatch):
+    """A bin the model records as Height 0 (no epithelium left) is thickness 0, not
+    a negative value; and the surfactant endpoint is the clearance half-life, not
+    the peak (which is just the applied dose)."""
+    import pandas as pd
+    rep = _report_tool()
+    omex = _replicate(tmp_path / 'a', 'combo_001', 1, 'success', thickness=True)
+    ds, _ = rep._thickness_dataset({'combo_001': [omex]}, tmp_path / 'work')
+    raw = ds.thickness_data['combo_001'][0].assign(Height=0.0)
+    ds.thickness_data['combo_001'] = [raw]
+    assert (ds._to_thickness_um(ds.thickness_data)['combo_001'][0]['Thickness'] == 0).all()
+
+    def surf(half):   # dose 100 at t=2 h, half of it reached 'half' hours later
+        return "Total Amount,Time\n0,0\n100,2\n80,3\n" + f"50,{2 + half}\n10,{4 + half}\n"
+    combos = {c: [_replicate(tmp_path / 'b', c, r, 'success', surfactant=surf(h))
+                  for r in (1, 2)] for c, h in (('combo_001', 4), ('combo_002', 6))}
+    stats = []
+    real = rep._fmt_stat
+    monkeypatch.setattr(rep, '_fmt_stat', lambda g, nd=1: stats.append(list(g)) or real(g, nd))
+    rep.build_experiment_report(tmp_path / 'b', combos, tmp_path / 'exp.pdf')
+    assert [4.0, 4.0] in stats and [6.0, 6.0] in stats
+    assert [100.0, 100.0] not in stats
