@@ -137,6 +137,7 @@ def test_replicate_statistics():
     assert rep._kruskal_p([[1, 2, 3]]) is None                # one group: nothing to compare
     assert '(n=2 of 3)' in rep._fmt_stat([1.0, 2.0, None])
     assert rep._short_labels(['SLS=1500.0', 'SLS=2000.0']) == (['1500', '2000'], 'SLS')
+    assert (rep._p_phrase(0.0001), rep._p_phrase(0.0123)) == ('p < 0.001', 'p = 0.012')
 
 
 def test_experiment_report_has_statistics_and_paper_thickness(tmp_path, monkeypatch):

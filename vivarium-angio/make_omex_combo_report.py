@@ -463,6 +463,12 @@ def _fmt_p(p):
     return "&mdash;" if p is None else ("&lt;0.001" if p < 0.001 else f"{p:.3f}")
 
 
+def _p_phrase(p):
+    """Plain-text p for a plot title: 'p = 0.012' or 'p < 0.001'."""
+    s = _fmt_p(p).replace("&lt;", "< ")
+    return "p " + s if s.startswith("<") else "p = " + s
+
+
 def _short_labels(labels):
     """Tick labels and axis name: 'lchem=100' -> ('100', 'lchem')."""
     parts = [str(l).split('=', 1) for l in labels]
@@ -490,7 +496,7 @@ def _endpoint_plot(panels, labels, tmpdir, fname, ncols=2):
                 ax.errorbar(i + 0.27, m, yerr=None if np.isnan(half) else half, fmt='o',
                             color='black', ms=3.5, capsize=3, lw=1, zorder=3)
         p = _kruskal_p([groups.get(lab, []) for lab in labels])
-        ax.set_title(title + (f"\nKruskal–Wallis p = {_fmt_p(p).replace('&lt;', '<')}"
+        ax.set_title(title + (f"\nKruskal–Wallis {_p_phrase(p)}"
                               if p is not None else ""), fontsize=7.5, color=NAVY)
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(ticks, fontsize=7)
@@ -800,7 +806,7 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
     cw = (6.75 - lw - pw) / max(len(clabels), 1)
     corner = "Metric" + (" &nbsp;/&nbsp; " + xname if xname else "")
     mrows = [[corner] + [f"{t}<br/>(n={len(frames)})" for t, (_, frames) in zip(ticks, combo_frames)]
-             + ["Kruskal&ndash;Wallis p"]]
+             + ["Kruskal&ndash;<br/>Wallis p"]]
     for m in METRICS:
         groups = [finals[label][m] for label in clabels]
         mrows.append([m] + [_fmt_stat(g) for g in groups] + [_fmt_p(_kruskal_p(groups))])
