@@ -30,15 +30,16 @@ environment record, logs, outputs and status — including failed and cancelled 
 
 ### 📄 See what a run produces
 
-These are two real runs, one per case study, made with the v1.0.0 installer and
-default parameters. Each has a human-readable audit report and the full run archive.
+These are two real parameter sweeps, one per case study, made with the v1.0.3
+installer. Each sweep has an experiment report that compares the parameter values,
+one audit report per value, and the full COMBINE/OMEX archive of every run.
 
-| Case study | Audit report | Run archive |
+| Case study | Sweep | Reports |
 |---|---|---|
-| **Angio-GUI** | [📄 Angio-GUI example report (PDF)](examples/Angio-GUI_example_run_report.pdf) | [Angio-GUI_example_run.omex](examples/Angio-GUI_example_run.omex) |
-| **V-Cornea GUI** | [📄 V-Cornea example report (PDF)](examples/V-Cornea_example_run_report.pdf) | [V-Cornea_example_run.omex](examples/V-Cornea_example_run.omex) |
+| **Angio-GUI** | Chemotaxis strength `lchem` = 100, 500, 1000 × 3 replicates | [📄 Experiment report (PDF)](examples/angio-gui_lchem_sweep/angio_lchem_sweep_20261020_182022_experiment_report.pdf) · [lchem=1000 audit report](examples/angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
+| **V-Cornea GUI** | Surfactant dose `SLS_Concentration` = 250, 750, 2000 × 2 replicates, 30 days | [📄 Experiment report (PDF)](examples/vcornea_sls_sweep/vcornea_sls_sweep_20261020_182006_experiment_report.pdf) · [SLS=2000 audit report](examples/vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
 
-The [examples/](examples/) folder explains what each report and archive contains.
+The [examples/](examples/) folder links every report and archive and explains what each contains.
 
 ---
 
@@ -106,7 +107,7 @@ COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 | [`vivarium-vcornea/`](vivarium-vcornea/) | `VCorneaProcess`: the Vivarium process (and its parameter schema) that orchestrates the V-Cornea model — decoupled pattern. |
 | [`vcornea-gui/`](vcornea-gui/) | **V-Cornea GUI**: the schema-driven PyQt5 application for the V-Cornea model. |
 | [`vcornea_paper/`](vcornea_paper/) | The published **V-Cornea** CompuCell3D model (Vanin et al. 2025, *PLOS Comput Biol* 21(12):e1013410), unmodified, in its `Local/` and `HPC/` layouts. |
-| [`examples/`](examples/) | One example run per case study: audit report (PDF) and run archive (OMEX). |
+| [`examples/`](examples/) | One example parameter sweep per case study: experiment and audit reports (PDF) and every run archive (OMEX). |
 | [`tests/`](tests/) | Repository-level tests (headless GUIs). |
 | [`installer/`](installer/) | Scripts that build the self-contained desktop installers. |
 
