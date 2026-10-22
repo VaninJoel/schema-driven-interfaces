@@ -170,7 +170,8 @@ def paper_count(fig, ds, combo=None, unit='days', stable_day=None):
 def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
     """Faithful port of Plot Scripts/plot_manager.py:plot_thickness (Fig 8):
     per-X-bin tissue TOP POSITION over time, and stable boxplots of both top
-    position (blue) and thickness=Height-membrane (red) across X (µm)."""
+    position (blue) and thickness=Height-membrane (red) across X (µm). A bin the
+    model records as Height 0 (no epithelium left) has thickness 0, not negative."""
     import seaborn as sns  # noqa: F401 (kept for parity; palette below uses mpl)
     fig.clear()
     combo = combo or (list(ds.thickness_data)[0] if ds.thickness_data else None)
@@ -201,7 +202,8 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
         ax0.plot(_tconv(bm['Time'], unit), bm['Height'] * 2, lw=1, color=cmap[b],
                  label=f"x {b*bins_size}-{(b+1)*bins_size-1} µm")
         stable_b = combined[(combined['Bin'] == b) & (combined['Time'] >= stable_h)]
-        bin_actual.append((stable_b['Height'].mean() - bin_memb.get(b, 10.0)) * 2)   # thickness µm
+        th_b = ((stable_b['Height'] - bin_memb.get(b, 10.0)) * 2).clip(lower=0.0)   # thickness µm
+        bin_actual.append(th_b.mean())
         bin_relative.append(stable_b['Height'].mean() * 2)                            # top position µm
         pos = bin_x[b] * 2
         x_um.append(pos)
@@ -214,7 +216,7 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
                         capprops=dict(color='black', linewidth=0.5),
                         flierprops=dict(marker='.', markerfacecolor=face, markersize=1,
                                         markeredgewidth=0.5, alpha=0.5))
-        _bp((stable_b['Height'] - bin_memb.get(b, 10.0)) * 2, 'tab:red')   # thickness
+        _bp(th_b, 'tab:red')                                               # thickness
         _bp(stable_b['Height'] * 2, 'tab:blue')                            # top position
 
     # NOTE: literature reference lines (REF_*_TOP) intentionally omitted for now —
@@ -387,7 +389,7 @@ CENTRAL_BINS = (4, 5, 6, 7, 8, 9)  # post-transition (paper leaves Bins 1–3 un
 def enhanced_thickness(fig, ds, combo=None, unit='days', injury_centered=False, stable_day=None):
     """Cross-combination thickness comparison (the betterment the paper view can't
     show). Two panels — limbal vs central epithelial thickness over time, one line
-    per combination.
+    per combination (replicate mean) with a ±1 SD band across replicates.
 
     NOTE: literature reference bands intentionally omitted for now (meaningful for
     control runs but not injury runs); re-add via REF_*_THICK if desired."""
@@ -403,14 +405,23 @@ def enhanced_thickness(fig, ds, combo=None, unit='days', injury_centered=False, 
     ]
     for ax, title, region_bins in regions:
         for combo_key, df_list in ds.thickness_um.items():
-            cm_df = _combo_concat(df_list)
-            cm_df = cm_df[cm_df['Bin'].isin(region_bins)]
-            if cm_df.empty:
+            # each replicate's region thickness (mean over the region's bins) per time,
+            # then mean ± SD across replicates
+            reps = []
+            for df in df_list:
+                d = df[df['Bin'].isin(region_bins)]
+                if not d.empty:
+                    d = d.assign(t=ds.time_axis(d, unit, ic))
+                    reps.append(d.groupby('t')['Thickness'].mean())
+            if not reps:
                 continue
-            cm_df['t'] = ds.time_axis(cm_df, unit, ic)
-            # mean thickness across the region's bins at each time, averaged over replicates
-            agg = cm_df.groupby('t')['Thickness'].mean().reset_index()
-            ax.plot(agg['t'], agg['Thickness'], lw=2, label=ds.combo_names.get(combo_key, combo_key))
+            per_t = pd.concat(reps, axis=1)
+            mean, sd = per_t.mean(axis=1), per_t.std(axis=1)
+            name = ds.combo_names.get(combo_key, combo_key)
+            line, = ax.plot(mean.index, mean.values, lw=2, label=f"{name} (n={len(reps)})")
+            if len(reps) > 1:
+                ax.fill_between(mean.index, mean - sd, mean + sd, color=line.get_color(),
+                                alpha=0.15, lw=0)
         if ic:
             ax.axvline(0, color='red', ls='--', lw=1.5)
         ax.set_title(title)

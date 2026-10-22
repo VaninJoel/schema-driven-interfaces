@@ -159,7 +159,11 @@ class AnalysisDataset:
             return {i: 10.0 for i in range(N_BINS)}
 
     def _to_thickness_um(self, thickness_data):
-        """Per combo/replicate, add a 'Thickness' column in µm (membrane-subtracted)."""
+        """Per combo/replicate, add a 'Thickness' column in µm (membrane-subtracted).
+
+        The model records Height = 0 for an X bin with no epithelial cells left
+        (vCornea_v2Steppables.py), which would read as a negative thickness; a bin
+        with no epithelium has thickness 0, so the value is floored there."""
         out = {}
         for combo, df_list in thickness_data.items():
             conv = []
@@ -168,7 +172,7 @@ class AnalysisDataset:
                     continue
                 d = df.copy()
                 base = d['Bin'].map(lambda b: self.membrane_bins.get(int(b), 10.0))
-                d['Thickness'] = (d['Height'] - base) * VOXEL_TO_UM
+                d['Thickness'] = ((d['Height'] - base) * VOXEL_TO_UM).clip(lower=0.0)
                 conv.append(d)
             if conv:
                 out[combo] = conv

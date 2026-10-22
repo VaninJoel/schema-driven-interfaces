@@ -433,3 +433,55 @@ def test_report_shows_parameter_credibility(tmp_path):
     assert flow, "credibility section missing from the report"
     rows = [r for f in flow if isinstance(f, list) for r in f]
     assert any(r[0].startswith('Chemotaxis') or 'lchem' in str(r[0]) for r in rows[1:])
+
+
+def test_report_statistics_are_across_replicates(tmp_path):
+    """The experiment report draws each combination as mean ± SD across its
+    replicates and summarises endpoints with mean, SD, 95% CI and Kruskal-Wallis."""
+    import pandas as pd
+    rep = _report_tool()
+    n, m, sd, half = rep._summary([1.0, 2.0, 3.0])
+    assert (n, m, sd) == (3, 2.0, 1.0)
+    assert abs(half - 4.302653 / 3 ** 0.5) < 1e-5
+    assert rep._kruskal_p([[1, 2, 3], [7, 8, 9], [14, 15, 16]]) < 0.05
+    assert rep._kruskal_p([[1, 1], [1, 1]]) is None
+    assert rep._short_labels(['lchem=100', 'lchem=500']) == (['100', '500'], 'lchem')
+
+    frames = [pd.DataFrame({'Time': [0, 10, 20], 'num_clusters': [1.0, 2.0, v]})
+              for v in (3.0, 5.0)]
+    per_t = rep._per_time(frames, 'num_clusters')
+    assert per_t.shape == (3, 2) and per_t.std(axis=1).iloc[-1] > 0
+    p = rep._metric_compare_plot('num_clusters', [('lchem=100', frames)], tmp_path, 'c.png')
+    assert p.stat().st_size > 0
+    p = rep._endpoint_plot([('num_clusters', {'lchem=100': [3.0, 5.0], 'lchem=500': [6.0, 7.0]})],
+                           ['lchem=100', 'lchem=500'], tmp_path, 'e.png')
+    assert p.stat().st_size > 0
+
+
+def test_unreadable_timestep_is_not_silently_dropped(tmp_path, monkeypatch):
+    """A timestep that cannot be read used to be skipped, so that replicate's
+    series quietly lost a row: its 'final' value became an earlier step and the
+    across-replicate mean at that step was taken without it. Reads are retried;
+    a step that stays unreadable makes the replicate's metrics unavailable
+    (it is then excluded and listed), never a series with a hole."""
+    from vivarium_angio.utils import omex_generator as og
+    monkeypatch.setattr('time.sleep', lambda s: None)
+    calls = []
+
+    def flaky():                                  # fails once, then reads
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError('file in use')
+        return 'data'
+    assert og._read_step(flaky, 10, strict=True) == 'data' and len(calls) == 2
+
+    d = _zarr_run(tmp_path, 'scan_combo001_rep01', 'success', 4)
+    assert len(og.extract_zarr_metrics(d / 'data.zarr').splitlines()) == 3   # header + 2 steps
+    chunks = [p for p in (d / 'data.zarr' / '10').rglob('*') if p.is_file()
+              and p.name not in ('zarr.json', '.zarray', '.zgroup', '.zattrs')]
+    assert chunks
+    for c in chunks:                              # corrupt step 10's array data
+        c.write_bytes(b'not a chunk')
+    assert og.extract_zarr_metrics(d / 'data.zarr') is None
+    # the lenient reader used for snapshots still yields the readable steps
+    assert [s for s, _ in og._load_zarr_steps(d / 'data.zarr')] == [0]

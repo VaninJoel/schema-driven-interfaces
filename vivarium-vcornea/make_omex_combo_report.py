@@ -59,6 +59,7 @@ _register_conda_dll_dirs()
 
 import numpy as np
 import pandas as pd
+from scipy import stats as _spstats
 
 import matplotlib
 matplotlib.use('Agg')
@@ -241,27 +242,129 @@ def make_csv_plots(reps, tmpdir):
         for label, df in dfs:
             for c, col in zip(cols, palette):
                 ax.plot(df[tk], df[c], color=col, alpha=0.28, lw=0.7)
-        # across-replicate mean per column (aligned on Time)
+        # across-replicate mean ± SD per column (aligned on Time)
         for c, col in zip(cols, palette):
-            series = [df[[tk, c]].rename(columns={c: 'v'}).set_index(tk)['v']
+            series = [df[[tk, c]].rename(columns={c: 'v'}).groupby(tk)['v'].mean()
                       for _, df in dfs]
             merged = pd.concat(series, axis=1)         # always a DataFrame
             mean = merged.mean(axis=1)                  # = the single trace if 1 replicate
-            ax.plot(mean.index, mean.values, color=col, lw=1.8, label=f"{c} (mean)")
+            line, = ax.plot(mean.index, mean.values, color=col, lw=1.8, label=f"{c} (mean)")
+            if len(dfs) > 1:
+                sd = merged.std(axis=1)
+                ax.fill_between(mean.index, mean - sd, mean + sd, color=line.get_color(),
+                                alpha=0.18, lw=0)
         ax.set_xlabel('Time (hours)', fontsize=8)
         ax.set_ylabel('Value', fontsize=8)
         ax.tick_params(labelsize=7)
         ax.grid(True, alpha=0.3, lw=0.4)
         ax.legend(fontsize=7, ncol=min(len(cols), 4), frameon=False, loc='best')
-        ax.set_title(f"{prefix} — mean (bold) and {len(dfs)} replicate(s) (thin)",
+        ax.set_title(f"{prefix} — mean ± SD (n={len(dfs)}) and each replicate (thin)",
                      fontsize=8.5, color='#1a3c5e')
         fig.tight_layout()
         png = tmpdir / f"csv_{idx}.png"
         fig.savefig(png, bbox_inches='tight')
         plt.close(fig)
         out.append((png, f"{prefix}: {', '.join(cols)} vs Time — "
-                    f"{len(dfs)} replicate(s), bold = across-replicate mean"))
+                    f"n = {len(dfs)} replicate(s); bold = across-replicate mean, shaded = "
+                    "±1 SD across replicates, thin = individual replicates"))
     return out
+
+
+# --------------------------------------------------------------- statistics
+def _finite(values):
+    return [float(x) for x in values if x is not None and np.isfinite(x)]
+
+
+def _summary(values):
+    """(n, mean, SD, 95% CI half-width) of the finite values; NaN where undefined."""
+    v = np.asarray(_finite(values))
+    n = len(v)
+    if n == 0:
+        return 0, np.nan, np.nan, np.nan
+    sd = v.std(ddof=1) if n > 1 else np.nan
+    half = _spstats.t.ppf(0.975, n - 1) * sd / np.sqrt(n) if n > 1 else np.nan
+    return n, v.mean(), sd, half
+
+
+def _kruskal_p(groups):
+    """Kruskal–Wallis p across groups of replicate values; None if not testable."""
+    g = [v for v in (_finite(grp) for grp in groups) if len(v) >= 2]
+    if len(g) < 2:
+        return None
+    try:
+        p = float(_spstats.kruskal(*g).pvalue)
+    except ValueError:      # older scipy, every value identical
+        return None
+    return p if np.isfinite(p) else None    # NaN: every value identical
+
+
+def _fmt_stat(values, nd=1):
+    """'mean ± SD [CI low, CI high]', noting n when some replicates have no value."""
+    n, m, sd, half = _summary(values)
+    if n == 0:
+        return "&mdash;"
+    s = f"{m:.{nd}f}"
+    if n > 1:
+        s += f" &plusmn; {sd:.{nd}f}<br/>[{m - half:.{nd}f}, {m + half:.{nd}f}]"
+    return s + (f"<br/>(n={n} of {len(values)})" if n < len(values) else "")
+
+
+def _fmt_p(p):
+    return "&mdash;" if p is None else ("&lt;0.001" if p < 0.001 else f"{p:.3f}")
+
+
+def _p_phrase(p):
+    """Plain-text p for a plot title: 'p = 0.012' or 'p < 0.001'."""
+    s = _fmt_p(p).replace("&lt;", "< ")
+    return "p " + s if s.startswith("<") else "p = " + s
+
+
+def _short_labels(labels):
+    """Tick labels and axis name: 'SLS_Concentration=1500.0' -> ('1500', 'SLS_Concentration')."""
+    parts = [str(l).split('=', 1) for l in labels]
+    if all(len(p) == 2 for p in parts) and len({p[0] for p in parts}) == 1:
+        def num(v):
+            try:
+                return f"{float(v):g}"
+            except ValueError:
+                return v
+        return [num(p[1]) for p in parts], parts[0][0]
+    return [str(l) for l in labels], ''
+
+
+def endpoint_plot(panels, labels, colors_by_label, png, ncols=2):
+    """panels: [(title, {label: [value per replicate]})]. One panel per endpoint:
+    each replicate a dot, the mean with its 95% CI as a black bar, and the
+    Kruskal–Wallis p across the combinations in the panel title."""
+    rows = -(-len(panels) // ncols)
+    fig, axes = plt.subplots(rows, ncols, figsize=(6.7, 2.25 * rows), dpi=150, squeeze=False)
+    ticks, xname = _short_labels(labels)
+    rng = np.random.default_rng(0)
+    for ax, (title, groups) in zip(axes.flat, panels):
+        for i, lab in enumerate(labels):
+            v = _finite(groups.get(lab, []))
+            ax.scatter(i + rng.uniform(-0.1, 0.1, len(v)), v, s=16, alpha=0.75, lw=0,
+                       color=colors_by_label[lab], zorder=2)
+            n, m, _, half = _summary(v)
+            if n:
+                ax.errorbar(i + 0.27, m, yerr=None if np.isnan(half) else half, fmt='o',
+                            color='black', ms=3.5, capsize=3, lw=1, zorder=3)
+        p = _kruskal_p([groups.get(lab, []) for lab in labels])
+        ax.set_title(title + (f"\nKruskal–Wallis {_p_phrase(p)}"
+                              if p is not None else ""), fontsize=7.5, color='#1a3c5e')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(ticks, fontsize=7)
+        ax.set_xlim(-0.5, len(labels) - 0.4)
+        if xname:
+            ax.set_xlabel(xname, fontsize=7)
+        ax.tick_params(labelsize=7)
+        ax.grid(True, axis='y', alpha=0.3, lw=0.4)
+    for ax in list(axes.flat)[len(panels):]:
+        ax.axis('off')
+    fig.tight_layout()
+    fig.savefig(png, bbox_inches='tight')
+    plt.close(fig)
+    return png
 
 
 def _gui_analysis():
@@ -354,8 +457,9 @@ def make_thickness_plots(reps, tmpdir, combo='combination'):
                 Path(tmpdir) / 'thick_regions.png', (6.7, 4.6))
     out.append((p, 4.6, (
         "Epithelial thickness in &micro;m over time in the limbus (bin 0) and the "
-        "central/peripheral cornea (bins 4&ndash;9), averaged over replicates "
-        "(Analyze Results &rarr; Thickness, comparison view).")))
+        f"central/peripheral cornea (bins 4&ndash;9): mean of the {n} replicate(s), "
+        "shaded &plusmn;1 SD across replicates (Analyze Results &rarr; Thickness, "
+        "comparison view).")))
     return out
 
 
@@ -676,7 +780,8 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
         S.append(Paragraph(
             f"Plotted from the CSV/parquet inside the {len(reps)} replicate archive(s). "
             "Thin lines are individual replicates; the bold line is the across-replicate "
-            "mean. Time is shown in hours (as stored in the data).", N))
+            "mean and the shaded band &plusmn;1 SD across replicates. Time is shown in "
+            "hours (as stored in the data).", N))
         for png, cap in csv_plots:
             S.append(Image(str(png), width=6.7 * inch, height=2.6 * inch))
             S.append(Paragraph(cap, SUB))
@@ -717,8 +822,9 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
 def _combo_metric_frames(omex_paths):
     """Replicate-MEAN frames for a combo's metrics, read from its per-run OMEX.
     Returns {'cell_count': df(Time index + cols), 'surfactant': df} (whichever
-    are present), plus (label, reps, sim_days, inj_days, has_injury) from the run
-    metadata. Thickness is analysed separately (_thickness_dataset)."""
+    are present) plus each replicate's own frames under 'cell_count_reps' /
+    'surfactant_reps', and (label, reps, sim_days, inj_days, has_injury) from the
+    run metadata. Thickness is analysed separately (_thickness_dataset)."""
     cc, surf = [], []
     label = reps = sim_days = inj_days = None
     has_injury = False
@@ -740,22 +846,28 @@ def _combo_metric_frames(omex_paths):
             sn = _find_name(names, 'surfactant', '.csv')
             if cn:
                 d = pd.read_csv(io.BytesIO(zf.read(cn)))
-                cc.append(d.rename(columns={_time_key(d): 'Time'}).set_index('Time'))
+                d = d.rename(columns={_time_key(d): 'Time'})
+                cc.append(d.groupby('Time').mean(numeric_only=True))
             if sn:
                 d = pd.read_csv(io.BytesIO(zf.read(sn)))
-                surf.append(d.rename(columns={_time_key(d): 'Time'}).set_index('Time'))
+                d = d.rename(columns={_time_key(d): 'Time'})
+                surf.append(d.groupby('Time').mean(numeric_only=True))
     frames = {}
     if cc:
         frames['cell_count'] = pd.concat(cc).groupby(level=0).mean(numeric_only=True)
+        frames['cell_count_reps'] = cc
     if surf:
         frames['surfactant'] = pd.concat(surf).groupby(level=0).mean(numeric_only=True)
+        frames['surfactant_reps'] = surf
     return frames, label, reps, sim_days, inj_days, has_injury
 
 
 def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
-    """Cross-combination comparison PDF (OMEX-internal): one line per combo for
-    each cell type and surfactant, the GUI's limbal vs central thickness view, and
-    a summary metrics table.
+    """Cross-combination comparison PDF (OMEX-internal): per-replicate endpoints
+    summarised across replicates (mean ± SD, 95% CI, Kruskal–Wallis across
+    combinations) as a table and a dot plot; one line per combo (mean ± SD band)
+    for each cell type and surfactant; the GUI's limbal vs central thickness view;
+    and the GUI's paper thickness figure for each combination.
 
     combos: {combo: SUCCESSFUL per-run archives}. unsuccessful: {combo:
     [archive_outcome()]} for every other attempt, listed and excluded."""
@@ -779,13 +891,21 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     colors_by = {ck: cmap(i % 10) for i, ck in enumerate(order)}
 
     def line_plot(metric, col, ylabel, title, fname):
-        present = [(ck, data[ck]['frames'][metric]) for ck in order
-                   if metric in data[ck]['frames'] and col in data[ck]['frames'][metric].columns]
+        present = [(ck, [r[col] for r in data[ck]['frames'].get(metric + '_reps', [])
+                         if col in r]) for ck in order]
+        present = [(ck, reps) for ck, reps in present if reps]
         if not present:
             return None
         fig, ax = plt.subplots(figsize=(6.7, 2.7), dpi=150)
-        for ck, fr in present:
-            ax.plot(fr.index, fr[col], lw=1.7, color=colors_by[ck], label=data[ck]['label'])
+        for ck, reps in present:
+            per_t = pd.concat(reps, axis=1)
+            mean = per_t.mean(axis=1)
+            ax.plot(mean.index, mean.values, lw=1.7, color=colors_by[ck],
+                    label=f"{data[ck]['label']} (n={len(reps)})")
+            if len(reps) > 1:
+                sd = per_t.std(axis=1)
+                ax.fill_between(mean.index, mean - sd, mean + sd, color=colors_by[ck],
+                                alpha=0.15, lw=0)
         if has_injury and inj_hours:
             ax.axvline(inj_hours, color='red', ls='--', lw=1, alpha=0.7, label='injury')
         ax.set_xlabel('Time (hours)', fontsize=8); ax.set_ylabel(ylabel, fontsize=8)
@@ -800,52 +920,114 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         p = line_plot('cell_count', ct, 'Cell count', f"{ct} cells across combinations",
                       f"cc_{ct}.png")
         if p:
-            plots.append((p, f"{ct}: replicate-mean count per combination vs Time"))
+            plots.append((p, f"{ct}: replicate mean per combination vs Time, shaded "
+                          "&plusmn;1 SD across replicates"))
     p = line_plot('surfactant', 'Total Amount', 'Total amount',
                   "Surfactant across combinations", "surf.png")
     if p:
-        plots.append((p, "Surfactant Total Amount: replicate-mean per combination vs Time"))
+        plots.append((p, "Surfactant Total Amount: replicate mean per combination vs Time, "
+                      "shaded &plusmn;1 SD across replicates"))
     plots = [(png, 2.7, cap) for png, cap in plots]
     ds, ap = _thickness_dataset(combos, tmpdir)
+    thick_paper = []
     if ds is not None:
         p = _render(lambda fig: ap.enhanced_thickness(fig, ds, unit='days'),
                     tmpdir / 'thick.png', (6.7, 4.6))
         plots.append((p, 4.6, (
             "Epithelial thickness in &micro;m over time in the limbus (bin 0) and the "
             "central/peripheral cornea (bins 4&ndash;9), one line per combination "
-            "(replicate mean), drawn by the V-Cornea GUI's own analysis (Analyze "
-            "Results &rarr; Thickness, comparison view). Thickness = (top position "
-            "&minus; membrane baseline) &times; 2 &micro;m/voxel. Time in days.")))
+            "(replicate mean, shaded &plusmn;1 SD across replicates), drawn by the "
+            "V-Cornea GUI's own analysis (Analyze Results &rarr; Thickness, comparison "
+            "view). Thickness = (top position &minus; membrane baseline) &times; 2 "
+            "&micro;m/voxel. Time in days.")))
+        stable_day = ap._default_stable_day(ds)
+        for i, ck in enumerate(order):
+            if ck not in ds.thickness_data:
+                continue
+            p = _render(lambda fig, ck=ck: ap.paper_thickness(fig, ds, combo=ck, unit='days'),
+                        tmpdir / f'thick_paper_{i}.png', (6.7, 6.4))
+            thick_paper.append((ck, p, len(ds.thickness_data[ck])))
 
-    def central_thickness(ck):
-        """(minimum after injury, final) central thickness in µm, replicate mean."""
+    # ---- endpoints, computed per replicate (the statistics are across replicates)
+    inj = inj_hours if (has_injury and inj_hours) else None
+
+    def _split(s):
+        """(pre-injury, post-injury) parts of a time series (whole series if no injury)."""
+        if inj is None:
+            return s.iloc[:1], s
+        return s[s.index < inj], s[s.index >= inj]
+
+    def central_series(ck):
+        """Each replicate's central thickness (mean over bins 4–9) per time, µm."""
         if ds is None or ck not in ds.thickness_um:
-            return None, None
-        d = pd.concat(ds.thickness_um[ck], ignore_index=True)
-        d = d[d['Bin'].isin(ap.CENTRAL_BINS)]
-        if d.empty:
-            return None, None
-        s = d.groupby('Time')['Thickness'].mean()
-        post = s[s.index >= inj_hours] if (has_injury and inj_hours) else s
-        return (post.min() if len(post) else s.min()), s.iloc[-1]
+            return []
+        out = []
+        for d in ds.thickness_um[ck]:
+            d = d[d['Bin'].isin(ap.CENTRAL_BINS)]
+            if not d.empty:
+                out.append(d.groupby('Time')['Thickness'].mean())
+        return out
 
-    # summary metrics table (computed from the replicate-mean series)
-    def metrics(ck):
+    def recovery_days(s, frac=0.9):
+        """Days from injury until thickness is back to frac × its pre-injury mean,
+        counted from the post-injury minimum; 0 if it never fell below; NaN if it
+        never recovered within the run."""
+        pre, post = _split(s)
+        if inj is None or pre.empty or post.empty:
+            return np.nan
+        base = pre.mean()
+        if post.min() >= frac * base:
+            return 0.0
+        after = post[post.index >= post.idxmin()]
+        hit = after[after >= frac * base]
+        return (hit.index[0] - inj) / 24.0 if len(hit) else np.nan
+
+    ENDPOINTS = [   # (key, row label, decimals)
+        ('wing0', "Wing cells, pre-injury mean", 1),
+        ('wing_min', "Wing cells, minimum after injury", 1),
+        ('wing_rec', "Wing cells, final / pre-injury (%)", 1),
+        ('th0', "Central thickness, pre-injury mean (&micro;m)", 1),
+        ('th_min', "Central thickness, minimum after injury (&micro;m)", 1),
+        ('th_end', "Central thickness, final (&micro;m)", 1),
+        ('th_rec', "Central thickness, days to recover 90% of pre-injury", 1),
+        ('surf_half', "Surfactant clearance half-life (h)", 1),
+    ]
+
+    def endpoints(ck):
+        """{endpoint key: [value per replicate]} for one combination."""
         f = data[ck]['frames']
-        cc = f.get('cell_count'); su = f.get('surfactant')
-        wing0 = wing_min = wing_end = None
-        if cc is not None and 'Wing' in cc:
-            w = cc['Wing']
-            if has_injury and inj_hours:
-                pre = w[w.index < inj_hours]; post = w[w.index >= inj_hours]
-                wing0 = pre.mean() if len(pre) else w.iloc[0]
-                wing_min = post.min() if len(post) else w.min()
-            else:
-                wing0 = w.iloc[0]; wing_min = w.min()
-            wing_end = w.iloc[-1]
-        peak_surf = su['Total Amount'].max() if (su is not None and 'Total Amount' in su) else None
-        rec = (wing_end / wing0 * 100) if (wing0 and wing_end is not None and wing0) else None
-        return (wing0, wing_min, wing_end, rec, peak_surf) + central_thickness(ck)
+        e = {k: [] for k, _, _ in ENDPOINTS}
+
+        def at_end(series_list):
+            """Each series' value at the combination's last time point; NaN (counted
+            as missing) for a series that does not reach it, never an earlier value."""
+            if not series_list:
+                return []
+            t_end = max(s.index.max() for s in series_list)
+            return [float(s.loc[t_end]) if t_end in s.index else np.nan for s in series_list]
+
+        wings = [r['Wing'] for r in f.get('cell_count_reps', []) if 'Wing' in r]
+        for w, w_end in zip(wings, at_end(wings)):
+            pre, post = _split(w)
+            w0 = pre.mean() if len(pre) else np.nan
+            e['wing0'].append(w0)
+            e['wing_min'].append(post.min() if len(post) else np.nan)
+            e['wing_rec'].append(w_end / w0 * 100 if w0 else np.nan)
+        central = central_series(ck)
+        for s, s_end in zip(central, at_end(central)):
+            pre, post = _split(s)
+            e['th0'].append(pre.mean() if len(pre) else np.nan)
+            e['th_min'].append(post.min() if len(post) else np.nan)
+            e['th_end'].append(s_end)
+            e['th_rec'].append(recovery_days(s))
+        for r in f.get('surfactant_reps', []):
+            if 'Total Amount' in r:   # Time is in hours; the peak is the applied dose
+                a = r['Total Amount']
+                below = a[(a.index > a.idxmax()) & (a <= a.max() / 2.0)] if a.max() > 0 else a[:0]
+                e['surf_half'].append(below.index[0] - a.idxmax() if len(below) else np.nan)
+        return e
+
+    ends = {ck: endpoints(ck) for ck in order}
 
     ss = getSampleStyleSheet()
     H = ParagraphStyle('H', parent=ss['Heading1'], fontSize=15, spaceAfter=2,
@@ -870,9 +1052,6 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         t = Table([[Paragraph(c, cellH if (header and i == 0) else cell) for c in r]
                    for i, r in enumerate(rows)], colWidths=widths)
         t.setStyle(TableStyle(st)); return t
-
-    def fmt(x):
-        return f"{x:.1f}" if isinstance(x, (int, float)) else "—"
 
     S = []
     S.append(Paragraph(f"OMEX Experiment Report — {root.name}", H))
@@ -985,29 +1164,81 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
             " Combinations with no successful replicate (absent from the comparisons): "
             + ", ".join(no_success) + "." if no_success else ""), SUB))
 
-    S.append(Paragraph("Summary Metrics (from replicate-mean series)", H2))
-    mrows = [["Combination", "Wing baseline", "Wing min", "Wing final", "Recovery %",
-              "Peak surfactant", "Central thickness min (&micro;m)",
-              "Central thickness final (&micro;m)"]]
-    for ck in order:
-        mrows.append([data[ck]['label']] + [fmt(x) for x in metrics(ck)])
-    S.append(prows(mrows, [1.55 * inch] + [0.74 * inch] * 7))
+    S.append(Paragraph("Summary Statistics (per-replicate endpoints)", H2))
     S.append(Paragraph(
-        "Wing baseline = pre-injury mean; Wing min = minimum after injury (damage depth); "
-        "Recovery % = final / baseline. Central thickness = mean over bins 4&ndash;9, "
-        "minimum after injury and at the end of the run. Metrics are on the "
-        "across-replicate mean.", SUB))
+        "Each endpoint is computed for every replicate separately, then summarised "
+        "across the replicates of a combination as mean &plusmn; SD with the 95% "
+        "confidence interval of the mean (t distribution) below it. The last column "
+        "is a Kruskal&ndash;Wallis test of whether the endpoint differs across the "
+        "combinations.", N))
+    lw, pw = 2.05, 0.75
+    cw = (6.75 - lw - pw) / max(len(order), 1)
+    ticks, xname = _short_labels([data[ck]['label'] for ck in order])
+    corner = "Endpoint" + (" &nbsp;/&nbsp; " + xname if xname else "")
+    mrows = [[corner]
+             + [f"{t}<br/>(n={data[ck]['reps']})" for t, ck in zip(ticks, order)]
+             + ["Kruskal&ndash;<br/>Wallis p"]]
+    for key, name, nd in ENDPOINTS:
+        groups = [ends[ck][key] for ck in order]
+        if not any(_finite(g) for g in groups):
+            continue
+        mrows.append([name] + [_fmt_stat(g, nd) for g in groups] + [_fmt_p(_kruskal_p(groups))])
+    S.append(prows(mrows, [lw * inch] + [cw * inch] * len(order) + [pw * inch]))
+    S.append(Paragraph(
+        "Pre-injury = before the injury time; minimum after injury = damage depth. "
+        "Central thickness = mean over bins 4&ndash;9 (&micro;m, the GUI's analysis; a "
+        "bin with no epithelium left counts as 0). "
+        "Surfactant half-life: hours from the applied peak until the total amount is "
+        "down to half of it. "
+        "Days to recover: from injury until central thickness, after its minimum, is "
+        "back to 90% of its pre-injury mean (0 = never fell below 90%; replicates that "
+        "did not recover within the run are left out and the remaining n is shown). "
+        "With few replicates per combination the tests have little power and are not "
+        "corrected for the number of endpoints; read them as descriptive.", SUB))
+
+    stat_panels = [(name.replace("&micro;m", "µm"), {data[ck]['label']: ends[ck][key] for ck in order})
+                   for key, name, _ in ENDPOINTS
+                   if key in ('wing_min', 'wing_rec', 'th_min', 'th_rec')
+                   and any(_finite(ends[ck][key]) for ck in order)]
+    if stat_panels:
+        labels_o = [data[ck]['label'] for ck in order]
+        png = endpoint_plot(stat_panels, labels_o,
+                            {data[ck]['label']: colors_by[ck] for ck in order},
+                            tmpdir / 'endpoints.png')
+        S.append(Image(str(png), width=6.7 * inch,
+                       height=2.25 * -(-len(stat_panels) // 2) * inch))
+        S.append(Paragraph(
+            "Key endpoints by combination: each dot is one replicate; the black point and "
+            "bar are the mean and its 95% confidence interval.", SUB))
 
     if plots:
         S.append(PageBreak())
         S.append(Paragraph("Metric Comparisons (one line per combination)", H2))
         S.append(Paragraph(
-            "Each line is a combination's across-replicate mean, read from the per-run "
-            "OMEX archives. Time in hours (thickness: days); the dashed red line marks "
-            "injury.", N))
+            "Each line is a combination's across-replicate mean and the shaded band "
+            "&plusmn;1 SD across its replicates, read from the per-run OMEX archives. "
+            "The legend gives the number of replicates n. Time in hours (thickness: "
+            "days); the dashed red line marks injury.", N))
         for png, height, cap in plots:
             S.append(Image(str(png), width=6.7 * inch, height=height * inch))
             S.append(Paragraph(cap, SUB)); S.append(Spacer(1, 4))
+
+    if thick_paper:
+        S.append(PageBreak())
+        S.append(Paragraph("Tissue Thickness by Combination (paper view)", H2))
+        S.append(Paragraph(
+            "For each combination, the V-Cornea GUI's paper thickness figure (Analyze "
+            "Results &rarr; Thickness, paper view; Vanin et al. 2025, Fig 8). Top: tissue "
+            "top position in each of the 10 X-bins over time; faint lines are the "
+            "replicates, solid lines their mean. Bottom: from the stability time (day "
+            f"{stable_day:g}) on, top position (blue) and thickness (red) across X, as "
+            "box plots over replicates and time; thickness = (top position &minus; "
+            "membrane baseline) &times; 2 &micro;m/voxel.", N))
+        for i, (ck, png, n) in enumerate(thick_paper):
+            if i:
+                S.append(PageBreak())
+            S.append(Paragraph(f"{data[ck]['label']} (n={n})", H2))
+            S.append(Image(str(png), width=6.7 * inch, height=6.4 * inch))
 
     try:
         SimpleDocTemplate(str(out_pdf), pagesize=letter, topMargin=0.55 * inch,

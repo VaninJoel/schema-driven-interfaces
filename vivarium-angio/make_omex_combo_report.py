@@ -61,6 +61,7 @@ _register_conda_dll_dirs()
 
 import numpy as np
 import pandas as pd
+from scipy import stats as _spstats
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
@@ -366,19 +367,27 @@ def _run_identity_block(rep_dirs, H2, SUB, prows):
 
 
 # ----------------------------------------------------------------- plots
+def _per_time(frames, metric):
+    """Replicates of one metric side by side on the Time index (one column each)."""
+    cols = [df.groupby('Time')[metric].mean() for df in frames if metric in df]
+    return pd.concat(cols, axis=1) if cols else None
+
+
 def _metric_replicate_plot(metric, frames, tmpdir, fname):
-    """One combo: per-replicate thin + across-replicate mean bold, for one metric."""
+    """One combo: per-replicate thin + across-replicate mean bold ± SD band, for one metric."""
     fig, ax = plt.subplots(figsize=(6.7, 2.3), dpi=150)
-    merged = None
     for df in frames:
-        if metric not in df:
-            continue
-        ax.plot(df['Time'], df[metric], color=NAVY, alpha=0.3, lw=0.8)
-        s = df.set_index('Time')[metric]
-        merged = s if merged is None else pd.concat([merged, s], axis=1)
-    if merged is not None:
-        m = merged.mean(axis=1) if isinstance(merged, pd.DataFrame) else merged
-        ax.plot(m.index, m.values, color=NAVY, lw=1.8, label=f"mean of {len(frames)} replicate(s)")
+        if metric in df:
+            ax.plot(df['Time'], df[metric], color=NAVY, alpha=0.3, lw=0.8)
+    per_t = _per_time(frames, metric)
+    if per_t is not None:
+        m = per_t.mean(axis=1)
+        ax.plot(m.index, m.values, color=NAVY, lw=1.8,
+                label=f"mean of {per_t.shape[1]} replicate(s)")
+        if per_t.shape[1] > 1:
+            sd = per_t.std(axis=1)
+            ax.fill_between(m.index, m - sd, m + sd, color=NAVY, alpha=0.15, lw=0,
+                            label="±1 SD")
         ax.legend(fontsize=7, frameon=False)
     ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(metric, fontsize=8)
     ax.tick_params(labelsize=7); ax.grid(True, alpha=0.3, lw=0.4)
@@ -387,17 +396,117 @@ def _metric_replicate_plot(metric, frames, tmpdir, fname):
     return p
 
 
-def _metric_compare_plot(metric, combo_means, tmpdir, fname):
-    """Experiment: one line per combination (replicate-mean) for one metric."""
+def _metric_compare_plot(metric, combo_frames, tmpdir, fname):
+    """Experiment: one line per combination (replicate mean) with a ±1 SD band
+    across its replicates, for one metric. combo_frames: [(label, [frames])]."""
     fig, ax = plt.subplots(figsize=(6.7, 2.5), dpi=150)
     cmap = plt.get_cmap('tab10')
-    for i, (label, df) in enumerate(combo_means):
-        if metric in df:
-            ax.plot(df['Time'], df[metric], lw=1.7, color=cmap(i % 10), label=label)
+    for i, (label, frames) in enumerate(combo_frames):
+        per_t = _per_time(frames, metric)
+        if per_t is None:
+            continue
+        m = per_t.mean(axis=1)
+        ax.plot(m.index, m.values, lw=1.7, color=cmap(i % 10),
+                label=f"{label} (n={per_t.shape[1]})")
+        if per_t.shape[1] > 1:
+            sd = per_t.std(axis=1)
+            ax.fill_between(m.index, m - sd, m + sd, color=cmap(i % 10), alpha=0.15, lw=0)
     ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(metric, fontsize=8)
     ax.tick_params(labelsize=7); ax.grid(True, alpha=0.3, lw=0.4)
     ax.legend(fontsize=7, frameon=False)
-    ax.set_title(f"{metric} across combinations", fontsize=8.5, color=NAVY)
+    ax.set_title(f"{metric} across combinations (mean ± SD)", fontsize=8.5, color=NAVY)
+    fig.tight_layout(); p = tmpdir / fname; fig.savefig(p, bbox_inches='tight'); plt.close(fig)
+    return p
+
+
+# ----------------------------------------------------------------- statistics
+def _finite(values):
+    return [float(x) for x in values if x is not None and np.isfinite(x)]
+
+
+def _summary(values):
+    """(n, mean, SD, 95% CI half-width) of the finite values; NaN where undefined."""
+    v = np.asarray(_finite(values))
+    n = len(v)
+    if n == 0:
+        return 0, np.nan, np.nan, np.nan
+    sd = v.std(ddof=1) if n > 1 else np.nan
+    half = _spstats.t.ppf(0.975, n - 1) * sd / np.sqrt(n) if n > 1 else np.nan
+    return n, v.mean(), sd, half
+
+
+def _kruskal_p(groups):
+    """Kruskal–Wallis p across groups of replicate values; None if not testable."""
+    g = [v for v in (_finite(grp) for grp in groups) if len(v) >= 2]
+    if len(g) < 2:
+        return None
+    try:
+        p = float(_spstats.kruskal(*g).pvalue)
+    except ValueError:      # older scipy, every value identical
+        return None
+    return p if np.isfinite(p) else None    # NaN: every value identical
+
+
+def _fmt_stat(values):
+    """'mean ± SD [CI low, CI high]', plain numbers at the mean's 3 significant figures."""
+    n, m, sd, half = _summary(values)
+    if n == 0:
+        return "&mdash;"
+    d = max(0, 2 - int(np.floor(np.log10(abs(m))))) if m else 2
+    s = f"{m:,.{d}f}"
+    if n > 1:
+        s += f" &plusmn; {sd:,.{d}f}<br/>[{m - half:,.{d}f}, {m + half:,.{d}f}]"
+    return s + (f"<br/>(n={n} of {len(values)})" if n < len(values) else "")
+
+
+def _fmt_p(p):
+    return "&mdash;" if p is None else ("&lt;0.001" if p < 0.001 else f"{p:.3f}")
+
+
+def _p_phrase(p):
+    """Plain-text p for a plot title: 'p = 0.012' or 'p < 0.001'."""
+    s = _fmt_p(p).replace("&lt;", "< ")
+    return "p " + s if s.startswith("<") else "p = " + s
+
+
+def _short_labels(labels):
+    """Tick labels and axis name: 'lchem=100' -> ('100', 'lchem')."""
+    parts = [str(l).split('=', 1) for l in labels]
+    if all(len(p) == 2 for p in parts) and len({p[0] for p in parts}) == 1:
+        return [p[1] for p in parts], parts[0][0]
+    return [str(l) for l in labels], ''
+
+
+def _endpoint_plot(panels, labels, tmpdir, fname, ncols=2):
+    """panels: [(title, {label: [value per replicate]})]. One panel per endpoint:
+    each replicate a dot, the mean with its 95% CI as a black bar, and the
+    Kruskal–Wallis p across the combinations in the panel title."""
+    rows = -(-len(panels) // ncols)
+    fig, axes = plt.subplots(rows, ncols, figsize=(6.7, 2.25 * rows), dpi=150, squeeze=False)
+    cmap = plt.get_cmap('tab10')
+    ticks, xname = _short_labels(labels)
+    rng = np.random.default_rng(0)
+    for ax, (title, groups) in zip(axes.flat, panels):
+        for i, lab in enumerate(labels):
+            v = _finite(groups.get(lab, []))
+            ax.scatter(i + rng.uniform(-0.1, 0.1, len(v)), v, s=16, alpha=0.75, lw=0,
+                       color=cmap(i % 10), zorder=2)
+            n, m, _, half = _summary(v)
+            if n:
+                ax.errorbar(i + 0.27, m, yerr=None if np.isnan(half) else half, fmt='o',
+                            color='black', ms=3.5, capsize=3, lw=1, zorder=3)
+        p = _kruskal_p([groups.get(lab, []) for lab in labels])
+        ax.set_title(title + (f"\nKruskal–Wallis {_p_phrase(p)}"
+                              if p is not None else ""), fontsize=7.5, color=NAVY)
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(ticks, fontsize=7)
+        ax.set_xlim(-0.5, len(labels) - 0.4)
+        if xname:
+            ax.set_xlabel(xname, fontsize=7)
+        ax.tick_params(labelsize=7)
+        ax.grid(True, axis='y', alpha=0.3, lw=0.4)
+    for ax in list(axes.flat)[len(panels):]:
+        ax.axis('off')
     fig.tight_layout(); p = tmpdir / fname; fig.savefig(p, bbox_inches='tight'); plt.close(fig)
     return p
 
@@ -572,7 +681,8 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf, ex
     # metric plots + spatial snapshots
     S.append(PageBreak())
     S.append(Paragraph("Metrics (replicate-aware, from the Zarr trajectory)", H2))
-    S.append(Paragraph("Thin = each replicate; bold = across-replicate mean. Time in MCS.", N))
+    S.append(Paragraph("Thin = each replicate; bold = across-replicate mean; shaded = "
+                       "&plusmn;1 SD across replicates. Time in MCS.", N))
     for i, metric in enumerate(METRICS):
         p = _metric_replicate_plot(metric, frames, tmpdir, f"m_{i}.png")
         S.append(Image(str(p), width=6.7 * inch, height=2.3 * inch)); S.append(Spacer(1, 3))
@@ -603,12 +713,11 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
     H, SUB, H2, N, prows = _styles()
     excluded = {c: v for c, v in (excluded or {}).items() if v}
     order = sorted(combos)
-    combo_means = []
+    combo_frames = []       # [(label, [one metrics frame per replicate])]
     for c in order:
         frames = replicate_metric_frames(combos[c])
         if frames:
-            mean = pd.concat([f.set_index('Time') for f in frames]).groupby(level=0).mean(numeric_only=True).reset_index()
-            combo_means.append((labels[c], mean))
+            combo_frames.append((labels[c], frames))
 
     S = [Paragraph(f"Angio OMEX Experiment Report — {root.name}", H),
          Paragraph(f"{len(order)} combinations &nbsp;|&nbsp; "
@@ -674,18 +783,53 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
             " Combinations with no successful replicate (absent from the comparisons): "
             + ", ".join(missing) + "." if missing else ""), SUB))
 
-    # summary metrics table (final value per combo per metric)
-    S.append(Paragraph("Summary Metrics (replicate-mean, final step)", H2))
-    mrows = [["Combination"] + METRICS]
-    for label, df in combo_means:
-        last = df.iloc[-1]
-        mrows.append([label] + [f"{last[m]:.3g}" if m in df else "—" for m in METRICS])
-    S.append(prows(mrows, [1.9 * inch] + [1.21 * inch] * len(METRICS)))
+    # summary statistics: each metric's final-step value per replicate, summarised
+    # across the replicates of each combination. "Final" is the combination's last
+    # step; a replicate without that step counts as missing (the cell shows n),
+    # never as its own earlier value.
+    def _finals(frames, m):
+        t_end = max(df['Time'].max() for df in frames)
+        return [(lambda v: float(v.iloc[0]) if len(v) else np.nan)(df.loc[df['Time'] == t_end, m])
+                for df in frames if m in df]
+    finals = {label: {m: _finals(frames, m) for m in METRICS} for label, frames in combo_frames}
+    clabels = [label for label, _ in combo_frames]
+    S.append(PageBreak())
+    S.append(Paragraph("Summary Statistics (final step, per replicate)", H2))
+    S.append(Paragraph(
+        "Each metric is read at the final step of every replicate, then summarised "
+        "across the replicates of a combination as mean &plusmn; SD with the 95% "
+        "confidence interval of the mean (t distribution) below it. The last column is "
+        "a Kruskal&ndash;Wallis test of whether the metric differs across the "
+        "combinations.", N))
+    ticks, xname = _short_labels(clabels)
+    lw, pw = 1.6, 0.8
+    cw = (6.75 - lw - pw) / max(len(clabels), 1)
+    corner = "Metric" + (" &nbsp;/&nbsp; " + xname if xname else "")
+    mrows = [[corner] + [f"{t}<br/>(n={len(frames)})" for t, (_, frames) in zip(ticks, combo_frames)]
+             + ["Kruskal&ndash;<br/>Wallis p"]]
+    for m in METRICS:
+        groups = [finals[label][m] for label in clabels]
+        mrows.append([m] + [_fmt_stat(g) for g in groups] + [_fmt_p(_kruskal_p(groups))])
+    S.append(prows(mrows, [lw * inch] + [cw * inch] * len(clabels) + [pw * inch]))
+    S.append(Paragraph(
+        "With few replicates per combination the tests have little power and are not "
+        "corrected for the number of metrics; read them as descriptive.", SUB))
+    if clabels:
+        p = _endpoint_plot([(m, {label: finals[label][m] for label in clabels}) for m in METRICS],
+                           clabels, tmpdir, "endpoints.png")
+        S.append(Image(str(p), width=6.7 * inch, height=2.25 * -(-len(METRICS) // 2) * inch))
+        S.append(Paragraph(
+            "Final-step value of each metric by combination: each dot is one replicate; "
+            "the black point and bar are the mean and its 95% confidence interval.", SUB))
 
     S.append(PageBreak())
     S.append(Paragraph("Metric Comparisons (one line per combination)", H2))
+    S.append(Paragraph(
+        "Each line is a combination's across-replicate mean and the shaded band "
+        "&plusmn;1 SD across its replicates; the legend gives the number of replicates "
+        "n. Time in MCS.", N))
     for i, metric in enumerate(METRICS):
-        p = _metric_compare_plot(metric, combo_means, tmpdir, f"c_{i}.png")
+        p = _metric_compare_plot(metric, combo_frames, tmpdir, f"c_{i}.png")
         S.append(Image(str(p), width=6.7 * inch, height=2.5 * inch)); S.append(Spacer(1, 3))
 
     # final-step spatial fields side by side (one per combo, replicate 1)
