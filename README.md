@@ -30,14 +30,15 @@ environment record, logs, outputs and status — including failed and cancelled 
 
 ### 📄 See what a run produces
 
-These are two real parameter sweeps, one per case study, made with the v1.0.3
-installer. Each sweep has an experiment report that compares the parameter values,
-one audit report per value, and the full COMBINE/OMEX archive of every run.
+These are two real parameter sweeps, one per case study, run with the v1.0.3
+installer. Each sweep has an experiment report that compares the parameter values
+with per-replicate statistics, one audit report per value, and the full
+COMBINE/OMEX archive of every run.
 
 | Case study | Sweep | Reports |
 |---|---|---|
-| **Angio-GUI** | Chemotaxis strength `lchem` = 100, 500, 1000 × 3 replicates | [📄 Experiment report (PDF)](examples/angio-gui_lchem_sweep/angio_lchem_sweep_20261020_182022_experiment_report.pdf) · [lchem=1000 audit report](examples/angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
-| **V-Cornea GUI** | Surfactant dose `SLS_Concentration` = 250, 750, 2000 × 2 replicates, 30 days | [📄 Experiment report (PDF)](examples/vcornea_sls_sweep/vcornea_sls_sweep_20261020_182006_experiment_report.pdf) · [SLS=2000 audit report](examples/vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
+| **Angio-GUI** | Chemotaxis strength `lchem` = 100, 500, 1000 × 10 replicates | [📄 Experiment report (PDF)](examples/angio-gui_lchem_sweep/angio_lchem_sweep_20261021_114558_experiment_report.pdf) · [lchem=1000 audit report](examples/angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
+| **V-Cornea GUI** | Surfactant dose `SLS_Concentration` = 1500, 2000, 2500 × 5 replicates, 30 days | [📄 Experiment report (PDF)](examples/vcornea_sls_sweep/vcornea_sls_sweep_20261021_115344_experiment_report.pdf) · [SLS=2500 audit report](examples/vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
 
 The [examples/](examples/) folder links every report and archive and explains what each contains.
 
