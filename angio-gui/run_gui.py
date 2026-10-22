@@ -14,6 +14,14 @@ import sys
 from pathlib import Path
 
 
+# numpy's OpenBLAS reserves ~120 MB of committed memory per logical CPU at import
+# (about 2.4 GB on a 20-thread machine) for a thread pool these models barely use.
+# Every simulation, CC3D and report process launched from here inherits this, so
+# a sweep of N parallel runs no longer charges N x 2.4 GB against the system commit
+# limit; single-threaded BLAS is also deterministic. An explicit user setting wins.
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+
+
 def _register_conda_dll_dirs():
     """Make the packaged conda env usable when launched without `conda activate`.
 

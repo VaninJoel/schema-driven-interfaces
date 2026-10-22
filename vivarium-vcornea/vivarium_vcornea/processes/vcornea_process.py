@@ -40,6 +40,16 @@ def to_cc3d_value(param_info, value):
     return int(round(converted)) if isinstance(param_info.get('_default'), int) else converted
 
 
+def cc3d_child_env():
+    """Environment for the CC3D subprocess: this process's, with single-threaded
+    OpenBLAS unless the user set it. numpy's OpenBLAS otherwise reserves ~120 MB
+    of committed memory per logical CPU at import (2.4 GB on 20 threads) in every
+    parallel replicate, for a thread pool the model barely uses."""
+    env = dict(os.environ)
+    env.setdefault('OPENBLAS_NUM_THREADS', '1')
+    return env
+
+
 class VCorneaProcess(Process):
     """
     Enhanced Vivarium wrapper for the vCornea CompuCell3D model.
@@ -5236,7 +5246,8 @@ class VCorneaProcess(Process):
                 cwd=os.fspath(project_path),
                 stdout=stdout_log,
                 stderr=stderr_log,
-                text=True
+                text=True,
+                env=cc3d_child_env(),
             )
             
             # Return the process handle and the log file objects
