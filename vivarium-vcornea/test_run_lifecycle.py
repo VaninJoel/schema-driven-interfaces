@@ -155,3 +155,25 @@ def test_timeout_kills_tree_and_is_archived_as_timed_out(tmp_path, monkeypatch):
         status = json.loads(zf.read('status.json'))
     assert status['status'] == 'timed_out' and status['timeout_seconds'] == 3
     assert _log_rows(tmp_path)[0]['timed_out'] == 'True'
+
+
+@pytest.mark.parametrize('user_value, expected', [(None, '1'), ('4', '4')])
+def test_cc3d_child_gets_single_threaded_blas_unless_user_set(tmp_path, monkeypatch,
+                                                             user_value, expected):
+    """The CC3D subprocess runs with OPENBLAS_NUM_THREADS=1 (numpy's OpenBLAS would
+    otherwise commit ~120 MB per logical CPU in every parallel replicate); a value
+    the user exported is kept."""
+    from vivarium_vcornea.processes import vcornea_process as vp
+    if user_value is None:
+        monkeypatch.delenv('OPENBLAS_NUM_THREADS', raising=False)
+    else:
+        monkeypatch.setenv('OPENBLAS_NUM_THREADS', user_value)
+    seen = {}
+    monkeypatch.setattr(vp.subprocess, 'Popen',
+                        lambda cmd, **kw: seen.update(kw) or object())
+    out = tmp_path / 'out'
+    out.mkdir()
+    _, so, se = VCorneaProcess({'output_base_dir': str(tmp_path)})._run_cc3d_simulation(tmp_path, out)
+    so.close(); se.close()
+    assert seen['env']['OPENBLAS_NUM_THREADS'] == expected
+    assert seen['env'].get('PATH') == os.environ.get('PATH')   # rest of the env inherited
