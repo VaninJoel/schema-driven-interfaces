@@ -117,3 +117,35 @@ def convert_range(range_tuple, dimension, display_unit=None):
         return None
     lo, hi = range_tuple
     return (to_display(lo, dimension, display_unit), to_display(hi, dimension, display_unit))
+
+
+# --- display text <-> stored value, for an editable field --------------------------
+def format_display(value, dimension, display_unit=None, integer=False):
+    """The text an editable field shows for a stored (sim-unit) value: the display
+    value at six significant figures (whole numbers for integer parameters)."""
+    shown = to_display(float(value), dimension, display_unit)
+    return str(int(round(shown))) if integer else f"{shown:g}"
+
+
+def parse_display(text, dimension, display_unit=None, integer=False, anchors=()):
+    """The stored (sim-unit) value for a number typed in display units.
+
+    A field shows six significant figures, so the text of a stored value does not
+    in general convert back to that value: 20 voxel^2/MCS is shown as 13.3333
+    um^2/min, and 13.3333 converts back to 19.99995. `anchors` are stored values
+    the field is known to have shown (the schema default, the value currently
+    stored): if the typed text IS the display text of one of them, that stored
+    value is returned exactly. Leaving a field untouched, or re-entering what it
+    shows, therefore never changes the stored value. Any other text is converted
+    as typed. Raises ValueError for text that is not a number.
+    """
+    typed = str(text).strip()
+    number = float(typed)                                   # ValueError if not a number
+    for anchor in anchors:
+        # Compared as numbers, so "13.33330" or a value already parsed to a float
+        # still matches the field text "13.3333".
+        if _is_number(anchor) and number == float(format_display(anchor, dimension,
+                                                                 display_unit, integer)):
+            return anchor
+    stored = to_model_units(number, dimension, display_unit)
+    return int(round(stored)) if integer else stored

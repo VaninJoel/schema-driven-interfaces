@@ -73,6 +73,7 @@ from reportlab.platypus import (HRFlowable, Image, PageBreak, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
 # Reuse the liked single-archive tool's helpers so the look is identical.
+from make_omex_summary_pdf import VALIDATION_NOTE  # noqa: E402
 from make_omex_summary_pdf import (parse_archive, run_validation, columns_for,
                                     ROLES, SEDNS, read_provenance as _read_provenance)
 
@@ -286,6 +287,22 @@ def _summary(values):
     return n, v.mean(), sd, half
 
 
+def _seed_scope_sentence():
+    """What the recorded seed controls, from utils/seed_scope.py (the one source)."""
+    try:
+        from vivarium_vcornea.utils.seed_scope import SEED_SCOPE_SENTENCE
+        return SEED_SCOPE_SENTENCE
+    except Exception:
+        return ("The recorded seed sets the simulator's random number generator; exact "
+                "replay of a trajectory from it is not claimed.")
+
+
+def _kruskal_dropped(groups):
+    """How many of the groups a Kruskal-Wallis test over `groups` leaves out
+    because they have fewer than two finite values."""
+    return sum(1 for grp in groups if len(_finite(grp)) < 2)
+
+
 def _kruskal_p(groups):
     """Kruskal–Wallis p across groups of replicate values; None if not testable."""
     g = [v for v in (_finite(grp) for grp in groups) if len(v) >= 2]
@@ -397,6 +414,16 @@ def _gui_analysis():
         return None
 
 
+def _baseline_sentence(ds):
+    """Which membrane baseline the thickness values were computed against. Stated
+    in every thickness caption; a fallback baseline is flagged, never silent."""
+    src = getattr(ds, 'membrane_source', None) or 'not recorded'
+    if getattr(ds, 'membrane_is_fallback', False):
+        return "<b>Membrane baseline: " + src.replace('<', '&lt;') + "</b>"
+    return ("Membrane baseline: " + src.replace('<', '&lt;') + ", a reference file shipped "
+            "with the analysis code (it is not part of the run archive).")
+
+
 def _thickness_dataset(combos, tmpdir):
     """An analysis_data.AnalysisDataset over the thickness data INSIDE the archives.
 
@@ -450,9 +477,10 @@ def make_thickness_plots(reps, tmpdir, combo='combination'):
         "&rarr; Thickness, paper view; Vanin et al. 2025, Fig 8). Top: tissue top "
         "position (vertical centre of mass of the top cells) in each of the 10 X-bins "
         f"over time, as the model records it; faint lines are the {n} replicate(s), "
-        "solid lines their mean. Bottom: from the stability time (day "
-        f"{stable_day:g}) on, top position (blue) and thickness (red) across X; "
-        "thickness = (top position &minus; membrane baseline) &times; 2 &micro;m/voxel.")))
+        f"solid lines their mean. Bottom: over the {ap.window_label(ds, stable_day)}, "
+        "top position (blue) and thickness (red) across X; "
+        "thickness = (top position &minus; membrane baseline) &times; 2 &micro;m/voxel. "
+        + _baseline_sentence(ds))))
     p = _render(lambda fig: ap.enhanced_thickness(fig, ds, unit='days'),
                 Path(tmpdir) / 'thick_regions.png', (6.7, 4.6))
     out.append((p, 4.6, (
@@ -471,7 +499,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     live schema. One table of the parameters an auditor must look at: changed
     from default, or sitting outside a documented range. Everything else is
     summarised in a line, so a report stays short when the run stayed inside
-    its documented evidence.
+    its documented ranges.
     """
     _pa = _parameter_audit
     if _pa is None:
@@ -481,7 +509,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         return []
     audit = audits[0]                       # replicates share a parameterization
     s = audit.get('summary') or {}
-    out = [Paragraph("Parameter Credibility (run values against the schema's documented evidence)", H2),
+    out = [Paragraph("Parameter Audit (run values against the ranges the schema documents)", H2),
            Paragraph(_pa.audit_summary_line(audit) + ".", SUB)]
     header, rows = _pa.audit_table_rows(audit, include='attention')
     if rows:
@@ -494,15 +522,19 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         out.append(Paragraph("Every parameter ran at its documented default and inside "
                              "every documented range.", SUB))
     out.append(Paragraph(
-        "<i>Credibility</i> places each executed value against the three range tiers the "
-        "schema documents: the implementation-admissible range (outside = inadmissible), the "
-        "evidence-supported range (outside = extrapolation beyond the documented evidence) and "
-        "the recommended range for this model's context of use. The evidence column names the "
-        "basis and citation the schema records for the supported range; "
-        "<i>not recorded</i> means the bound exists but its justification has not been "
-        "documented, which is itself an audit finding. Numeric parameters without any documented range "
-        "are listed as unassessable; switches and categories are not range-assessed. Full detail for every parameter is in "
-        "parameter_audit.json inside the archive.", SUB))
+        "Each executed value is placed against the range tiers the schema declares for "
+        "its parameter: the implementation limit, the documented working range and the "
+        "recommended range. A range is only as strong as what it rests on, so every "
+        "verdict names the basis of the range it was judged against: published "
+        "literature, model calibration, the modeler's judgement, a numerical or "
+        "implementation limit, or exploratory presets. <i>Outside the documented working "
+        "range</i> therefore means outside a range of that stated kind; it is evidence "
+        "of physiological implausibility only where the basis is published literature. "
+        "<i>Basis not recorded</i> means a bound exists but its justification has not "
+        "been documented, which is itself an audit finding. Numeric parameters without "
+        "any documented range are listed as such; switches and categories are not "
+        "range-assessed. Full detail for every parameter is in parameter_audit.json "
+        "inside the archive.", SUB))
     if len(audits) > 1:
         diff = [k for k, e in audit['parameters'].items()
                 if e.get('parameter_type') != 'control'
@@ -680,7 +712,8 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
         rv.append([f"replicate_{rid}" if rid is not None else "?",
                    f"id {rid} of {n_replicates}",
                    "PASS" if s_ok else "FAIL", "PASS" if m_ok else "FAIL", bio])
-    S.append(prows(rv, [1.1 * inch, 1.4 * inch, 1.25 * inch, 1.0 * inch, 2.0 * inch]))
+    S.append(prows(rv, [0.9 * inch, 1.05 * inch, 0.85 * inch, 0.7 * inch, 3.25 * inch]))
+    S.append(Paragraph(VALIDATION_NOTE, SUB))
 
     # Provenance (OMEX Metadata) — who ran it, license, citation
     prov = _read_provenance(omex0)
@@ -738,7 +771,8 @@ def build_combo_report(combo_key, omex_paths, out_pdf, unsuccessful=()):
             "and recorded afterwards; seeds marked <i>explicit</i> were set by the operator "
             "(a pinned seed applies to the first replicate only). The schema "
             "fingerprint identifies the parameter definitions in force when the run was "
-            "configured, and the code entry the source revision that executed it.", SUB))
+            "configured, and the code entry the source revision that executed it. "
+            + _seed_scope_sentence(), SUB))
 
     S.extend(_parameter_credibility_block(list(omex_paths), H2, SUB, prows))
 
@@ -875,16 +909,19 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='omex_exp_'))
 
-    data = {}            # combo_key -> dict(frames,label,reps)
-    inj_hours = sim_days = None
-    has_injury = False
+    data = {}            # combo_key -> dict(frames,label,reps,inj,sim_days)
     for ck, paths in combos.items():
         frames, label, reps, sd, idays, hinj = _combo_metric_frames(paths)
-        data[ck] = {'frames': frames, 'label': label or ck, 'reps': reps or len(paths)}
-        sim_days = sim_days or sd
-        if hinj and idays is not None:
-            inj_hours = idays * 24.0
-            has_injury = True
+        # Injury switch, injury time and run length belong to the combination:
+        # each can itself be the swept parameter.
+        data[ck] = {'frames': frames, 'label': label or ck, 'reps': reps or len(paths),
+                    'inj': (idays * 24.0 if (hinj and idays is not None) else None),
+                    'sim_days': sd}
+    inj_set = {d['inj'] for d in data.values()}
+    has_injury = any(i is not None for i in inj_set)
+    inj_hours = next(iter(inj_set)) if len(inj_set) == 1 else None   # shared time, if any
+    sim_set = {d['sim_days'] for d in data.values()}
+    sim_days = next(iter(sim_set)) if len(sim_set) == 1 else None
 
     cmap = plt.get_cmap('tab10')
     order = list(data.keys())
@@ -906,8 +943,12 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
                 sd = per_t.std(axis=1)
                 ax.fill_between(mean.index, mean - sd, mean + sd, color=colors_by[ck],
                                 alpha=0.15, lw=0)
-        if has_injury and inj_hours:
+        if inj_hours:
             ax.axvline(inj_hours, color='red', ls='--', lw=1, alpha=0.7, label='injury')
+        else:       # injury time differs between combinations: one line each, in its colour
+            for ck, _reps in present:
+                if data[ck]['inj'] is not None:
+                    ax.axvline(data[ck]['inj'], color=colors_by[ck], ls='--', lw=1, alpha=0.7)
         ax.set_xlabel('Time (hours)', fontsize=8); ax.set_ylabel(ylabel, fontsize=8)
         ax.tick_params(labelsize=7); ax.grid(True, alpha=0.3, lw=0.4)
         ax.legend(fontsize=7, frameon=False)
@@ -939,7 +980,7 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
             "(replicate mean, shaded &plusmn;1 SD across replicates), drawn by the "
             "V-Cornea GUI's own analysis (Analyze Results &rarr; Thickness, comparison "
             "view). Thickness = (top position &minus; membrane baseline) &times; 2 "
-            "&micro;m/voxel. Time in days.")))
+            "&micro;m/voxel. Time in days. " + _baseline_sentence(ds))))
         stable_day = ap._default_stable_day(ds)
         for i, ck in enumerate(order):
             if ck not in ds.thickness_data:
@@ -949,12 +990,12 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
             thick_paper.append((ck, p, len(ds.thickness_data[ck])))
 
     # ---- endpoints, computed per replicate (the statistics are across replicates)
-    inj = inj_hours if (has_injury and inj_hours) else None
-
-    def _split(s):
-        """(pre-injury, post-injury) parts of a time series (whole series if no injury)."""
+    def _split(s, inj):
+        """(pre-injury, post-injury) parts of a time series, for a combination
+        injured at `inj` hours. Both empty when the combination has no injury: there
+        is then no pre-injury baseline and no post-injury minimum to report."""
         if inj is None:
-            return s.iloc[:1], s
+            return s.iloc[:0], s.iloc[:0]
         return s[s.index < inj], s[s.index >= inj]
 
     def central_series(ck):
@@ -968,11 +1009,11 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
                 out.append(d.groupby('Time')['Thickness'].mean())
         return out
 
-    def recovery_days(s, frac=0.9):
+    def recovery_days(s, inj, frac=0.9):
         """Days from injury until thickness is back to frac × its pre-injury mean,
         counted from the post-injury minimum; 0 if it never fell below; NaN if it
         never recovered within the run."""
-        pre, post = _split(s)
+        pre, post = _split(s, inj)
         if inj is None or pre.empty or post.empty:
             return np.nan
         base = pre.mean()
@@ -986,6 +1027,7 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         ('wing0', "Wing cells, pre-injury mean", 1),
         ('wing_min', "Wing cells, minimum after injury", 1),
         ('wing_rec', "Wing cells, final / pre-injury (%)", 1),
+        ('wing_end', "Wing cells, final", 1),
         ('th0', "Central thickness, pre-injury mean (&micro;m)", 1),
         ('th_min', "Central thickness, minimum after injury (&micro;m)", 1),
         ('th_end', "Central thickness, final (&micro;m)", 1),
@@ -996,6 +1038,7 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     def endpoints(ck):
         """{endpoint key: [value per replicate]} for one combination."""
         f = data[ck]['frames']
+        inj = data[ck]['inj']
         e = {k: [] for k, _, _ in ENDPOINTS}
 
         def at_end(series_list):
@@ -1008,18 +1051,19 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
 
         wings = [r['Wing'] for r in f.get('cell_count_reps', []) if 'Wing' in r]
         for w, w_end in zip(wings, at_end(wings)):
-            pre, post = _split(w)
+            pre, post = _split(w, inj)
             w0 = pre.mean() if len(pre) else np.nan
             e['wing0'].append(w0)
             e['wing_min'].append(post.min() if len(post) else np.nan)
-            e['wing_rec'].append(w_end / w0 * 100 if w0 else np.nan)
+            e['wing_rec'].append(w_end / w0 * 100 if (w0 and np.isfinite(w0)) else np.nan)
+            e['wing_end'].append(w_end)
         central = central_series(ck)
         for s, s_end in zip(central, at_end(central)):
-            pre, post = _split(s)
+            pre, post = _split(s, inj)
             e['th0'].append(pre.mean() if len(pre) else np.nan)
             e['th_min'].append(post.min() if len(post) else np.nan)
             e['th_end'].append(s_end)
-            e['th_rec'].append(recovery_days(s))
+            e['th_rec'].append(recovery_days(s, inj))
         for r in f.get('surfactant_reps', []):
             if 'Total Amount' in r:   # Time is in hours; the peak is the applied dose
                 a = r['Total Amount']
@@ -1058,8 +1102,14 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
     S.append(Paragraph(
         f"{len(order)} combinations &nbsp;|&nbsp; "
         f"{', '.join(str(data[ck]['reps']) for ck in order)} replicate(s) each &nbsp;|&nbsp; "
-        f"SimTime {sim_days} days &nbsp;|&nbsp; "
-        + ("injury at day %s" % (inj_hours / 24.0) if has_injury and inj_hours else "no injury"), SUB))
+        + (f"SimTime {sim_days} days" if sim_days is not None else
+           "SimTime " + ", ".join(f"{data[ck]['sim_days']}" for ck in order) + " days")
+        + " &nbsp;|&nbsp; "
+        + ("injury at day %g" % (inj_hours / 24.0) if inj_hours else
+           "no injury" if not has_injury else
+           "injury: " + ", ".join(
+               ("day %g" % (data[ck]['inj'] / 24.0)) if data[ck]['inj'] is not None else "none"
+               for ck in order) + " (per combination)"), SUB))
     S.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#1a3c5e')))
 
     # --- OMEX-internal sections: this PDF is a report OF the experiment scan.omex,
@@ -1143,7 +1193,8 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
               ["Built-in SED-ML structure", "PASS" if s_ok else "FAIL"],
               ["Built-in OMEX manifest", "PASS" if m_ok else "FAIL"],
               ["biosimulators-utils (COMBINE)", bio]]
-        S.append(prows(vr, [3.3 * inch, 3.45 * inch]))
+        S.append(prows(vr, [2.3 * inch, 4.45 * inch]))
+        S.append(Paragraph(VALIDATION_NOTE, SUB))
         S.append(PageBreak())
 
     S.append(Paragraph("Combinations", H2))
@@ -1182,10 +1233,17 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
         groups = [ends[ck][key] for ck in order]
         if not any(_finite(g) for g in groups):
             continue
-        mrows.append([name] + [_fmt_stat(g, nd) for g in groups] + [_fmt_p(_kruskal_p(groups))])
+        dropped = _kruskal_dropped(groups)
+        p_txt = _fmt_p(_kruskal_p(groups))
+        if dropped and len(groups) - dropped >= 2:
+            p_txt += f"<br/>({len(groups) - dropped} of {len(groups)} combinations)"
+        mrows.append([name] + [_fmt_stat(g, nd) for g in groups] + [p_txt])
     S.append(prows(mrows, [lw * inch] + [cw * inch] * len(order) + [pw * inch]))
     S.append(Paragraph(
-        "Pre-injury = before the injury time; minimum after injury = damage depth. "
+        "Pre-injury = before that combination's injury time; minimum after injury = "
+        "damage depth; a combination without an injury has no value for either. "
+        "A test uses only combinations with at least two replicate values for the "
+        "endpoint; where it left some out, the p-value cell says how many it used. "
         "Central thickness = mean over bins 4&ndash;9 (&micro;m, the GUI's analysis; a "
         "bin with no epithelium left counts as 0). "
         "Surfactant half-life: hours from the applied peak until the total amount is "
@@ -1198,7 +1256,9 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
 
     stat_panels = [(name.replace("&micro;m", "µm"), {data[ck]['label']: ends[ck][key] for ck in order})
                    for key, name, _ in ENDPOINTS
-                   if key in ('wing_min', 'wing_rec', 'th_min', 'th_rec')
+                   # injury endpoints where there was an injury; final values otherwise
+                   if key in (('wing_min', 'wing_rec', 'th_min', 'th_rec') if has_injury
+                              else ('wing_end', 'th_end'))
                    and any(_finite(ends[ck][key]) for ck in order)]
     if stat_panels:
         labels_o = [data[ck]['label'] for ck in order]
@@ -1230,10 +1290,11 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
             "For each combination, the V-Cornea GUI's paper thickness figure (Analyze "
             "Results &rarr; Thickness, paper view; Vanin et al. 2025, Fig 8). Top: tissue "
             "top position in each of the 10 X-bins over time; faint lines are the "
-            "replicates, solid lines their mean. Bottom: from the stability time (day "
-            f"{stable_day:g}) on, top position (blue) and thickness (red) across X, as "
-            "box plots over replicates and time; thickness = (top position &minus; "
-            "membrane baseline) &times; 2 &micro;m/voxel.", N))
+            f"replicates, solid lines their mean. Bottom: over the "
+            f"{ap.window_label(ds, stable_day)}, top position (blue) and thickness (red) "
+            "across X, as box plots over replicates and time; thickness = (top position "
+            "&minus; membrane baseline) &times; 2 &micro;m/voxel. "
+            + _baseline_sentence(ds), N))
         for i, (ck, png, n) in enumerate(thick_paper):
             if i:
                 S.append(PageBreak())

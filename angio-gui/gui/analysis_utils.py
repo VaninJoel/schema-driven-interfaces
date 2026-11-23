@@ -23,7 +23,8 @@ except ImportError:
 
 # Handle scipy import for network analysis
 try:
-    from scipy.ndimage import label
+    from scipy.ndimage import label  # noqa: F401  (availability probe)
+    from vivarium_angio.utils import network_metrics as _nm
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
@@ -133,91 +134,55 @@ class ExperimentData:
 
 def compute_network_metrics(cell_types: np.ndarray, cell_ids: np.ndarray = None) -> Dict:
     """
-    Compute network connectivity metrics from cell type field.
+    Network measures of one snapshot of the cell-type field (1 = EC, 0 = Medium).
 
-    Args:
-        cell_types: 3D array where 1=EC, 0=Medium
-        cell_ids: Optional 3D array of cell IDs for advanced metrics
-
-    Returns:
-        dict with metrics: num_clusters, largest_cluster_size, total_ec_pixels,
-                          cell_density, fragmentation_index, branching_points, etc.
+    Every measure is defined in vivarium_angio.utils.network_metrics
+    (METRIC_DEFINITIONS, METRIC_UNITS) and computed on the model's lattice:
+    4-neighbour connectivity, periodic in x and y — the same code the archive
+    exporter uses. The result always carries every key of NETWORK_METRIC_KEYS, in
+    that order; a measure that cannot be computed is None (scipy missing, no cell
+    ids given) or NaN (undefined for this field).
     """
-    metrics = {}
+    metrics = {key: None for key in _nm.NETWORK_METRIC_KEYS} if SCIPY_AVAILABLE else {}
+    binary = cell_types == 1
+    ec_pixels = int(np.sum(binary))
+    metrics['total_ec_pixels'] = ec_pixels
+    metrics['cell_density'] = float(ec_pixels / cell_types.size) if cell_types.size else 0.0
 
-    # Basic cell counting
-    ec_pixels = np.sum(cell_types == 1)
-    total_pixels = cell_types.size
-    metrics['total_ec_pixels'] = int(ec_pixels)
-    metrics['cell_density'] = float(ec_pixels / total_pixels)
-
-    # Cluster analysis (requires scipy)
     if SCIPY_AVAILABLE:
-        # Create binary image for cluster detection
-        binary = np.where(cell_types == 1, 1, 0)
-
-        # Label connected components
-        labeled_array, num_clusters = label(binary)
-        metrics['num_clusters'] = int(num_clusters)
-
-        # Find largest cluster
-        if num_clusters > 0:
-            cluster_sizes = []
-            for i in range(1, num_clusters + 1):
-                size = np.sum(labeled_array == i)
-                cluster_sizes.append(size)
-
-            metrics['largest_cluster_size'] = int(max(cluster_sizes))
-            metrics['mean_cluster_size'] = float(np.mean(cluster_sizes))
-            metrics['fragmentation_index'] = float(num_clusters / max(ec_pixels, 1))
-
-            # Connectivity index (largest cluster / total EC pixels)
-            metrics['connectivity_index'] = float(max(cluster_sizes) / max(ec_pixels, 1))
-        else:
-            metrics['largest_cluster_size'] = 0
-            metrics['mean_cluster_size'] = 0.0
-            metrics['fragmentation_index'] = 0.0
-            metrics['connectivity_index'] = 0.0
-
-        # Advanced topology metrics
-        if ec_pixels > 0:
-            # Network perimeter (boundary pixels)
-            from scipy.ndimage import binary_erosion
-            eroded = binary_erosion(binary)
-            perimeter_pixels = np.sum(binary & ~eroded)
-            metrics['network_perimeter'] = int(perimeter_pixels)
-            metrics['compactness'] = float(4 * np.pi * ec_pixels / max(perimeter_pixels**2, 1))
-
+        cluster_sizes = _nm.cluster_sizes(binary)
+        metrics['num_clusters'] = len(cluster_sizes)
+        metrics['largest_cluster_size'] = int(max(cluster_sizes)) if cluster_sizes else 0
+        metrics['mean_cluster_size'] = float(np.mean(cluster_sizes)) if cluster_sizes else 0.0
+        metrics['fragmentation_index'] = (len(cluster_sizes) / ec_pixels) if ec_pixels else 0.0
+        metrics['connectivity_index'] = (max(cluster_sizes) / ec_pixels) if ec_pixels else 0.0
+        metrics['network_perimeter'] = _nm.network_perimeter(binary)
+        metrics['compactness'] = float(_nm.compactness(binary))
     else:
-        metrics['num_clusters'] = None
-        metrics['largest_cluster_size'] = None
-        metrics['fragmentation_index'] = None
-        metrics['connectivity_index'] = None
-        metrics['network_perimeter'] = None
-        metrics['compactness'] = None
+        for key in ('num_clusters', 'largest_cluster_size', 'mean_cluster_size',
+                    'fragmentation_index', 'connectivity_index', 'network_perimeter',
+                    'compactness', 'num_cells', 'mean_cell_size', 'std_cell_size'):
+            metrics.setdefault(key, None)
 
-    # Cell-based metrics (if cell IDs provided)
     if cell_ids is not None:
-        unique_cells = np.unique(cell_ids[cell_ids > 0])  # Exclude medium (id=0)
-        metrics['num_cells'] = int(len(unique_cells))
-
-        if len(unique_cells) > 0:
-            # Average cell size
-            cell_sizes = []
-            for cell_id in unique_cells:
-                size = np.sum(cell_ids == cell_id)
-                cell_sizes.append(size)
-            metrics['mean_cell_size'] = float(np.mean(cell_sizes))
-            metrics['std_cell_size'] = float(np.std(cell_sizes))
-        else:
-            metrics['mean_cell_size'] = 0.0
-            metrics['std_cell_size'] = 0.0
-    else:
-        metrics['num_cells'] = None
-        metrics['mean_cell_size'] = None
-        metrics['std_cell_size'] = None
+        ids, sizes = np.unique(cell_ids[cell_ids > 0], return_counts=True)   # 0 = medium
+        metrics['num_cells'] = int(len(ids))
+        metrics['mean_cell_size'] = float(np.mean(sizes)) if len(ids) else 0.0
+        metrics['std_cell_size'] = float(np.std(sizes)) if len(ids) else 0.0
 
     return metrics
+
+
+def metric_label(key: str) -> str:
+    """'Largest Cluster Size (lattice sites)' — a metric name with its unit."""
+    name = key.replace('_', ' ').title()
+    unit = _nm.METRIC_UNITS.get(key) if SCIPY_AVAILABLE else None
+    return f"{name} ({unit})" if unit else name
+
+
+def metric_definition(key: str) -> str:
+    """The one-sentence definition of a metric, or '' if none is recorded."""
+    return (_nm.METRIC_DEFINITIONS.get(key, '') if SCIPY_AVAILABLE else '')
 
 
 def compute_vegf_statistics(vegf_field: np.ndarray) -> Dict:
@@ -305,10 +270,10 @@ def export_metrics_to_csv(time_series: Dict, output_path: Path):
         for i, timestep in enumerate(time_series['timesteps']):
             row = [timestep]
 
-            # Add network metrics
+            # Add network metrics, in the header's column order
             if i < len(time_series['network_metrics']):
                 metrics = time_series['network_metrics'][i]
-                row.extend([metrics.get(k, '') for k in metrics.keys()])
+                row.extend([metrics.get(k, '') for k in time_series['network_metrics'][0].keys()])
 
             # Add VEGF stats
             if i < len(time_series['vegf_stats']):
@@ -362,6 +327,53 @@ def run_status(exp_dir: Path):
     if status:
         return status
     return 'success' if (meta.get('execution') or {}).get('success') else 'failed'
+
+
+def completed_run_problem(exp_dir: Path) -> Optional[str]:
+    """Why a directory may NOT be analysed as a result, or None if it may.
+
+    Every way of bringing a run into the analysis window goes through this, not
+    only the experiment list: a failed, timed-out or cancelled run keeps a partial
+    trajectory that looks like any other once loaded."""
+    exp_dir = Path(exp_dir)
+    if not (exp_dir / 'data.zarr').exists():
+        return "no data.zarr"
+    status = run_status(exp_dir)
+    if status is None:
+        return "no run record (run_metadata.json), so it cannot be shown to have completed"
+    if status != 'success':
+        return f"run recorded as {status}; its trajectory is partial"
+    return None
+
+
+# Recorded on every run but not part of the model's parameterization.
+_NON_MODEL_PARAM_KEYS = frozenset((
+    'exp_name', 'store_path', 'creator', 'random_seed', 'random_seed_origin',
+    '_schema_fingerprint', 'parameter_scan', 'scan_point', 'combination_index',
+    'total_combinations', 'replicate_id', 'total_replicates', 'parent_experiment_id',
+))
+
+
+def replicate_set_problem(exp_data_list) -> Optional[str]:
+    """Why a set of runs may NOT be summarised as replicates of one condition, or
+    None if it may. Replicates share every model parameter and are compared at the
+    same final step."""
+    finals = {e.exp_name: (e.timesteps[-1] if e.timesteps else None) for e in exp_data_list}
+    if len(set(finals.values())) > 1:
+        return ("the runs end at different steps ("
+                + ", ".join(f"{n}: {t}" for n, t in finals.items())
+                + "), so their final values are not comparable")
+
+    def model_params(e):
+        return {k: v for k, v in (e.parameters or {}).items() if k not in _NON_MODEL_PARAM_KEYS}
+    first = model_params(exp_data_list[0])
+    differing = sorted({k for e in exp_data_list[1:]
+                        for k in set(first) | set(model_params(e))
+                        if first.get(k) != model_params(e).get(k)})
+    if differing:
+        return ("the runs differ in " + ", ".join(differing)
+                + ", so they are not replicates of one condition")
+    return None
 
 
 def detect_cell_boundaries(cell_ids: np.ndarray) -> np.ndarray:

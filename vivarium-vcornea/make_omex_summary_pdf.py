@@ -97,6 +97,64 @@ def _utils(name):
         return importlib.import_module(name)
 
 
+# What the external validator does and does not establish, printed beside its result.
+VALIDATION_NOTE = (
+    "The biosimulators-utils validator checks the COMBINE manifest and the structure "
+    "of the SED-ML. It cannot validate CompuCell3D model files (there is no validator "
+    "for the urn:sedml:language:compucell3d model language), so a PASS says the "
+    "archive is well-formed and exchangeable, not that the model or its results were "
+    "checked; that takes re-execution. Its warnings are quoted in full above.")
+
+
+def _flatten_validator_messages(nested):
+    """The leaf message texts of biosimulators-utils' nested error/warning lists,
+    in order, without duplicates."""
+    out = []
+
+    def walk(node):
+        if isinstance(node, str):
+            text = " ".join(node.split())
+            if text and text not in out:
+                out.append(text)
+        elif isinstance(node, (list, tuple)):
+            for child in node:
+                walk(child)
+    walk(nested)
+    return out
+
+
+def _leaf_warnings(nested):
+    """The messages that say something. biosimulators-utils nests its findings as
+    [[message, [children...]], ...]: the outer messages only locate a finding ("X
+    has warnings", "Model Y", "The model file Z"), the innermost one states it. A
+    very short innermost entry is an item of a list its parent introduces ("The
+    following tasks do not contribute to outputs" -> a task id), so it is quoted
+    with that parent."""
+    leaves = []
+
+    def add(text, parent):
+        text = " ".join(str(text).split())
+        if parent and len(text) < 40:
+            text = f"{' '.join(str(parent).split()).rstrip(':.')}: {text}"
+        if text and text not in leaves:
+            leaves.append(text)
+
+    def walk(node, parent=None):
+        if isinstance(node, str):
+            add(node, parent)
+        elif isinstance(node, (list, tuple)):
+            if (len(node) == 2 and isinstance(node[0], str)
+                    and isinstance(node[1], (list, tuple)) and node[1]):
+                walk(node[1], node[0])
+            elif node and all(isinstance(c, str) for c in node):
+                add(node[0], parent)
+            else:
+                for child in node:
+                    walk(child, parent)
+    walk(nested)
+    return leaves or _flatten_validator_messages(nested)
+
+
 def run_validation(omex: Path, sedml: str, manifest: str, names):
     validate_sedml_structure = _utils('omex_generator').validate_sedml_structure
     validate_omex_manifest = _utils('omex_generator').validate_omex_manifest
@@ -110,8 +168,14 @@ def run_validation(omex: Path, sedml: str, manifest: str, names):
             warnings.simplefilter("ignore")
             arch = CombineArchiveReader().run(str(omex), ed)
             errs, warns = v(arch, archive_dirname=ed)
-        bio = (f"PASS ({len(errs)} errors, {len(warns)} warning group)"
-               if not errs else f"FAIL ({len(errs)} errors)")
+        if errs:
+            bio = (f"FAIL ({len(_leaf_warnings(errs))} error(s)): "
+                   + "; ".join(_leaf_warnings(errs))[:600])
+        else:
+            w = _leaf_warnings(warns)
+            bio = ("PASS (0 errors, no warnings)" if not w else
+                   f"PASS (0 errors, {len(w)} warning{'s' if len(w) != 1 else ''}): "
+                   + "; ".join(t if len(t) <= 220 else t[:217] + "..." for t in w))
     except Exception as e:  # noqa: BLE001
         bio = f"SKIP ({e})"
     return s_ok, m_ok, bio
@@ -286,7 +350,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     live schema. One table of the parameters an auditor must look at: changed
     from default, or sitting outside a documented range. Everything else is
     summarised in a line, so a report stays short when the run stayed inside
-    its documented evidence.
+    its documented ranges.
     """
     try:
         _pa = _utils('parameter_audit')
@@ -297,7 +361,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         return []
     audit = audits[0]                       # replicates share a parameterization
     s = audit.get('summary') or {}
-    out = [Paragraph("Parameter Credibility (run values against the schema's documented evidence)", H2),
+    out = [Paragraph("Parameter Audit (run values against the ranges the schema documents)", H2),
            Paragraph(_pa.audit_summary_line(audit) + ".", SUB)]
     header, rows = _pa.audit_table_rows(audit, include='attention')
     if rows:
@@ -310,15 +374,19 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         out.append(Paragraph("Every parameter ran at its documented default and inside "
                              "every documented range.", SUB))
     out.append(Paragraph(
-        "<i>Credibility</i> places each executed value against the three range tiers the "
-        "schema documents: the implementation-admissible range (outside = inadmissible), the "
-        "evidence-supported range (outside = extrapolation beyond the documented evidence) and "
-        "the recommended range for this model's context of use. The evidence column names the "
-        "basis and citation the schema records for the supported range; "
-        "<i>not recorded</i> means the bound exists but its justification has not been "
-        "documented, which is itself an audit finding. Numeric parameters without any documented range "
-        "are listed as unassessable; switches and categories are not range-assessed. Full detail for every parameter is in "
-        "parameter_audit.json inside the archive.", SUB))
+        "Each executed value is placed against the range tiers the schema declares for "
+        "its parameter: the implementation limit, the documented working range and the "
+        "recommended range. A range is only as strong as what it rests on, so every "
+        "verdict names the basis of the range it was judged against: published "
+        "literature, model calibration, the modeler's judgement, a numerical or "
+        "implementation limit, or exploratory presets. <i>Outside the documented working "
+        "range</i> therefore means outside a range of that stated kind; it is evidence "
+        "of physiological implausibility only where the basis is published literature. "
+        "<i>Basis not recorded</i> means a bound exists but its justification has not "
+        "been documented, which is itself an audit finding. Numeric parameters without "
+        "any documented range are listed as such; switches and categories are not "
+        "range-assessed. Full detail for every parameter is in parameter_audit.json "
+        "inside the archive.", SUB))
     if len(audits) > 1:
         diff = [k for k, e in audit['parameters'].items()
                 if e.get('parameter_type') != 'control'
@@ -456,9 +524,10 @@ def build(omex: Path):
           ["Key parameters", "  ".join(f"{k}={v}" for k, v in kp.items())],
           ["Replicate", f"{meta.get('replicate_id')} of "
                         f"{meta.get('total_replicates')}"],
-          ["Outcome", f"success={meta.get('simulation_success')} &middot; "
-                      f"healing_time={meta.get('healing_time')} &middot; "
-                      f"completed {str(meta.get('simulation_completed_at',''))[:19]}"]]
+          ["Outcome", f"status={meta.get('simulation_status')} &middot; "
+                      f"completion evidence: "
+                      f"{(meta.get('output_check') or {}).get('completion_evidence') or 'not recorded'}"
+                      f" &middot; completed {str(meta.get('simulation_completed_at',''))[:19]}"]]
     S.append(prows([[f"<b>{a}</b>", str(b)] for a, b in ov],
                    [1.35 * inch, 5.4 * inch], header=False))
 
@@ -643,7 +712,8 @@ def build(omex: Path):
           ["biosimulators-utils (COMBINE spec)",
            "Independent third-party check vs. the COMBINE standard",
            bio]]
-    S.append(prows(vr, [1.9 * inch, 3.1 * inch, 1.75 * inch]))
+    S.append(prows(vr, [1.9 * inch, 2.2 * inch, 2.65 * inch]))
+    S.append(Paragraph(VALIDATION_NOTE, SUB))
     S.append(Spacer(1, 4))
     S.append(Paragraph(
         "<b>Why this is easy to audit:</b> the three layers move from "

@@ -121,7 +121,8 @@ CSV_OUTPUT_SCHEMAS = {
             {'id': 'Wing', 'name': 'Wing Cells', 'type': 'integer', 'unit': 'cells'},
             {'id': 'Basal', 'name': 'Basal Cells', 'type': 'integer', 'unit': 'cells'},
             {'id': 'Stem', 'name': 'Stem Cells', 'type': 'integer', 'unit': 'cells'},
-            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'MCS'},
+            # The model records mcs / HOURtoMCS (HOURtoMCS = 10): hours.
+            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'hours'},
         ]
     },
     'cell_states': {
@@ -176,14 +177,15 @@ CSV_OUTPUT_SCHEMAS = {
         'description': 'Surfactant concentration/effects over time',
         'columns': [
             {'id': 'Total Amount', 'name': 'Total Surfactant Amount', 'type': 'float', 'unit': 'a.u.'},
-            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'MCS'},
+            # The model records mcs / HOURtoMCS (HOURtoMCS = 10): hours.
+            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'hours'},
         ]
     },
     'thickness': {
         'description': 'Epithelial thickness profile (Height per spatial Bin) over time',
         # Long-format parquet: each (Time, Bin) row carries one Height sample.
         'columns': [
-            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'MCS'},
+            {'id': 'Time', 'name': 'Simulation Time', 'type': 'float', 'unit': 'hours'},
             {'id': 'Bin', 'name': 'Spatial Bin (along cornea)', 'type': 'integer', 'unit': 'dimensionless'},
             {'id': 'Height', 'name': 'Epithelial Thickness (Height)', 'type': 'float', 'unit': 'voxel'},
         ]
@@ -239,6 +241,20 @@ def _match_output_schema(filename: str) -> Optional[Dict[str, Any]]:
 # =============================================================================
 # SED-ML DOCUMENT GENERATION
 # =============================================================================
+
+def _seed_scope_sentence() -> str:
+    """One sentence on what the recorded seed controls (utils/seed_scope.py). Loaded
+    defensively: this module is also imported by bare file path."""
+    try:
+        try:
+            from .seed_scope import SEED_SCOPE_SENTENCE
+        except ImportError:
+            from seed_scope import SEED_SCOPE_SENTENCE
+        return SEED_SCOPE_SENTENCE
+    except Exception:
+        return ("The recorded seed sets the simulator's random number generator; exact "
+                "replay of the trajectory from it is not claimed.")
+
 
 def generate_sedml_document(
     run_metadata: Dict[str, Any],
@@ -403,6 +419,12 @@ def generate_sedml_document(
         seed_param = ET.SubElement(algo_params, 'algorithmParameter')
         seed_param.set('kisaoID', KISAO_RANDOM_SEED_ID)
         seed_param.set('value', str(seed))
+        # What that seed means, stated where the seed is stated (notes must be
+        # the first child of a SED-ML element).
+        seed_notes = ET.Element('notes')
+        seed_body = ET.SubElement(seed_notes, '{%s}body' % XHTML_NAMESPACE)
+        ET.SubElement(seed_body, '{%s}p' % XHTML_NAMESPACE).text = _seed_scope_sentence()
+        sim.insert(0, seed_notes)
 
     # List of Tasks
     list_of_tasks = ET.SubElement(root, 'listOfTasks')
@@ -429,7 +451,8 @@ def generate_sedml_document(
             f"This experiment was run {num_replicates} times with identical parameters. "
             "Each replicate was assigned its own independently drawn random number "
             "generator seed, recorded in that replicate's run metadata and archive, so "
-            "the replicates are independent stochastic realizations."
+            "the replicates are independent stochastic realizations. "
+            + _seed_scope_sentence()
             if seed is not None and str(seed) != '-1' else
             f"This experiment was run {num_replicates} times with identical parameters. "
             "Seeds were not recorded for this run, so the replicates should be compared "
@@ -894,7 +917,10 @@ def generate_environment_manifest(provenance=None):
 # model. Each carries its own reader-facing explanation.
 _ARCHIVE_STATUSES = {
     'success': ('Run completed successfully; simulation.sedml is the executable '
-                'master describing the reproducible experiment.'),
+                'master describing the experiment, and model/ holds the runnable '
+                'project with this replicate\'s parameters and seed. Re-executing it '
+                'runs the same configuration; see random_seed_scope for what the seed '
+                'does and does not reproduce.'),
     'failed': ('This run did NOT complete successfully. The archive preserves '
                'parameters, provenance, logs and any partial outputs for audit, '
                'but intentionally contains no executable SED-ML and asserts no '
@@ -1178,6 +1204,9 @@ def create_omex_archive(
             'duration_seconds': run_metadata.get('duration_seconds'),
             'error_message': run_metadata.get('error_message'),
             'cancelled_at': run_metadata.get('cancelled_at'),
+            'random_seed': run_metadata.get('random_seed'),
+            'random_seed_applied': run_metadata.get('random_seed_applied'),
+            'random_seed_scope': _seed_scope_sentence(),
             'note': _ARCHIVE_STATUSES[status],
         }
         zf.writestr('status.json', json.dumps(status_doc, indent=2, default=str))
@@ -1292,7 +1321,7 @@ def generate_scan_sedml_document(
     model = ET.SubElement(list_of_models, 'model')
     model.set('id', 'model_cc3d')
     model.set('name', 'vCornea CellFate CC3D Model')
-    model.set('source', 'vcornea.cc3d')
+    model.set('source', SCAN_MODEL_REFERENCE)
     model.set('language', MODEL_LANGUAGE_URI)
 
     # Simulation (single time course reused for every scan point)
@@ -1460,7 +1489,7 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name,
     list_of_models = ET.SubElement(root, 'listOfModels')
     model = ET.SubElement(list_of_models, 'model')
     model.set('id', 'model_cc3d'); model.set('name', 'vCornea CellFate CC3D Model')
-    model.set('source', 'vcornea.cc3d'); model.set('language', MODEL_LANGUAGE_URI)
+    model.set('source', SCAN_MODEL_REFERENCE); model.set('language', MODEL_LANGUAGE_URI)
 
     list_of_sims = ET.SubElement(root, 'listOfSimulations')
     sim = ET.SubElement(list_of_sims, 'uniformTimeCourse')
@@ -1543,6 +1572,32 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name,
 
     xml_str = ET.tostring(root, encoding='unicode', method='xml')
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
+
+
+# The experiment-level archive compares scan points and does not embed the
+# CompuCell3D project (each point's own archive does). Its SED-ML model/@source
+# used to name a 'vcornea.cc3d' that was not in the archive; it now resolves to
+# this bundled entry, which says where the runnable project is.
+SCAN_MODEL_REFERENCE = 'model/model_reference.json'
+
+
+def _scan_model_reference(scan_metadata: Dict[str, Any]) -> str:
+    points = []
+    for c in (scan_metadata.get('combinations') or scan_metadata.get('scan_points') or []):
+        if isinstance(c, dict):
+            points.append({k: c.get(k) for k in ('label', 'index', 'output_dir', 'archive',
+                                                 'archives', 'included') if k in c})
+    return json.dumps({
+        'model': 'V-Cornea CompuCell3D project (vCornea_v2.cc3d)',
+        'embedded_here': False,
+        'where': ('This experiment-level archive describes the scan and carries the '
+                  'compared series; it does not embed the model. Every scan point has '
+                  'its own per-run archive (one per replicate), which bundles the '
+                  'runnable project under model/ (primary file model/vCornea_v2.cc3d) '
+                  'with that replicate\'s Parameters.py and seeded CC3DML. Their '
+                  'locations are catalogued in scan_metadata.json.'),
+        'scan_points': points,
+    }, indent=2, default=str)
 
 
 def create_experiment_scan_archive(
@@ -1645,10 +1700,12 @@ def create_experiment_scan_archive(
         zf.writestr('scan.sedml', sedml_content)
         zf.writestr('metadata.rdf', metadata_rdf)
         zf.writestr('scan_metadata.json', json.dumps(scan_metadata, indent=2, default=str))
+        zf.writestr(SCAN_MODEL_REFERENCE, _scan_model_reference(scan_metadata))
         manifest_entries = [
             {'location': 'scan.sedml', 'format': FORMAT_URIS['.sedml']},
             {'location': 'metadata.rdf', 'format': OMEX_METADATA_FORMAT},
             {'location': 'scan_metadata.json', 'format': FORMAT_URIS['.json']},
+            {'location': SCAN_MODEL_REFERENCE, 'format': FORMAT_URIS['.json']},
         ]
         for src, text in data_files.items():
             zf.writestr(src, text)

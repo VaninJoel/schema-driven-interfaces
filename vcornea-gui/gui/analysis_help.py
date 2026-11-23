@@ -96,21 +96,27 @@ _PLOT_TEXT = {
     # ---- CELL COUNTS · ENHANCED · STATISTICS --------------------------------
     ('count', 'enhanced', 'statistics'): {
         'shows':
-            "Quantitative cross-combination statistics computed over the stable phase — "
-            "the numbers behind the Comparison view.",
+            "Cross-combination statistics over the analysis window named in the figure "
+            "title, with <b>one value per replicate</b>: each replicate's mean over the "
+            "window. Without an injury the window is the steady-state phase; with an "
+            "injury it starts at the injury and covers damage and recovery.",
         'read':
-            "<b>Total count boxplots</b> — the spread of total cells per combination. "
-            "<b>Coefficient of Variation</b> — relative variability of the total; the "
-            "red line at 0.1 is a rule-of-thumb stability threshold (below it = tight "
-            "homeostasis). <b>Mean count by type</b> — grouped bars comparing each "
-            "layer across combinations. <b>Pairwise p-value heatmap</b> — a "
-            "Mann-Whitney test on the total counts for every pair; greener / lower means "
-            "the two combinations differ significantly.",
+            "<b>Total count, mean per replicate</b> — one dot per replicate, the bar "
+            "is their mean. <b>Variability over time</b> — each replicate's coefficient "
+            "of variation of the total count within the window, averaged over "
+            "replicates; the red line at 0.1 is a rule-of-thumb threshold. <b>Mean "
+            "count by type</b> — grouped bars comparing each layer across combinations. "
+            "<b>Pairwise p-value heatmap</b> — a Mann-Whitney test on the replicate "
+            "means for every pair. Replicates are the independent units, so n is the "
+            "number of replicates, not the number of hourly samples.",
         'use':
-            "Use this to <b>back up a claim with statistics</b>. Read the CV bars to "
-            "judge whether each run is actually at steady state, then read the heatmap to "
-            "see which pairs are significantly different. Needs ≥2 combinations for the "
-            "heatmap; a single run shows a placeholder there.",
+            "Use this as a <b>descriptive</b> comparison. With a handful of replicates "
+            "the tests have little power and the p-values are not corrected for the "
+            "number of pairs, so they support a claim only alongside the per-replicate "
+            "dots; the experiment report gives endpoint statistics with confidence "
+            "intervals. The heatmap needs ≥2 combinations with ≥2 replicates each. In "
+            "an injury run the variability panel measures the size of the damage and "
+            "recovery excursion, not steady-state stability.",
         'expect':
             "Well-regulated runs sit below the CV=0.1 line. In the heatmap, combinations "
             "that you expect to behave the same (e.g. two replicate doses) should be "
@@ -242,9 +248,11 @@ _GLOSSARY = (
     "<li><b>Replicates:</b> independent runs of the same combination (different random "
     "seeds). Mean lines and ±SD bands aggregate across them; faint lines are the "
     "individual replicates. More replicates → more trustworthy spread.</li>"
-    "<li><b>Stability time:</b> the point after which the tissue is treated as being at "
-    "steady state; histogram, boxplot and statistics windows are taken from <i>after</i> "
-    "this time so start-up transients don't pollute them.</li>"
+    "<li><b>Analysis window:</b> histogram, boxplot and statistics views use the data "
+    "from a window start to the end of the run; the figure states the window. Without an "
+    "injury it starts at the stability time (40% of the run), after which the tissue is "
+    "treated as at steady state. With an injury it starts at the injury time and covers "
+    "damage and recovery, so it is not a steady state.</li>"
     "<li><b>Length:</b> 1 voxel = 2 µm; thickness subtracts a per-section basement-"
     "membrane baseline so it reflects the epithelial layer, not absolute height.</li>"
     "</ul>"

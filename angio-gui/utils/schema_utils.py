@@ -423,89 +423,60 @@ def get_full_parameter_info(schema: Dict, param_name: str) -> Dict[str, Any]:
 # VALIDATION UTILITIES
 # =============================================================================
 
+def _spec_validation():
+    """The specification check shared with the program-facing process."""
+    from vivarium_angio.utils import spec_validation
+    return spec_validation
+
+
+# How a finding of the shared check is shown on a field.
+#   ERROR    malformed (cannot be used as written; never runs) or outside a
+#            declared implementation limit (runs only after explicit confirmation)
+#   WARNING  outside the documented working range (runs after confirmation)
+#   NOTE     outside the recommended range (runs; recorded; no confirmation)
+SEVERITY_ERROR, SEVERITY_WARNING, SEVERITY_NOTE = 'ERROR', 'WARNING', 'NOTE'
+
+
 def validate_parameter_value(schema: Dict, param_name: str, value: Any) -> List[Dict]:
     """
-    Validate a parameter value and return issues.
-
-    Args:
-        schema: The ports schema
-        param_name: Name of parameter
-        value: Value to validate
+    Findings for one parameter value, from the SAME check the process runs before
+    it executes a specification (vivarium_angio.utils.spec_validation), so a field
+    cannot be judged one way here and another way at execution.
 
     Returns:
-        list: [{'severity': str, 'message': str, 'reference': str}, ...]
+        list of dicts with
+          'severity'  'ERROR' | 'WARNING' | 'NOTE' (see above)
+          'kind'      'malformed' | 'inadmissible' | 'outside_range'
+          'tier'      'mathematical' | 'physiological' | 'recommended' | None
+          'basis'     what the violated range is based on (schema `_range_evidence`)
+          'message'   the shared check's wording; it names the range and its basis
+          'reference' the evidence statement of the violated range, if any
     """
     if 'inputs' not in schema or param_name not in schema['inputs']:
-        return [{'severity': 'ERROR', 'message': 'Parameter not found in schema'}]
+        return [{'severity': SEVERITY_ERROR, 'kind': 'malformed', 'tier': None,
+                 'basis': None, 'message': 'Parameter not found in schema'}]
 
+    sv = _spec_validation()
     param_info = schema['inputs'][param_name]
+    prefix = f"{param_info.get('_display_name') or param_name}: "
     issues = []
-
-    # Type checking. int and float are interchangeable for numeric parameters
-    # (a preset of 10.0 for an int default of 10 is not a type error); bool is
-    # its own type and never numeric.
-    expected_type = type(param_info['_default'])
-    numeric = (int, float)
-    if isinstance(param_info['_default'], bool) or isinstance(value, bool):
-        type_ok = isinstance(value, bool) and isinstance(param_info['_default'], bool)
-    elif isinstance(param_info['_default'], numeric):
-        type_ok = isinstance(value, numeric)
-    else:
-        type_ok = isinstance(value, expected_type)
-    if not type_ok:
-        issues.append({
-            'severity': 'ERROR',
-            'message': f'Expected {expected_type.__name__}, got {type(value).__name__}'
-        })
-        return issues  # Stop further validation if type is wrong
-
-    # String parameters: declared pattern / length (e.g. experiment names that
-    # become folder names).
-    if isinstance(value, str):
-        import re as _re
-        pattern = param_info.get('_validation_pattern')
-        if pattern and not _re.match(pattern, value):
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value!r} does not match the allowed pattern {pattern}'
-            })
-        max_len = param_info.get('_max_length')
-        if max_len and len(value) > max_len:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value is {len(value)} characters; at most {max_len} allowed'
-            })
-        return issues
-
-    # Physiological range check
-    if '_physiological_range' in param_info:
-        min_val, max_val = param_info['_physiological_range']
-        if value < min_val or value > max_val:
-            # The evidence behind the RANGE, not the citation of the default value.
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                'reference': format_range_evidence(param_info, 'physiological', fmt='markdown')
-            })
-
-    # Mathematical stability check
-    if '_mathematical_range' in param_info:
-        min_val, max_val = param_info['_mathematical_range']
-        if value < min_val or value > max_val:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value} outside stable range [{min_val}, {max_val}]. Simulation may fail!'
-            })
-
-    # Warning threshold check
-    if '_warning_threshold' in param_info:
-        threshold = param_info['_warning_threshold']
-        if value > threshold:
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value exceeds recommended threshold of {threshold}'
-            })
-
+    for finding in sv.validate_value(param_name, param_info, value):
+        message = finding['message']
+        if message.startswith(prefix):          # the field already shows its own name
+            message = message[len(prefix):]
+        message = message[:1].upper() + message[1:]
+        if finding['severity'] in (sv.MALFORMED, sv.INADMISSIBLE):
+            severity = SEVERITY_ERROR
+        elif finding['tier'] == 'recommended':
+            severity = SEVERITY_NOTE
+        else:
+            severity = SEVERITY_WARNING
+        issue = {'severity': severity, 'kind': finding['severity'], 'tier': finding['tier'],
+                 'basis': finding['basis'], 'message': message}
+        if finding['tier']:
+            issue['reference'] = format_range_evidence(param_info, finding['tier'],
+                                                       fmt='markdown')
+        issues.append(issue)
     return issues
 
 

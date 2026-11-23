@@ -79,14 +79,39 @@ class StoreManager():
 
         root = zarr.open(self.store_path, mode='a')
 
-        # Write directly at root level
+        # A step that is already there belongs to another run (see
+        # refuse_used_store, which stops a run before its first step). Skipping
+        # it silently would leave that other run's snapshot in this trajectory.
         if str(step) in root:
-            print(f'Step {step} already exists, skipping')
-            return
+            raise RuntimeError(
+                f"{self.store_path} already holds step {step}; a store is single-use "
+                f"and this run would mix its snapshots with an earlier run's")
 
         mcs_group = root.require_group(str(step))
         # Zarr v3 API: use array assignment instead of create_dataset with compression
         mcs_group['data'] = data
+
+def refuse_used_store(store_path):
+    """Raise if store_path already holds recorded steps.
+
+    A Zarr store is the trajectory of ONE run. Two runs pointed at the same store
+    (for example several runs left on the default 'temp_store.zarr') used to
+    interleave: whichever wrote a step first kept it and the others were skipped
+    without an error, so the result looked complete and belonged to no run."""
+    import os
+    if not os.path.isdir(str(store_path)):
+        return
+    try:
+        root = zarr.open(str(store_path), mode='r')
+        steps = sorted(int(k) for k in root.keys() if str(k).isdigit())
+    except Exception:
+        steps = []
+    if steps:
+        raise RuntimeError(
+            f"Refusing to run into {store_path}: it already holds {len(steps)} recorded "
+            f"step(s) ({steps[0]}..{steps[-1]}) of an earlier run. Give every run its own "
+            f"store (parameter 'store_path') or remove the old one.")
+
 
 class WriterSteppable(SteppableBasePy):
     """
@@ -238,6 +263,21 @@ class AngiogenesisProcess(Process):
         'random_seed': -1,
     }
 
+    # Keys that legitimately accompany a specification without being schema
+    # parameters: where to write, who ran it, run identity, launcher settings and
+    # Vivarium's own process configuration. Anything else that is not in the
+    # schema is a mistake (typically a misspelt parameter) and is refused.
+    NON_SCHEMA_KEYS = frozenset((
+        'store_path', 'creator', 'run_timeout_seconds',
+        'allow_inadmissible', 'confirmed_by_operator',
+        '_schema_fingerprint', 'random_seed_origin', 'parameter_scan', 'scan_point',
+        'combination_index', 'total_combinations', 'replicate_id', 'total_replicates',
+        'parent_experiment_id',
+        # vivarium.core.process.Process configuration
+        'name', 'timestep', 'time_step', '_schema', '_parallel', '_condition',
+        '_original_parameters', '_no_original_parameters',
+    ))
+
     # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a
     # negative value is unambiguous. The GUI/scheduler replaces it with a drawn
     # seed and writes that value into the experiment specification.
@@ -316,7 +356,37 @@ class AngiogenesisProcess(Process):
         }
     }
 
+    @classmethod
+    def schema_inputs(cls):
+        """The `inputs` port of the schema, without constructing a process (and so
+        without checking a specification or touching CompuCell3D)."""
+        return cls.__new__(cls).ports_schema()['inputs']
+
+    @classmethod
+    def check_specification(cls, parameters, allow_inadmissible=False,
+                            checked_by='process', confirmed_by_operator=None):
+        """Check a specification against the schema with the check both interfaces
+        share (utils/spec_validation.py). Returns the check record, or raises
+        SpecificationError: always for malformed input (unknown key, wrong type),
+        and for a value outside a declared implementation limit unless
+        allow_inadmissible is True."""
+        from ..utils import spec_validation
+        return spec_validation.enforce(
+            cls.schema_inputs(), dict(parameters or {}),
+            allow_inadmissible=allow_inadmissible, known_extra=cls.NON_SCHEMA_KEYS,
+            checked_by=checked_by, confirmed_by_operator=confirmed_by_operator)
+
     def __init__(self, parameters=None):
+        # The program-facing interface checks what it is given BEFORE anything is
+        # built: the same check, on the same schema, that the graphical interface
+        # runs. A specification the GUI would refuse cannot be executed by going
+        # around the GUI, and a run that was allowed past an implementation limit
+        # carries that permission in its record (self.specification_check).
+        given = dict(parameters or {})
+        self.specification_check = self.check_specification(
+            given, allow_inadmissible=bool(given.get('allow_inadmissible')),
+            confirmed_by_operator=given.get('confirmed_by_operator'))
+
         super().__init__(parameters)
 
         self.specs = []
@@ -398,6 +468,7 @@ class AngiogenesisProcess(Process):
         """Build and start the CC3D simulation service (once, on first use)."""
         if self.core_sim is not None:
             return
+        refuse_used_store(self.store)
         # Disable CC3D default output directory (we use Zarr instead)
         # Setting output_dir=None prevents CC3D from creating OutStore folder
         self.core_sim = CC3DSimService(output_dir=None, output_frequency=0)
@@ -1699,47 +1770,23 @@ class AngiogenesisProcess(Process):
         return params
 
     def validate_parameters(self, params):
-        """
-        Validate parameter set and return warnings/errors.
+        """Findings of the shared specification check for a parameter set.
 
-        Args:
-            params (dict): Parameter values to validate
+        Kept for callers of the old method; the logic is utils/spec_validation.py,
+        the same code the GUI and the constructor use (this method used to carry
+        its own, weaker rules: it ignored the implementation limit entirely).
 
         Returns:
-            dict: {param_name: [{'severity': str, 'message': str}]}
+            dict: {param_name: [finding, ...]}, each finding a dict with
+            'severity' ('malformed' | 'inadmissible' | 'outside_range'), 'tier',
+            'range', 'basis' and 'message'. Empty when nothing is flagged.
         """
-        schema = self.ports_schema()
+        from ..utils import spec_validation
         issues = {}
-
-        for param_name, value in params.items():
-            if param_name not in schema['inputs']:
-                continue
-
-            param_schema = schema['inputs'][param_name]
-            param_issues = []
-
-            # Check physiological range
-            if '_physiological_range' in param_schema:
-                min_val, max_val = param_schema['_physiological_range']
-                if value < min_val or value > max_val:
-                    param_issues.append({
-                        'severity': 'WARNING',
-                        'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                        'reference': param_schema.get('_reference_paper', {}).get('source', 'N/A')
-                    })
-
-            # Check warning threshold
-            if '_warning_threshold' in param_schema:
-                threshold = param_schema['_warning_threshold']
-                if value > threshold:
-                    param_issues.append({
-                        'severity': 'WARNING',
-                        'message': f'Value exceeds recommended threshold of {threshold}'
-                    })
-
-            if param_issues:
-                issues[param_name] = param_issues
-
+        for finding in spec_validation.validate_specification(
+                self.ports_schema()['inputs'], dict(params or {}),
+                known_extra=self.NON_SCHEMA_KEYS):
+            issues.setdefault(finding['parameter'], []).append(finding)
         return issues
 
     def export_model_export_dir(self, dest_dir):
@@ -1780,8 +1827,12 @@ class AngiogenesisProcess(Process):
             steps_override = self.mcs or int(self.parameters.get('sim_time', 0) or 0)
             potts = next((s for s in self.specs if isinstance(s, PottsCore)), None)
             prior_steps = getattr(potts, 'steps', None) if potts is not None else None
+            # The stock runner executes steps 0 .. Steps-1 and the dumper writes a
+            # snapshot on each step it is called for, so the archived run's last
+            # recorded step N is produced only with Steps = N + 1. (Exporting N
+            # stopped the native re-run one snapshot short of the final state.)
             if potts is not None and steps_override > 0:
-                potts.steps = int(steps_override)
+                potts.steps = int(steps_override) + 1
             try:
                 cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
             finally:
@@ -1882,6 +1933,7 @@ class AngiogenesisProcess(Process):
             'parameters': params,
             'parameter_changes': param_changes,
             'validation': self.validate_parameters(params),
+            'specification_check': getattr(self, 'specification_check', None),
             'schema_version': '1.0',
             # The seed actually handed to the CPM kernel (resolved in __init__,
             # so this is never the -1 sentinel).

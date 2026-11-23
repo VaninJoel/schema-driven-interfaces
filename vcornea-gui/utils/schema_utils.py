@@ -429,89 +429,71 @@ def get_full_parameter_info(schema: Dict, param_name: str) -> Dict[str, Any]:
 # VALIDATION UTILITIES
 # =============================================================================
 
-def validate_parameter_value(schema: Dict, param_name: str, value: Any) -> List[Dict]:
+def _spec_validation():
+    """The specification check shared with the program-facing process
+    (vivarium_vcornea.utils.spec_validation). The GUI does not have a validator
+    of its own: a value is judged here exactly as VCorneaProcess judges it."""
+    from vivarium_vcornea.utils import spec_validation
+    return spec_validation
+
+
+def validate_parameter_value(schema: Dict, param_name: str, value: Any,
+                             display=None) -> List[Dict]:
     """
-    Validate a parameter value and return issues.
+    Findings for one parameter value, from the check the process itself applies.
 
     Args:
         schema: The ports schema
         param_name: Name of parameter
-        value: Value to validate
+        value: Value to validate, in STORED (simulation) units
+        display: optional callable(number) -> (number_in_display_units, unit_label).
+            When given, range findings are worded in the units the operator sees
+            in the field instead of the stored simulation units.
 
     Returns:
-        list: [{'severity': str, 'message': str, 'reference': str}, ...]
+        list of {'severity': 'ERROR' | 'WARNING', 'kind': 'malformed' |
+        'inadmissible' | 'outside_range', 'tier', 'basis', 'message', 'reference'}.
+        ERROR + malformed: the value cannot be used and a run is refused.
+        ERROR + inadmissible: outside a declared implementation limit; runs only
+        after explicit confirmation, which is recorded. WARNING: outside a
+        documented working or recommended range; runs, and is recorded.
     """
     if 'inputs' not in schema or param_name not in schema['inputs']:
-        return [{'severity': 'ERROR', 'message': 'Parameter not found in schema'}]
+        return [{'severity': 'ERROR', 'kind': 'malformed', 'tier': None, 'basis': None,
+                 'message': 'Parameter not found in schema'}]
 
+    sv = _spec_validation()
     param_info = schema['inputs'][param_name]
+    described = {tier: text for _key, tier, _sev, text in sv._TIERS}
     issues = []
-
-    # Type checking. int and float are interchangeable for numeric parameters
-    # (a preset of 10.0 for an int default of 10 is not a type error); bool is
-    # its own type and never numeric.
-    expected_type = type(param_info['_default'])
-    numeric = (int, float)
-    if isinstance(param_info['_default'], bool) or isinstance(value, bool):
-        type_ok = isinstance(value, bool) and isinstance(param_info['_default'], bool)
-    elif isinstance(param_info['_default'], numeric):
-        type_ok = isinstance(value, numeric)
-    else:
-        type_ok = isinstance(value, expected_type)
-    if not type_ok:
-        issues.append({
-            'severity': 'ERROR',
-            'message': f'Expected {expected_type.__name__}, got {type(value).__name__}'
-        })
-        return issues  # Stop further validation if type is wrong
-
-    # String parameters: declared pattern / length (e.g. experiment names that
-    # become folder names).
-    if isinstance(value, str):
-        import re as _re
-        pattern = param_info.get('_validation_pattern')
-        if pattern and not _re.match(pattern, value):
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value!r} does not match the allowed pattern {pattern}'
-            })
-        max_len = param_info.get('_max_length')
-        if max_len and len(value) > max_len:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value is {len(value)} characters; at most {max_len} allowed'
-            })
-        return issues
-
-    # Physiological range check
-    if '_physiological_range' in param_info:
-        min_val, max_val = param_info['_physiological_range']
-        if value < min_val or value > max_val:
+    for found in sv.validate_value(param_name, param_info, value):
+        message = found['message']
+        if found['severity'] == sv.MALFORMED:
+            # "<name>: Expected a number, got 'abc'"
+            message = message.replace(': expected ', ': Expected ', 1)
+        elif display is not None and found.get('range'):
+            try:
+                (shown, unit), (lo, _), (hi, _) = (display(found['value']),
+                                                   display(found['range'][0]),
+                                                   display(found['range'][1]))
+                name = param_info.get('_display_name') or param_name
+                unit_txt = f" {unit}" if unit else ""
+                message = (f"{name}: {shown:g}{unit_txt} is outside {described[found['tier']]} "
+                           f"[{lo:g}, {hi:g}]{unit_txt} "
+                           f"(range set by {sv._basis_phrase(found.get('basis'))})")
+            except Exception:
+                pass                                     # keep the stored-unit wording
+        issue = {
+            'severity': 'WARNING' if found['severity'] == sv.OUTSIDE_RANGE else 'ERROR',
+            'kind': found['severity'],
+            'tier': found.get('tier'),
+            'basis': found.get('basis'),
+            'message': message,
+        }
+        if found.get('tier'):
             # The evidence behind the RANGE, not the citation of the default value.
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                'reference': format_range_evidence(param_info, 'physiological', fmt='markdown')
-            })
-
-    # Mathematical stability check
-    if '_mathematical_range' in param_info:
-        min_val, max_val = param_info['_mathematical_range']
-        if value < min_val or value > max_val:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value} outside stable range [{min_val}, {max_val}]. Simulation may fail!'
-            })
-
-    # Warning threshold check
-    if '_warning_threshold' in param_info:
-        threshold = param_info['_warning_threshold']
-        if value > threshold:
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value exceeds recommended threshold of {threshold}'
-            })
-
+            issue['reference'] = format_range_evidence(param_info, found['tier'], fmt='markdown')
+        issues.append(issue)
     return issues
 
 
