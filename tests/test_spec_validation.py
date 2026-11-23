@@ -111,3 +111,42 @@ def test_live_schema_defaults_pass_and_every_declared_limit_is_enforced(which):
             beyond = int(beyond)
         with pytest.raises(sv.SpecificationError):
             sv.enforce(inputs, {**defaults, key: beyond})
+
+
+def test_non_finite_numbers_are_malformed_and_always_refused():
+    # NaN compares False against every bound, so it used to pass every range tier.
+    for bad in (float('nan'), float('inf'), float('-inf')):
+        assert _severities({'rate': bad}) == [('rate', sv.MALFORMED, None)]
+        with pytest.raises(sv.SpecificationError):
+            sv.enforce(SCHEMA, {'rate': bad}, allow_inadmissible=True)
+
+
+def test_a_negative_value_of_a_non_negative_quantity_is_inadmissible():
+    # Where the schema declares no implementation limit, the declared dimension
+    # still rules out a negative diffusion coefficient, length, area, rate...
+    schema = {
+        'diff': {'_default': 20.0, '_display_name': 'Diffusion', '_dimension': 'diffusion',
+                 '_unit': 'voxel^2/MCS', '_physiological_range': (0.0, 186.0),
+                 '_range_evidence': {'physiological': {'basis': 'literature'}}},
+        'energy': {'_default': 2.0, '_dimension': 'energy'},
+        'plain': {'_default': 1.0},
+    }
+    [issue] = sv.validate_specification(schema, {'diff': -5.0})
+    assert issue['severity'] == sv.INADMISSIBLE and issue['tier'] == 'dimension'
+    assert 'cannot be negative' in issue['message']
+    with pytest.raises(sv.SpecificationError):
+        sv.enforce(schema, {'diff': -5.0})
+    assert sv.enforce(schema, {'diff': -5.0}, allow_inadmissible=True)['n_inadmissible'] == 1
+    # An energy or an unlabelled number may be negative; a positive value outside
+    # the working range still only runs-and-records.
+    assert sv.validate_specification(schema, {'energy': -3.0, 'plain': -1.0}) == []
+    [issue] = sv.validate_specification(schema, {'diff': 300.0})
+    assert issue['severity'] == sv.OUTSIDE_RANGE
+
+
+def test_negative_diffusion_is_refused_by_the_real_vcornea_schema():
+    from vivarium_vcornea.processes.vcornea_process import VCorneaProcess
+    inputs = VCorneaProcess({}).ports_schema()['inputs']
+    for key in ('EGF_SUPERDiffCoef', 'InitSTEM_TargetVolume', 'EGF_GlobalDecay'):
+        with pytest.raises(sv.SpecificationError):
+            sv.enforce(inputs, {key: -1.0})

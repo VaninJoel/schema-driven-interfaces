@@ -962,12 +962,13 @@ class AngiogenesisProcess(Process):
                     },
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2008'],
+                        **self.REFERENCES['model_specific'],
                         'value': 0.1,
-                        'locator': {'table': None, 'equation': 'Methods: saturation parameter s = 0 (standard; varied 0–0.15)', 'page': None},
-                        'notes': "The saturating form is Merks et al. 2008's; their standard value is s = 0 (linear) and they "
-                                 "sweep 0–0.15 to show the effect. This model's default 0.1 sits inside that sweep but is not the "
-                                 'published standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: ChemotaxisTypeParameters(linear_sat_cf=lsc)', 'page': None},
+                        'notes': "The default 0.1 is this implementation's choice, not a published value. The saturating form "
+                                 'is that of Merks et al. 2008, whose standard value is s = 0 (linear); they call 0.05 moderate '
+                                 'and sweep 0–0.15 to show the effect. 0.1 lies inside that sweep but is not the published '
+                                 'standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
                     },
                     '_ontology_term': 'cbo:Chemotaxis',  # the process, as for lchem
                     '_model_context': 'Saturation parameter in chemotaxis term. Determines if cells respond linearly or with saturation to VEGF concentration.',
@@ -1161,16 +1162,18 @@ class AngiogenesisProcess(Process):
                         },
                         'physiological': {
                             'basis': 'expert_judgement',
-                            'refs': ['merks2008', 'merks2006'],
+                            'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'Merks et al. 2008, Methods (ε = α = 1e-3 s⁻¹); Merks et al. 2006, Results (1.8e-4 s⁻¹)',
-                                'page': 50,
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
+                                'page': None,
                             },
-                            'note': "0.1–0.5 per MCS is the model author's band around the default. On the Merks scale the "
-                             "literature values are 0.0054–0.03 per MCS and VEGF165's 30–60 min half-life gives 0.006–0.012 "
-                             'per MCS, all BELOW this band. Labelled expert judgement, not literature, for that reason; see '
-                             'the default-value note for the consequence (shorter gradients).',
+                            'note': "0.1–0.5 per MCS is the model author's band around this implementation's default of 0.3; "
+                             'no publication supports it. The published values lie BELOW the band: Merks et al. 2008 use '
+                             'ε = 1e-3 s⁻¹ (0.03 per MCS on their scale, so the default is ten times that reference), Merks '
+                             "et al. 2006 use 1.8e-4 s⁻¹ (0.0054 per MCS), and VEGF165's 30–60 min half-life gives "
+                             '0.006–0.012 per MCS. The papers are named here for comparison only; see the default-value '
+                             'note for the consequence (shorter gradients).',
                         },
                         'recommended': {
                             'basis': 'exploratory',
@@ -1278,15 +1281,17 @@ class AngiogenesisProcess(Process):
                         },
                         'physiological': {
                             'basis': 'expert_judgement',
-                            'refs': ['merks2008', 'merks2006'],
+                            'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
-                            'note': "0.1–0.5 per MCS is the model author's band around the default; the literature values "
-                             '(0.0054–0.03 per MCS on the Merks scale) lie below it. Only the ratio to veder is constrained '
-                             'by the papers (α = ε), not the absolute rate.',
+                            'note': "0.1–0.5 per MCS is the model author's band around this implementation's default of 0.3; "
+                             'no publication supports it. The published values (0.03 per MCS in Merks et al. 2008, so the '
+                             'default is ten times that reference; 0.0054 per MCS in Merks et al. 2006) lie BELOW the band '
+                             'and are named for comparison only. The papers constrain only the ratio to veder (α = ε), '
+                             'which this implementation keeps.',
                         },
                         'recommended': {
                             'basis': 'exploratory',

@@ -13,12 +13,18 @@ Three kinds of finding, in decreasing severity:
                    that breaks the parameter's declared pattern or length.
                    ALWAYS refused. There is nothing to confirm.
     inadmissible   a well-formed value outside the range the schema declares as
-                   the implementation limit (`_mathematical_range`).
+                   the implementation limit (`_mathematical_range`), or - where
+                   the schema declares no such limit - a negative value of a
+                   quantity that cannot be negative by its declared dimension
+                   (a diffusion coefficient, a length, an area, a rate, ...).
                    Refused unless the caller explicitly allows it
                    (`allow_inadmissible=True`), and that permission is recorded.
     outside_range  a well-formed, admissible value outside the documented working
                    range (`_physiological_range`) or the recommended range
                    (`_recommended_range`). Never refused: it runs, and is recorded.
+
+The check is only as strong as what the schema declares. A parameter with no
+declared range and no sign-constrained dimension is checked for type only.
 
 Every message names what the range is based on (published literature, model
 calibration, the modeler's judgement, a numerical or implementation limit,
@@ -31,6 +37,7 @@ vivarium_vcornea.utils.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -50,6 +57,15 @@ _BASIS_PHRASES = {
     'numerical_stability': 'a numerical or implementation limit',
     'exploratory': 'exploratory presets',
 }
+
+
+# Dimensions (the schema's `_dimension`) of quantities that cannot be negative.
+# Energies and dimensionless coefficients are deliberately absent: a contact
+# energy or a chemotaxis coefficient can legitimately be negative.
+NON_NEGATIVE_DIMENSIONS = frozenset((
+    'diffusion', 'diffusivity', 'length', 'area', 'volume', 'concentration',
+    'rate', 'pressure', 'time',
+))
 
 
 class SpecificationError(ValueError):
@@ -104,6 +120,10 @@ def validate_value(key: str, info: Dict[str, Any], value: Any) -> List[Dict[str,
         if not _is_number(value):
             return [_issue(key, MALFORMED, f"{name}: expected a number, got {value!r}",
                            value=value)]
+        if not math.isfinite(value):
+            # NaN compares False against every bound and would pass every range.
+            return [_issue(key, MALFORMED, f"{name}: expected a finite number, got {value!r}",
+                           value=value)]
         if isinstance(default, int) and float(value) != int(value):
             return [_issue(key, MALFORMED,
                            f"{name}: expected a whole number, got {value!r}", value=value)]
@@ -125,6 +145,17 @@ def validate_value(key: str, info: Dict[str, Any], value: Any) -> List[Dict[str,
         return found
     if not _is_number(value):
         return []
+
+    # ---- sign: implied by the dimension where no implementation limit is declared
+    dimension = info.get('_dimension')
+    if (value < 0 and info.get('_mathematical_range') is None
+            and dimension in NON_NEGATIVE_DIMENSIONS):
+        return [_issue(
+            key, INADMISSIBLE,
+            f"{name}: {value:g}{unit_txt} is negative, and a {dimension} cannot be negative "
+            f"(implied by the parameter's declared dimension; the schema declares no "
+            f"implementation limit for it)",
+            value=value, tier='dimension', basis='physical_dimension')]
 
     # ---- ranges: report the outermost tier the value violates ----------------
     for schema_key, tier, severity, described in _TIERS:

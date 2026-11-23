@@ -12,9 +12,11 @@ requested, not against any one of them:
 * Each table is switched by its own parameter (CellCount, ThicknessPlot,
   SurfactantTracking). Only the tables whose switch is on are required; a run
   configured to record thickness alone is complete without a cell-count file.
-* A required table must also cover the requested period: its last sampled time
-  must reach the end of the simulation. A table with the right name and a
-  truncated series does not pass.
+* A required table must also follow its planned sampling schedule over the whole
+  requested period (see END_OF_RUN_OUTPUTS): the hourly cell-count table must hold
+  every hour from 0 to the end, the per-step surfactant table one row per step. A
+  table with the right name and a truncated or gapped series does not pass, and a
+  table that cannot be read does not pass.
 * A table counts only if THIS launch wrote it. A run directory can already hold
   the tables of an earlier run (a rerun under the same name); a simulator that
   then exits cleanly without writing anything must not inherit them. Files last
@@ -36,10 +38,16 @@ from typing import Any, Dict, List, Optional
 MCS_PER_HOUR = 10                      # HOURtoMCS in the model's steppables
 
 # (switch parameter, output key, file pattern with {mcs}, series must reach the end?)
+# (switch parameter, output key, file pattern with {mcs}, sampling schedule)
+#   'hourly'      one row per simulated hour, Time = 0, 1, ..., final_mcs // MCS_PER_HOUR
+#   'every_step'  one row per MCS, final_mcs + 1 rows, last Time = final_mcs / MCS_PER_HOUR
+#   'sparse'      rows only at hours where there was something to record (a time
+#                 point with no superficial cell leaves no thickness row), so the
+#                 table must be readable and carry a Time column, nothing more
 END_OF_RUN_OUTPUTS = (
-    ('CellCount', 'cell_count', 'cell_count_{mcs}.csv', True),
-    ('ThicknessPlot', 'thickness', 'thickness_rep*_{mcs}.parquet', False),
-    ('SurfactantTracking', 'surfactant', 'surfactant_{mcs}.csv', True),
+    ('CellCount', 'cell_count', 'cell_count_{mcs}.csv', 'hourly'),
+    ('ThicknessPlot', 'thickness', 'thickness_rep*_{mcs}.parquet', 'sparse'),
+    ('SurfactantTracking', 'surfactant', 'surfactant_{mcs}.csv', 'every_step'),
 )
 
 # Printed by CompuCell3D when a simulation run ends.
@@ -70,13 +78,43 @@ def _final_stamped(output_dir: Path, pattern: str, final_mcs: int,
     return fresh, stale
 
 
-def _last_time(path: Path) -> Optional[float]:
-    """Largest value of the table's Time column (hours); None if it has no rows."""
+def _read_table(path: Path):
     import pandas as pd
-    df = pd.read_parquet(path) if path.suffix == '.parquet' else pd.read_csv(path)
-    if 'Time' not in df.columns or df.empty:
-        return None
-    return float(df['Time'].max())
+    return pd.read_parquet(path) if path.suffix == '.parquet' else pd.read_csv(path)
+
+
+def _schedule_finding(schedule: str, df, final_mcs: int):
+    """Compare a table with its planned sampling schedule.
+
+    Returns (state, last_time_hours, n_rows, detail): state is 'complete',
+    'truncated' (the series stops before the end of the requested period),
+    'incomplete' (samples are missing inside it) or 'unreadable' (no Time column).
+    """
+    if 'Time' not in df.columns:
+        return 'unreadable', None, len(df), "has no Time column"
+    n = len(df)
+    last = float(df['Time'].max()) if n else None
+    expected_last = float(final_mcs // MCS_PER_HOUR)
+    if schedule == 'sparse':
+        return 'complete', last, n, None
+    if last is None or last < expected_last - 1e-9:
+        return ('truncated', last, n,
+                "ends at " + ("no sample" if last is None else f"{last:g} h")
+                + f", before the end of the requested period ({expected_last:g} h)")
+    if schedule == 'hourly':
+        planned = int(final_mcs // MCS_PER_HOUR) + 1
+        have = {round(float(t), 6) for t in df['Time']}
+        missing = [h for h in range(planned) if float(h) not in have]
+        if missing:
+            return ('incomplete', last, n,
+                    f"has {planned - len(missing)} of the {planned} planned hourly samples "
+                    f"(first missing at {missing[0]} h)")
+    elif schedule == 'every_step':
+        planned = int(final_mcs) + 1
+        if n < planned:
+            return ('incomplete', last, n,
+                    f"has {n} of the {planned} planned per-step samples")
+    return 'complete', last, n, None
 
 
 def cc3d_reported_end_of_run(stdout_log) -> bool:
@@ -103,7 +141,7 @@ def check_requested_outputs(output_dir, sim_params: Dict[str, Any], final_mcs: i
       final_mcs, expected_last_time_hours, cc3d_end_of_run_report
       outputs              one entry per end-of-run output: switch, requested,
                            state ('complete' | 'missing' | 'truncated' |
-                           'unreadable' | 'not requested'), file, last_time_hours,
+                           'incomplete' | 'unreadable' | 'not requested'), file, last_time_hours,
                            detail, and stale_files when tables from before the
                            launch were found and ignored
       problems             human-readable reasons, empty when ok
@@ -113,7 +151,7 @@ def check_requested_outputs(output_dir, sim_params: Dict[str, Any], final_mcs: i
     entries, problems = [], []
     reached_end = False
 
-    for switch, key, pattern, must_cover in END_OF_RUN_OUTPUTS:
+    for switch, key, pattern, schedule in END_OF_RUN_OUTPUTS:
         requested = bool(sim_params.get(switch, True))
         entry = {'output': key, 'switch': switch, 'requested': requested,
                  'state': 'not requested', 'file': None, 'last_time_hours': None,
@@ -144,24 +182,23 @@ def check_requested_outputs(output_dir, sim_params: Dict[str, Any], final_mcs: i
             problems.append(entry['detail'])
             continue
         try:
-            entry['last_time_hours'] = _last_time(files[0])
+            table = _read_table(files[0])
+        except ImportError as e:
+            # No parquet engine in this environment: the table exists and carries
+            # the final step in its name; its contents are not judged.
+            entry['state'] = 'complete'
+            entry['detail'] = f"contents not read ({e})"
+            continue
         except Exception as e:  # noqa: BLE001
-            if must_cover:
-                entry['state'] = 'unreadable'
-                entry['detail'] = f"{files[0].name} could not be read: {e}"
-                problems.append(entry['detail'])
-                continue
-            entry['detail'] = f"contents not read: {e}"
-        last = entry['last_time_hours']
-        if must_cover and (last is None or last < expected_last - 1e-9):
-            entry['state'] = 'truncated'
-            entry['detail'] = (
-                f"{files[0].name} ends at "
-                + ("no sample" if last is None else f"{last:g} h")
-                + f", before the end of the requested period ({expected_last:g} h)")
+            entry['state'] = 'unreadable'
+            entry['detail'] = f"{files[0].name} could not be read: {e}"
             problems.append(entry['detail'])
             continue
-        entry['state'] = 'complete'
+        state, last, n_rows, detail = _schedule_finding(schedule, table, final_mcs)
+        entry.update(state=state, last_time_hours=last, n_rows=n_rows, schedule=schedule)
+        if state != 'complete':
+            entry['detail'] = f"{files[0].name} {detail}"
+            problems.append(entry['detail'])
 
     end_report = cc3d_reported_end_of_run(stdout_log) if stdout_log is not None else False
     any_requested = any(e['requested'] for e in entries)

@@ -43,6 +43,9 @@ def main(argv=None):
     ap.add_argument('--name', required=True, help='experiment name typed into the GUI')
     ap.add_argument('--operator', required=True, help='operator name typed into the GUI')
     ap.add_argument('--replicates', type=int, default=1)
+    ap.add_argument('--max-runs', type=int, default=None,
+                    help='the "Max simultaneous runs" field of the GUI (default: the '
+                         'application default, one less than the number of CPU cores)')
     ap.add_argument('--report-wait', type=int, default=1800,
                     help='seconds to wait for the report PDFs after the batch ends')
     ap.add_argument('fields', nargs='*', help='parameter=text exactly as typed in its field')
@@ -79,6 +82,11 @@ def main(argv=None):
     win.exp_name_input.setText(args.name)
     win.operator_name_input.setText(args.operator)
     win.replicate_spinbox.setValue(args.replicates)
+    # The window restores the last-used cap from the user's own settings file,
+    # which is not what an unattended example run should inherit.
+    cap = args.max_runs or win.default_max_concurrent_runs()
+    win.concurrency_spinbox.setValue(cap)
+    log(f"max simultaneous runs = {win.concurrency_spinbox.value()}")
     for field in args.fields:
         key, _, text = field.partition('=')
         widget = win.param_widgets[key]['input']

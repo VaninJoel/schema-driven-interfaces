@@ -40,6 +40,10 @@ RANDOM_SEED_SCOPE = {
         "start-up",
     ],
     'does_not_control': [
+        "random draws a project might make from other generators: this statement "
+        "describes the paper_version project, whose steppables draw from "
+        "CompuCell3D and from Python's `random` only (the STEM_ONLY variants also "
+        "call numpy's generator, which is not seeded)",
         "the order in which draws are consumed if the simulator is run "
         "multi-threaded (the model is configured for one processor)",
         "differences between machines, operating systems or versions of "

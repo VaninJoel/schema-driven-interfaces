@@ -43,11 +43,14 @@ def _fake_outputs(cell_count=True, thickness=True, surfactant=True,
     if cell_count:
         src.append(f"open('cell_count_{stamp}.csv', 'w').write('Stem,Time\\n' + "
                    f"''.join(f'1,{{float(h)}}\\n' for h in range({last_hour} + 1)))")
-    if thickness:
-        src.append(f"open('thickness_rep_{stamp}.parquet', 'wb').write(b'PAR1')")
-    if surfactant:
+    if thickness:           # a real parquet table: Time (hours), Bin, Height
+        src.append("import pandas as pd")
+        src.append(f"pd.DataFrame({{'Time': [float(h) for h in range({last_hour} + 1)], "
+                   f"'Bin': 0, 'Height': 30.0}}).to_parquet('thickness_rep_{stamp}.parquet', "
+                   f"index=False)")
+    if surfactant:          # one row per MCS, Time in hours
         src.append(f"open('surfactant_{stamp}.csv', 'w').write('Total Amount,Time\\n' + "
-                   f"''.join(f'0.5,{{float(h)}}\\n' for h in range({last_hour} + 1)))")
+                   f"''.join(f'0.5,{{s / 10}}\\n' for s in range({last_hour} * 10 + 1)))")
     if end_report:
         src.append("print('------------------PERFORMANCE REPORT:----------------------')")
     return "; ".join(src) or "pass"
@@ -305,6 +308,6 @@ def test_run_is_not_started_when_the_seed_cannot_be_applied(tmp_path, monkeypatc
 
     assert launched == []                       # never ran under an unrecorded seed
     assert meta['simulation_status'] == 'failed' and meta['random_seed_applied'] is False
-    assert 'could not be written' in meta['error_message']
+    assert 'could not be applied' in meta['error_message']
     with _archive(rep, meta) as zf:
         assert 'simulation.sedml' not in zf.namelist()

@@ -412,3 +412,78 @@ def test_an_archive_built_by_the_real_run_path_passes_the_combine_validator(
         errors, _ = validate(CombineArchiveReader().run(str(omex), str(out)),
                              archive_dirname=str(out))
     assert errors == []
+
+
+# ---- second review round ---------------------------------------------------------------
+def test_output_tables_are_checked_against_their_sampling_schedule(tmp_path):
+    import pandas as pd
+    from vivarium_vcornea.utils.output_check import check_requested_outputs
+    final_mcs, hours = 240, 24
+
+    def write(cell_hours, surf_rows, thickness=True):
+        for old in tmp_path.glob('*'):
+            old.unlink()
+        pd.DataFrame({'Stem': 1, 'Time': [float(h) for h in cell_hours]}).to_csv(
+            tmp_path / f'cell_count_{final_mcs + 1}.csv', index=False)
+        pd.DataFrame({'Total Amount': 0.5, 'Time': [s / 10 for s in range(surf_rows)]}).to_csv(
+            tmp_path / f'surfactant_{final_mcs + 1}.csv', index=False)
+        if thickness is True:
+            pd.DataFrame({'Time': [0.0], 'Bin': 0, 'Height': 30.0}).to_parquet(
+                tmp_path / f'thickness_rep_{final_mcs + 1}.parquet', index=False)
+        elif thickness == 'garbage':
+            (tmp_path / f'thickness_rep_{final_mcs + 1}.parquet').write_bytes(b'not a parquet file')
+        check = check_requested_outputs(tmp_path, {}, final_mcs)
+        return check, {e['output']: e for e in check['outputs']}
+
+    check, by = write(range(hours + 1), final_mcs + 1)
+    assert check['ok'] and by['cell_count']['n_rows'] == hours + 1
+    assert by['surfactant']['n_rows'] == final_mcs + 1 and by['thickness']['state'] == 'complete'
+
+    # the last hour is present, but hours are missing inside the series
+    check, by = write([h for h in range(hours + 1) if h not in (5, 6)], final_mcs + 1)
+    assert not check['ok'] and by['cell_count']['state'] == 'incomplete'
+    assert 'first missing at 5 h' in by['cell_count']['detail']
+
+    # the per-step table reaches the last time but has too few rows
+    check, by = write(range(hours + 1), final_mcs + 1)
+    df = pd.read_csv(tmp_path / f'surfactant_{final_mcs + 1}.csv')
+    df.iloc[::2].to_csv(tmp_path / f'surfactant_{final_mcs + 1}.csv', index=False)
+    check = check_requested_outputs(tmp_path, {}, final_mcs)
+    by = {e['output']: e for e in check['outputs']}
+    assert not check['ok'] and by['surfactant']['state'] == 'incomplete'
+
+    # a thickness table that cannot be read is not a delivered output
+    check, by = write(range(hours + 1), final_mcs + 1, thickness='garbage')
+    assert not check['ok'] and by['thickness']['state'] == 'unreadable'
+
+
+def test_seed_is_verified_on_the_parsed_cc3dml_not_on_its_text(tmp_path):
+    proc = _process(tmp_path / 'out')
+    sim = tmp_path / 'proj' / 'Simulation'
+    sim.mkdir(parents=True)
+    xml = sim / 'model.xml'
+    # the only <RandomSeed> is inside a comment: a text substitution "succeeds" there
+    xml.write_text('<CompuCell3D><!-- <Potts><RandomSeed>1</RandomSeed></Potts> -->'
+                   '<Metadata/></CompuCell3D>')
+    assert proc._inject_random_seed_in_copy(tmp_path / 'proj', 4242) is False
+    xml.write_text('<CompuCell3D><Potts><Steps>10</Steps></Potts></CompuCell3D>')
+    assert proc._inject_random_seed_in_copy(tmp_path / 'proj', 4242) is True
+    assert '<RandomSeed>4242</RandomSeed>' in xml.read_text()
+
+
+def test_seed_counts_as_applied_only_when_it_reached_both_generators(tmp_path, monkeypatch):
+    _, _, metas = _run_batch(tmp_path / 'ok', monkeypatch, 'success')
+    assert metas[0]['random_seed_applied'] is True
+    assert metas[0]['random_seed_applied_to'] == {'compucell3d': True, 'python_random': True}
+
+    # Python's half missing: the run must not start under a record that says "applied".
+    launched = []
+    monkeypatch.setattr(VCorneaProcess, '_write_parameters_file',
+                        lambda self, params_file, sim_params: False)
+    monkeypatch.setattr(VCorneaProcess, '_run_cc3d_simulation',
+                        lambda self, p, o: launched.append(o))
+    proc = _process(tmp_path / 'half')
+    out = proc.next_update(1, _states(proc))['outputs']
+    [rep] = out['replicate_results']
+    assert launched == [] and rep['status'] == 'failed'
+    assert "Python's generator" in rep['error_message']

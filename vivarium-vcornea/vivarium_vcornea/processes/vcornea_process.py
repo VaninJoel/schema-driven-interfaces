@@ -4438,16 +4438,24 @@ class VCorneaProcess(Process):
                 # written into the copy. If it was not, the run is not started:
                 # it would execute under a seed nobody recorded while its record
                 # and archive named another one.
-                seed_applied = self._inject_random_seed_in_copy(temp_project, run_seed)
-                run_metadata['random_seed_applied'] = bool(seed_applied)
-                run_metadata['random_seed_scope'] = RANDOM_SEED_SCOPE
-                if not seed_applied:
-                    raise RuntimeError(
-                        f"random seed {run_seed} could not be written into the project "
-                        f"copy's CC3DML (<Potts>/<RandomSeed>); run not started because "
-                        f"its recorded seed would not describe it")
+                # The model draws from two generators, so "applied" means both:
+                # CompuCell3D's (CC3DML) and Python's (generated Parameters.py).
+                cc3d_seeded = bool(self._inject_random_seed_in_copy(temp_project, run_seed))
                 sim_params_file = temp_project / "Simulation" / "Parameters.py"
-                self._write_parameters_file(sim_params_file, replicate_params)
+                python_seeded = bool(self._write_parameters_file(sim_params_file, replicate_params))
+                run_metadata['random_seed_applied_to'] = {
+                    'compucell3d': cc3d_seeded, 'python_random': python_seeded}
+                run_metadata['random_seed_applied'] = cc3d_seeded and python_seeded
+                run_metadata['random_seed_scope'] = RANDOM_SEED_SCOPE
+                if not (cc3d_seeded and python_seeded):
+                    missing = [name for name, ok in (
+                        ("CompuCell3D's generator (<Potts>/<RandomSeed> in the CC3DML)", cc3d_seeded),
+                        ("Python's generator (the generated Parameters.py)", python_seeded))
+                        if not ok]
+                    raise RuntimeError(
+                        f"random seed {run_seed} could not be applied to "
+                        f"{' and '.join(missing)}; run not started because its recorded "
+                        f"seed would not describe it")
                 # Launch record: the generated Parameters.py, the parameter audit
                 # and run_metadata.json (status 'running') reach the replicate
                 # directory now, not only after the process ends, so an interrupted
@@ -5198,10 +5206,25 @@ class VCorneaProcess(Process):
                     '<Potts>', f'<Potts>\n       <RandomSeed>{int(seed)}</RandomSeed>', 1)
             try:
                 xml_path.write_text(content)
-                print(f"  > [OK] seeded {xml_path.name} with RandomSeed={int(seed)}")
-                return True
             except Exception as e:
                 print(f"  > [WARNING] could not write seed into {xml_path.name}: {e}")
+                continue
+            # Verify on the parsed document, not on the text: a <RandomSeed> that
+            # sits inside a comment, or outside <Potts>, would satisfy the text
+            # edit above and leave the simulator unseeded.
+            try:
+                import xml.etree.ElementTree as _ET
+                node = _ET.parse(xml_path).getroot().find('.//Potts/RandomSeed')
+                effective = int((node.text or '').strip()) if node is not None else None
+            except Exception as e:
+                print(f"  > [WARNING] {xml_path.name} could not be parsed after seeding: {e}")
+                effective = None
+            if effective == int(seed):
+                print(f"  > [OK] seeded {xml_path.name} with RandomSeed={int(seed)}")
+                return True
+            print(f"  > [WARNING] {xml_path.name}: the effective <Potts>/<RandomSeed> is "
+                  f"{effective!r}, not {int(seed)}; run would be UNSEEDED")
+            return False
         print("  > [WARNING] no <Potts> block found; run will be UNSEEDED")
         return False
 
@@ -5373,9 +5396,17 @@ class VCorneaProcess(Process):
             # utils/seed_scope.py). Only for a resolved seed: the -1 sentinel
             # ("draw one") never reaches a replicate's own parameters.
             seed = final_params.get('random_seed')
-            if isinstance(seed, int) and not isinstance(seed, bool) and seed >= 0:
+            try:
+                import operator
+                seed_ok = (not isinstance(seed, bool)) and operator.index(seed) >= 0
+            except TypeError:           # not an integer of any kind (None, float, text)
+                seed_ok = False
+            if seed_ok:
                 from ..utils.seed_scope import PYTHON_SEED_LINES
                 f.write(PYTHON_SEED_LINES)
+        # Whether Python's generator is seeded by this file. The caller refuses to
+        # launch a replicate whose recorded seed did not reach both generators.
+        return bool(seed_ok)
 
     def _run_cc3d_simulation(self, project_path, output_dir):
         """

@@ -6,6 +6,14 @@ output tables. The model draws from two random generators (CompuCell3D's, and
 Python's for superficial-cell sloughing); the wrapper seeds both from the one
 recorded seed (vivarium_vcornea/utils/seed_scope.py).
 
+Two further runs make the result mean something:
+  * a control with the same seed in which Python's generator is deliberately left
+    unseeded (the behaviour before the fix): it must NOT reproduce the tables, which
+    shows that sloughing draws do change the outcome within this horizon and that
+    the seeding of Python's generator is what gives the replay;
+  * a run configured to record thickness only (cell counts and surfactant switched
+    off): it must be classified as a success.
+
 Scope of the claim these tests support: same machine, same software environment,
 one processor, a short run without injury. A full-length run is not checked here.
 
@@ -26,19 +34,40 @@ SIM_DAYS = 1               # 240 MCS (the schema takes whole days); sloughing dr
 SEED = 20261123
 
 
-def _run(out_dir, seed):
+UNSEEDED_PYTHON = "\n# test control: Python's generator deliberately left unseeded\n"
+
+
+def _run(out_dir, seed, python_seed_lines=None, **switches):
+    """One real run. python_seed_lines replaces the lines the wrapper appends to
+    the generated Parameters.py (the control passes a comment instead)."""
     proc = VCorneaProcess({'output_base_dir': str(out_dir), 'SimTime': SIM_DAYS,
-                           'replicates': 1, 'random_seed': seed, 'IsInjury': False})
+                           'replicates': 1, 'random_seed': seed, 'IsInjury': False,
+                           **switches})
+    if python_seed_lines is not None:
+        real_write = proc._write_parameters_file
+
+        def write_without_python_seed(params_file, sim_params):
+            # Edit the file this replicate just wrote; nothing shared is changed, so
+            # the runs going on in parallel are not affected.
+            from vivarium_vcornea.utils.seed_scope import PYTHON_SEED_LINES
+            written = real_write(params_file, sim_params)
+            text = Path(params_file).read_text()
+            assert PYTHON_SEED_LINES in text
+            Path(params_file).write_text(text.replace(PYTHON_SEED_LINES, python_seed_lines))
+            return written
+        proc._write_parameters_file = write_without_python_seed
     states = {'inputs': {k: v['_default'] for k, v in proc.ports_schema()['inputs'].items()}}
     [rep] = proc.next_update(1, states)['outputs']['replicate_results']
     assert rep['status'] == 'success', rep.get('error_message')
     run_dir = Path(rep['output_directory'])
     meta = json.loads((run_dir / 'run_metadata.json').read_text())
-    tables = {
-        'cell_count': pd.read_csv(next(run_dir.glob('cell_count_*.csv'))),
-        'surfactant': pd.read_csv(next(run_dir.glob('surfactant_*.csv'))),
-        'thickness': pd.read_parquet(next(run_dir.glob('thickness_*.parquet'))),
-    }
+    tables = {}
+    for name, pattern, read in (('cell_count', 'cell_count_*.csv', pd.read_csv),
+                                ('surfactant', 'surfactant_*.csv', pd.read_csv),
+                                ('thickness', 'thickness_*.parquet', pd.read_parquet)):
+        found = sorted(run_dir.glob(pattern))
+        if found:
+            tables[name] = read(found[0])
     return run_dir, meta, tables
 
 
@@ -46,9 +75,15 @@ def _run(out_dir, seed):
 def runs(tmp_path_factory):
     base = tmp_path_factory.mktemp('vc')      # short path: the project copy is deep
     from concurrent.futures import ThreadPoolExecutor
-    plan = (('a', SEED), ('b', SEED), ('other', SEED + 1))
+    plan = {
+        'a': dict(seed=SEED),
+        'b': dict(seed=SEED),
+        'other': dict(seed=SEED + 1),
+        'python_unseeded': dict(seed=SEED, python_seed_lines=UNSEEDED_PYTHON),
+        'thickness_only': dict(seed=SEED, CellCount=False, SurfactantTracking=False),
+    }
     with ThreadPoolExecutor(max_workers=len(plan)) as pool:     # each run is its own process
-        futures = {name: pool.submit(_run, base / name, seed) for name, seed in plan}
+        futures = {name: pool.submit(_run, base / name, **kw) for name, kw in plan.items()}
         return {name: f.result() for name, f in futures.items()}
 
 
@@ -88,3 +123,31 @@ def test_a_different_seed_gives_a_different_run(runs):
     _, _, a = runs['a']
     _, _, other = runs['other']
     assert not a['thickness'].equals(other['thickness'])
+
+
+def test_without_seeding_pythons_generator_the_same_seed_does_not_replay(runs):
+    # The control: CompuCell3D's seed is the same as in run 'a', Python's generator
+    # is left to seed itself. If this run reproduced 'a', the replay above would
+    # owe nothing to the Python seeding (or no sloughing draw mattered in a day).
+    run_dir, meta, control = runs['python_unseeded']
+    _, _, a = runs['a']
+    assert meta['random_seed'] == SEED
+    assert '_python_random.seed' not in (run_dir / 'Parameters.py').read_text()
+    assert not (a['cell_count'].equals(control['cell_count'])
+                and a['thickness'].equals(control['thickness']))
+
+
+def test_a_real_run_that_records_thickness_only_is_a_success(runs):
+    run_dir, meta, tables = runs['thickness_only']
+    check = meta['output_check']
+    by = {e['output']: e for e in check['outputs']}
+    assert meta['simulation_status'] == 'success' and check['ok'] is True
+    assert check['completion_evidence'] == 'end_of_run_output'
+    assert by['cell_count']['state'] == 'not requested'
+    assert by['surfactant']['state'] == 'not requested'
+    assert by['thickness']['state'] == 'complete'
+    assert set(tables) == {'thickness'} and len(tables['thickness']) > 0
+    assert not list(run_dir.glob('cell_count_*.csv'))
+    with zipfile.ZipFile(run_dir / meta['omex_archive']) as zf:
+        assert 'simulation.sedml' in zf.namelist()          # archived as a completed run
+        assert json.loads(zf.read('status.json'))['status'] == 'success'
