@@ -53,7 +53,7 @@ visible. Optional fields may be omitted when they cannot apply to a parameter.
 | `_biological_meaning` | no | What the quantity corresponds to in vivo / in vitro. |
 | `_model_context` | no | Where it enters the model: equation, Hamiltonian term, rule. |
 | `_implementation_pattern` | no | Where it is assigned in the code. |
-| `_ontology_term` | no | CURIE (`CBO:0000016`) or list of CURIEs; ontology-agnostic. |
+| `_ontology_term` | no | Ontology term or list of terms, as `prefix:Identifier`; ontology-agnostic. Cell Behavior Ontology classes are identified by name (`cbo:AdhesionEnergy` = `http://cbo.biocomplexity.indiana.edu/svn/cbo/trunk/CBO_1_1_2.owl#AdhesionEnergy`, release 1.1.2); CBO has no numeric identifiers. |
 
 ### 3. Units
 

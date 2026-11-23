@@ -614,7 +614,7 @@ class AngiogenesisProcess(Process):
                                  '= 0.2 corresponds to the mildly adhesive Merks 2006 J_cc = 20 case (γ/T = 10/50). No published '
                                  'source gives the number 2 itself.',
                     },
-                    '_ontology_term': 'CBO:0000015',  # Cell-cell adhesion
+                    '_ontology_term': 'cbo:AdhesionEnergy',  # energy of contact between two objects (here: two cells)
                     '_model_context': 'Contact energy term in Cellular Potts Model Hamiltonian. Appears in energy calculation: ΔH = Σ J(τ,τ\')(1-δ) for cell boundary modifications.',
 
                     # === RELATIONSHIPS ===
@@ -730,7 +730,7 @@ class AngiogenesisProcess(Process):
                                  'associate with blocked VE-cadherin signalling (anti-VE-cadherin antibody, Fig 1) — though in '
                                  'the paper that phenotype is produced by removing contact inhibition, not by changing J.',
                     },
-                    '_ontology_term': 'CBO:0000016',  # Cell-matrix adhesion
+                    '_ontology_term': 'cbo:AdhesionEnergy',  # same class as jee: CBO has no cell-medium-specific energy
                     '_model_context': 'EC-Medium contact energy in CPM Hamiltonian. Critical parameter controlling aggregation vs network formation.',
 
                     '_related_parameters': ['jee'],
@@ -854,7 +854,7 @@ class AngiogenesisProcess(Process):
                                  'to the membrane fluctuations that drive movement. Merks 2006 used χ = 1000 at T = 50 without '
                                  'contact inhibition.',
                     },
-                    '_ontology_term': 'CBO:0000072',  # Chemotaxis
+                    '_ontology_term': 'cbo:Chemotaxis',  # the process this coefficient parameterizes (CBO has no class for the coefficient)
                     '_model_context': 'Chemotaxis Hamiltonian term: H_chem = -λ_chem * Σ_membrane VEGF(x). Drives cell migration toward VEGF sources.',
 
                     '_related_parameters': ['vedir', 'vesec', 'lsc'],
@@ -969,7 +969,7 @@ class AngiogenesisProcess(Process):
                                  "sweep 0–0.15 to show the effect. This model's default 0.1 sits inside that sweep but is not the "
                                  'published standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
                     },
-                    '_ontology_term': 'CBO:0000072',  # Chemotaxis (same as lchem)
+                    '_ontology_term': 'cbo:Chemotaxis',  # the process, as for lchem
                     '_model_context': 'Saturation parameter in chemotaxis term. Determines if cells respond linearly or with saturation to VEGF concentration.',
 
                     '_related_parameters': ['lchem'],
@@ -1081,7 +1081,7 @@ class AngiogenesisProcess(Process):
                                  "DiffusionSolverFE); the comparison values assume Merks et al.'s mapping of 2 µm per lattice "
                                  'site and 30 s per MCS.',
                     },
-                    '_ontology_term': 'CBO:0000090',  # Molecular diffusion
+                    '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion term in VEGF field PDE: ∂C/∂t = D∇²C + production - decay. Solved using DiffusionSolverFE.',
 
                     '_related_parameters': ['veder', 'vesec', 'lchem'],
@@ -1200,7 +1200,7 @@ class AngiogenesisProcess(Process):
                                  'sets no physical scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks '
                                  "et al.'s mapping of 2 µm per lattice site and 30 s per MCS.",
                     },
-                    '_ontology_term': 'CBO:0000091',  # Molecular degradation
+                    '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Decay term in VEGF field PDE. Combined with diffusion, determines gradient spatial scale.',
 
                     '_related_parameters': ['vedir', 'vesec'],
@@ -1313,7 +1313,7 @@ class AngiogenesisProcess(Process):
                                  "scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks et al.'s mapping "
                                  'of 2 µm per lattice site and 30 s per MCS.',
                     },
-                    '_ontology_term': 'CBO:0000092',  # Molecular secretion
+                    '_ontology_term': 'cbo:MoleculeCreation',
                     '_model_context': 'Source term in VEGF field PDE. ECs secrete VEGF, creating gradients that guide chemotaxis.',
 
                     '_related_parameters': ['vedir', 'veder', 'lchem'],

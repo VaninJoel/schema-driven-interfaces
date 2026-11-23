@@ -18,7 +18,7 @@ Identity and meaning,_conceptual_hint,no,Operator-level intuition in plain langu
 Identity and meaning,_biological_meaning,no,What the quantity corresponds to in vivo / in vitro.,'Represents VEGF diffusion through tissue/medium. In vivo …',9/11,1/79
 Identity and meaning,_model_context,no,"Where it enters the model: equation, Hamiltonian term, rule.",'Diffusion term in VEGF field PDE: ∂C/∂t = D∇²C + …',7/11,76/79
 Identity and meaning,_implementation_pattern,no,Where it is assigned in the code.,,0/11,79/79
-Identity and meaning,_ontology_term,no,CURIE (`CBO:0000016`) or list of CURIEs; ontology-agnostic.,'CBO:0000090',7/11,75/79
+Identity and meaning,_ontology_term,no,"Ontology term or list of terms, as `prefix:Identifier`; ontology-agnostic. Cell Behavior Ontology classes are identified by name (`cbo:AdhesionEnergy` = `http://cbo.biocomplexity.indiana.edu/svn/cbo/trunk/CBO_1_1_2.owl#AdhesionEnergy`, release 1.1.2); CBO has no numeric identifiers.",'cbo:MoleculeDiffusion',7/11,75/79
 Units,_unit,yes,"Unit of the stored value, as the simulator sees it.",'pixels²/MCS',11/11,79/79
 Units,_dimension,yes,"`energy`, `length`, `time`, `concentration`, `rate`, `count`, `dimensionless`, … Drives display conversion.",'diffusivity',10/11,76/79
 Units,_unit_long,no,Spelled-out unit with caveats.,'Diffusion coefficient (simulation units)',10/11,0/79

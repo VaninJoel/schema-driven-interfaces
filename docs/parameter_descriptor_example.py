@@ -98,7 +98,7 @@ JEM = {
                        'Hamiltonian; critical parameter controlling aggregation versus '
                        'network formation.'),
     '_implementation_pattern': None,     # code location of the assignment; not yet recorded for this parameter
-    '_ontology_term': 'CBO:0000016',     # Cell Behavior Ontology: cell-matrix adhesion
+    '_ontology_term': 'cbo:AdhesionEnergy',   # Cell Behavior Ontology class (by name)
 
     # ---- units --------------------------------------------------------------
     '_unit': 'Arbitrary Energy Units',

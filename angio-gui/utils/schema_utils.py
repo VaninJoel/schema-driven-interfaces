@@ -679,7 +679,7 @@ ONTOLOGY_PREFIXES = {
 
 
 def format_ontology_term(term) -> str:
-    """'CBO:0000016' -> 'CBO:0000016 (Cell Behavior Ontology)'; lists are joined."""
+    """'cbo:AdhesionEnergy' -> 'cbo:AdhesionEnergy (Cell Behavior Ontology)'; lists are joined."""
     if not term:
         return ''
     terms = term if isinstance(term, (list, tuple)) else [term]
