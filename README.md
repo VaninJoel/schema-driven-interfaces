@@ -45,31 +45,13 @@ The [examples/](examples/) folder links every report and archive and explains wh
 
 ---
 
-## ⬇️ Download & install — no coding required
+## Install and run
 
-Pre-built desktop installers bundle **everything** (including CompuCell3D) — no
-Python or conda setup. Download the one for your computer, then follow the last
-column. All builds live on the **[Releases page](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest)**.
-
-| Your computer | Download | Then |
-|---|---|---|
-| **Windows** (64-bit) | [Windows installer (.zip)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-Windows-x86_64.zip) | Extract the zip, double-click **`install.bat`**, then open **V-Cornea Simulation** / **Angiogenesis Simulation** from the Start menu. |
-| **macOS** (Apple Silicon) | [macOS installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-macOS-arm64.sh) | Open Terminal and run `bash ~/Downloads/SchemaDrivenInterfaces-macOS-arm64.sh`, then launch from the desktop. |
-| **Linux** (64-bit) | [Linux installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-Linux-x86_64.sh) | In a terminal, run `bash ~/Downloads/SchemaDrivenInterfaces-Linux-x86_64.sh`, then launch from the app menu. |
-
-Installs into your user folder — **no admin rights needed**. The installers are
-unsigned, so Windows SmartScreen ("More info → Run anyway") and macOS Gatekeeper
-may ask for confirmation the first time. Prefer to run from the source code
-instead? See [Run from source](#run-from-source-developers).
-
-**Where your runs are saved:** by default in your Documents folder, under
+The applications are installed from source; no prebuilt installer is published
+from v1.1.0 on. Runs are saved by default in your Documents folder, under
 `Documents/SchemaDrivenInterfaces/vcornea-gui/experiments` and
-`Documents/SchemaDrivenInterfaces/angio-gui/experiments`. Use **Browse...** in
-the app to choose another folder. Reinstalling or updating never deletes saved runs.
-
----
-
-## Run from source (developers)
+`Documents/SchemaDrivenInterfaces/angio-gui/experiments`; use **Browse...** in
+the app to choose another folder.
 
 Everything runs in a single self-contained conda environment (`vc`) — one file
 sets up CompuCell3D 4.7.0, Python 3.12 and the full Python stack:
@@ -114,7 +96,7 @@ COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 | [`vcornea_paper/`](vcornea_paper/) | The published **V-Cornea** CompuCell3D model (Vanin et al. 2025, *PLOS Comput Biol* 21(12):e1013410), unmodified, in its `Local/` and `HPC/` layouts. |
 | [`examples/`](examples/) | One example parameter sweep per case study: experiment and audit reports (PDF) and every run archive (OMEX). |
 | [`tests/`](tests/) | Repository-level tests (headless GUIs). |
-| [`installer/`](installer/) | Scripts that build the self-contained desktop installers. |
+| [`installer/`](installer/) | Scripts that built the desktop installers of releases up to v1.0.4. No installer is published from v1.1.0 on. |
 
 Each GUI finds its sibling process package by relative path (e.g.
 `vcornea-gui/run_gui.py` expects `../vivarium-vcornea`), so keep the folders

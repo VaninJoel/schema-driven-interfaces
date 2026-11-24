@@ -258,9 +258,7 @@ This integrated approach trades implementation complexity for performance and fl
 
 ## 📦 Installation
 
-- **No coding:** download the desktop installer for your OS from the
-  [repository README](../README.md).
-- **From source:** follow [INSTALL.md](../INSTALL.md) (one conda environment, `vc`,
+- Follow [INSTALL.md](../INSTALL.md) (one conda environment, `vc`,
   provides CompuCell3D 4.7.0, Python 3.12 and every dependency), then:
 
 ```bash

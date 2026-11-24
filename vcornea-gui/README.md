@@ -66,9 +66,7 @@ For batch runs (parameter sweeps / replicates) these files live under
 
 ## Installation
 
-- **No coding:** download the desktop installer for your OS from the
-  [repository README](../README.md).
-- **From source:** follow [INSTALL.md](../INSTALL.md) — one conda environment
+- Follow [INSTALL.md](../INSTALL.md) — one conda environment
   (`vc`) provides CompuCell3D 4.7.0, Python 3.12, PyQt5 and the sibling
   `vivarium-vcornea` package, whose `VCorneaProcess` schema drives this GUI.
 

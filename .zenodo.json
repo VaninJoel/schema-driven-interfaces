@@ -1,0 +1,55 @@
+{
+  "title": "Schema-Driven Interfaces: Angio-GUI and V-Cornea GUI",
+  "version": "1.1.0",
+  "upload_type": "software",
+  "license": "MIT",
+  "description": "Schema-driven graphical interfaces, provenance capture and COMBINE/OMEX run archives for two CompuCell3D models exposed as Vivarium processes: Angio-GUI (integrated, API-driven pattern) and the V-Cornea GUI (decoupled, subprocess-based pattern). Release accompanying the revised manuscript \"Addressing the Usability Gap in In Silico Experiments: Schema-Driven Interfaces and Provenance for Reproducible Simulations\"; it contains the example runs in examples/, produced from commit 210b9c3.",
+  "creators": [
+    {
+      "name": "Vanin, Joel",
+      "affiliation": "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA; Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA",
+      "orcid": "0000-0001-9227-9667"
+    },
+    {
+      "name": "Getz, Michael",
+      "affiliation": "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA",
+      "orcid": "0000-0001-9886-8454"
+    },
+    {
+      "name": "Sego, Timothy J.",
+      "affiliation": "Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA",
+      "orcid": "0000-0002-4274-656X"
+    },
+    {
+      "name": "Mahony, Catherine",
+      "affiliation": "Procter & Gamble Technical Centre, Reading, UK"
+    },
+    {
+      "name": "Glazier, James A.",
+      "affiliation": "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA",
+      "orcid": "0000-0003-3634-190X"
+    },
+    {
+      "name": "Veschini, Lorenzo",
+      "affiliation": "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA",
+      "orcid": "0000-0003-3820-7472"
+    }
+  ],
+  "keywords": [
+    "CompuCell3D",
+    "Vivarium",
+    "agent-based modeling",
+    "schema-driven GUI",
+    "provenance",
+    "COMBINE/OMEX",
+    "reproducibility"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/VaninJoel/schema-driven-interfaces",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ],
+  "publication_date": "2026-11-24"
+}
