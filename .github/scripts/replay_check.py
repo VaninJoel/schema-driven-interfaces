@@ -18,13 +18,22 @@ REPO = Path(__file__).resolve().parents[2]
 ENV = {**os.environ, 'OPENBLAS_NUM_THREADS': '1'}
 
 
-def run(cmd, cwd):
+ABNORMAL_EXITS = []
+
+
+def run(cmd, cwd, tolerate_exit=False):
+    """Run a command. With tolerate_exit, a non-zero exit status is recorded and
+    reported instead of ending the check, so that what the command wrote can still
+    be compared (a process that crashes while exiting has already written it)."""
     print('$', ' '.join(str(c) for c in cmd), flush=True)
     done = subprocess.run(cmd, cwd=cwd, env=ENV, capture_output=True, text=True)
     if done.returncode != 0:
         print(done.stdout[-3000:])
         print(done.stderr[-3000:])
-        raise SystemExit(f'command failed with exit code {done.returncode}')
+        if not tolerate_exit:
+            raise SystemExit(f'command failed with exit code {done.returncode}')
+        ABNORMAL_EXITS.append((' '.join(str(c) for c in cmd[1:4]), done.returncode))
+        print(f'NOTE: exit code {done.returncode}; comparing what it wrote', flush=True)
     return done
 
 
@@ -43,7 +52,7 @@ def angio(work):
          '-o', str(work / 'out')], work)
     native = {int(p.stem.split('_')[1]): np.load(p)
               for p in (work / 'model' / 'native_output').glob('step_*.npy')}
-    run([sys.executable, 'run_model.py'], work / 'model')
+    run([sys.executable, 'run_model.py'], work / 'model', tolerate_exit=True)
     rerun = {step: np.array(data) for step, data in og._load_zarr_steps(
         work / 'model' / 'rerun_output' / 'data.zarr', strict=True)}
 
@@ -71,7 +80,7 @@ def vcornea(work):
     run([sys.executable, '-m', 'cc3d.run_script', '-i', 'model/vCornea_v2.cc3d',
          '-o', str(work / 'out')], work)
     done = run([sys.executable, str(REPO / 'vivarium-vcornea' / 'compare_replay.py'),
-                '.', 'model/Simulation', '241'], work)
+                '.', 'model/Simulation', '241'], work, tolerate_exit=True)
     print(done.stdout)
     return 'ALL IDENTICAL' in done.stdout
 
@@ -81,4 +90,6 @@ if __name__ == '__main__':
     work.mkdir(parents=True, exist_ok=True)
     ok = {'angio': angio, 'vcornea': vcornea}[which](work)
     print('RESULT:', 'identical to the archive' if ok else 'DIFFERS from the archive')
-    sys.exit(0 if ok else 1)
+    for what, code in ABNORMAL_EXITS:
+        print(f'ABNORMAL EXIT: `{what}` ended with exit code {code} after writing its output')
+    sys.exit(0 if ok and not ABNORMAL_EXITS else 1)

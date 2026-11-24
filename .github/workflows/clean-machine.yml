@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest, macos-13]
     defaults:
       run:
         shell: bash -el -o pipefail {0}
@@ -71,6 +71,11 @@ jobs:
           conda run -n vc --no-capture-output python -c "import cc3d; print('CompuCell3D OK', cc3d.__version__)"
           conda run -n vc --no-capture-output python -c "import vivarium_vcornea, vivarium_angio; print('wrappers OK')"
           conda run -n vc --no-capture-output python -c "import sys, numpy, pandas, zarr; print(sys.version.split()[0], numpy.__version__, pandas.__version__, zarr.__version__)"
+
+      - name: Diagnose abnormal process exits
+        if: always() && steps.create.conclusion == 'success' && runner.os != 'Windows'
+        run: |
+          conda run -n vc --no-capture-output python .github/scripts/diagnose_exit.py "$RUNNER_TEMP/dx" 2>&1 | tee dx.log || true
 
       - name: Tests - tests
         if: always() && steps.create.conclusion == 'success'

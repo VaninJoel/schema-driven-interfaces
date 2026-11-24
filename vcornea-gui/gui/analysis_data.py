@@ -82,10 +82,13 @@ class AnalysisDataset:
                 return False
             return True
 
-        count = [str(p) for p in base.rglob("cell_count_*.csv") if keep(p)]
-        thick = [str(p) for p in base.rglob("thickness_rep_*.parquet") if keep(p)]
-        surf = [str(p) for p in base.rglob("surfactant_*.csv") if keep(p)]
-        meta = [p for p in base.rglob("run_metadata.json") if keep(p)]
+        # Sorted: the order in which a file system lists a folder is not defined
+        # (it differs between Windows and Linux), and the order of replicates
+        # must not depend on it.
+        count = [str(p) for p in sorted(base.rglob("cell_count_*.csv")) if keep(p)]
+        thick = [str(p) for p in sorted(base.rglob("thickness_rep_*.parquet")) if keep(p)]
+        surf = [str(p) for p in sorted(base.rglob("surfactant_*.csv")) if keep(p)]
+        meta = [p for p in sorted(base.rglob("run_metadata.json")) if keep(p)]
         if self.excluded_runs:
             print(f"[analysis] excluded {len(self.excluded_runs)} unsuccessful run(s): "
                   + ", ".join(f"{Path(d).name}={s}" for d, s in sorted(self.excluded_runs.items())))

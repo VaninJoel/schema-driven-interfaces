@@ -483,6 +483,7 @@ trajectory to rerun_output/data.zarr beside this script. With the same software 
 one processor, each recorded step is expected to equal the archived zarr/ step.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -502,6 +503,12 @@ composer = AngiogenesisComposer({"angiogenesis_process": params})
 engine = Engine(composite=composer.generate())
 engine.update(params.get("sim_time", 100.0))
 print(f"Re-run complete: {store}")
+# The trajectory is on disk. CompuCell3D 4.7.0 can crash while the interpreter
+# tears down after an in-process run (seen on Linux: exit by segmentation fault
+# after the output was written), so end the process here, as the GUI worker does.
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(0)
 '''
 
 
