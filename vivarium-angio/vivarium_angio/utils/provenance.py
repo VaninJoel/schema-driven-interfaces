@@ -37,6 +37,7 @@ from typing import Any, Dict, Optional
 # git is invoked with a short timeout so a wedged/networked git can never stall a
 # run, and (on Windows) without a console window so the GUI does not flash a shell.
 _GIT_TIMEOUT_S = 5
+_GIT_KILL_WAIT_S = 2      # how long a killed git call is given to let go of its pipe
 _NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
 
 # Written next to the payload by the installer build so packaged (non-git)
@@ -107,16 +108,44 @@ def _run_git(args, cwd, allow_empty: bool = False) -> Optional[str]:
     commit, which is exactly the case the caller needs to detect. Without it an
     unpushed commit is indistinguishable from a git error.
     """
+    # Two properties matter beyond the answer itself:
+    #  * The call must never wait without limit. subprocess.run(timeout=...) kills
+    #    the child on timeout and then waits, unbounded, for its pipes to close; on
+    #    Windows a helper process that inherited the pipe keeps that wait alive. So
+    #    the wait after the kill is bounded too, and the pipe is then closed here.
+    #  * The call must not write to the repository. `git status` normally refreshes
+    #    the index under .git/index.lock; a status killed at the timeout leaves that
+    #    lock behind and blocks the next commit. --no-optional-locks makes every
+    #    query here read-only.
     try:
-        proc = subprocess.run(
-            ['git', *args], cwd=str(cwd), capture_output=True, text=True,
-            timeout=_GIT_TIMEOUT_S, creationflags=_NO_WINDOW,
+        proc = subprocess.Popen(
+            ['git', '--no-optional-locks', *args], cwd=str(cwd),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, creationflags=_NO_WINDOW,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None  # git absent, not executable, or timed out
+        return None  # git absent or not executable
+    try:
+        stdout, _ = proc.communicate(timeout=_GIT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate(timeout=_GIT_KILL_WAIT_S)
+        except Exception:  # noqa: BLE001 - still not released: stop waiting for it
+            pass
+        finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        return None  # timed out
+    except Exception:  # noqa: BLE001
+        proc.kill()
+        return None
     if proc.returncode != 0:
         return None
-    out = proc.stdout.strip()
+    out = (stdout or '').strip()
     return out if (out or allow_empty) else None
 
 
