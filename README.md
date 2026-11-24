@@ -89,10 +89,13 @@ display (X11) notes, verification and troubleshooting.
 From the repository root, with the environment active:
 
 ```bash
-pytest
+pytest tests
+pytest vivarium-angio
+pytest vivarium-vcornea
 ```
 
-This runs, in one session, the unit tests of both Vivarium packages (including the
+Run the three suites as separate commands (in a single session an Angio run
+late in the session has been seen to stall). Together they run the unit tests of both Vivarium packages (including the
 check that every exposed parameter carries the required schema fields), the
 COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 ([`tests/gui/`](tests/gui/)).
