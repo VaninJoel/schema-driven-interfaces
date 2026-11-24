@@ -96,6 +96,10 @@ def _schedule_finding(schedule: str, df, final_mcs: int):
     last = float(df['Time'].max()) if n else None
     expected_last = float(final_mcs // MCS_PER_HOUR)
     if schedule == 'sparse':
+        # No fixed number of rows, but the tissue is measured at hour 0, so a
+        # table without a single row was not written by a run that got going.
+        if n == 0:
+            return 'incomplete', last, n, "has no rows"
         return 'complete', last, n, None
     if last is None or last < expected_last - 1e-9:
         return ('truncated', last, n,
@@ -141,7 +145,8 @@ def check_requested_outputs(output_dir, sim_params: Dict[str, Any], final_mcs: i
       final_mcs, expected_last_time_hours, cc3d_end_of_run_report
       outputs              one entry per end-of-run output: switch, requested,
                            state ('complete' | 'missing' | 'truncated' |
-                           'incomplete' | 'unreadable' | 'not requested'), file, last_time_hours,
+                           'incomplete' | 'unreadable' | 'present, not read' |
+                           'not requested'), file, last_time_hours,
                            detail, and stale_files when tables from before the
                            launch were found and ignored
       problems             human-readable reasons, empty when ok
@@ -186,7 +191,7 @@ def check_requested_outputs(output_dir, sim_params: Dict[str, Any], final_mcs: i
         except ImportError as e:
             # No parquet engine in this environment: the table exists and carries
             # the final step in its name; its contents are not judged.
-            entry['state'] = 'complete'
+            entry['state'] = 'present, not read'
             entry['detail'] = f"contents not read ({e})"
             continue
         except Exception as e:  # noqa: BLE001

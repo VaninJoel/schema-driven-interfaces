@@ -487,3 +487,27 @@ def test_seed_counts_as_applied_only_when_it_reached_both_generators(tmp_path, m
     [rep] = out['replicate_results']
     assert launched == [] and rep['status'] == 'failed'
     assert "Python's generator" in rep['error_message']
+
+
+def test_an_empty_thickness_table_is_not_complete(tmp_path):
+    import pandas as pd
+    from vivarium_vcornea.utils.output_check import check_requested_outputs
+    pd.DataFrame({'Time': [], 'Bin': [], 'Height': []}).to_parquet(tmp_path / 'thickness_rep_241.parquet')
+    check = check_requested_outputs(tmp_path, {'CellCount': False, 'SurfactantTracking': False}, 240)
+    [entry] = [e for e in check['outputs'] if e['output'] == 'thickness']
+    assert entry['state'] == 'incomplete' and not check['ok']
+
+
+def test_a_table_that_cannot_be_read_for_lack_of_an_engine_is_not_called_complete(tmp_path, monkeypatch):
+    from vivarium_vcornea.utils import output_check
+    (tmp_path / 'thickness_rep_241.parquet').write_bytes(b'x')
+
+    def no_engine(path):
+        raise ImportError('no parquet engine')
+    monkeypatch.setattr(output_check, '_read_table', no_engine)
+    check = output_check.check_requested_outputs(
+        tmp_path, {'CellCount': False, 'SurfactantTracking': False}, 240)
+    [entry] = [e for e in check['outputs'] if e['output'] == 'thickness']
+    assert entry['state'] == 'present, not read' and 'not read' in entry['detail']
+    assert check['ok']          # the file carries the final step; contents unjudged
+
