@@ -1,15 +1,26 @@
 """Per-combination + experiment PDF reports for angio OMEX runs (parity with the
 vivarium-vcornea report tool, adapted for the angio Zarr/metrics model).
 
-Reads ONLY the OMEX archives' worth of information: it (re)generates each run's
-.omex with the current generator (so each carries metrics.csv + metadata.rdf +
-model summary), then builds, OMEX-internal style:
+Two separate steps:
+
+  1. Export (only where a working directory exists): a run directory that has no
+     archive yet gets one, built by the current generator. A run directory is
+     never read after this step.
+  2. Report: every figure, table and number is read from the .omex archives --
+     run_metadata.json, the parameter audit, metadata.rdf, metrics.csv and the
+     Zarr trajectory packed under zarr/. The metric series are recomputed from
+     that archived trajectory and compared with the archive's own metrics.csv;
+     the outcome is printed in the report. A directory holding nothing but
+     .omex files therefore produces the same report as the original experiment
+     directory.
+
+Output:
   * one <combo>_omex_report.pdf per combination (replicate-aware metric plots +
     a final-step network snapshot + provenance + validation), and
   * one <experiment>_experiment_report.pdf comparing the combinations.
 
 Usage:
-    python make_omex_combo_report.py <experiment_dir>
+    python make_omex_combo_report.py <experiment_dir | directory of .omex files>
 """
 from __future__ import annotations
 
@@ -98,6 +109,7 @@ ROLES = {
     'sim_params.json': 'Exact simulation parameters',
     'scan_metadata.json': 'Scan catalogue (points, combinations, metrics)',
     'metrics.csv': 'Scalar signals over time (indexed by the SED-ML)',
+    'status.json': 'Machine-readable run outcome',
     'model/model_summary.json': 'Bundled model artifact (model/@source resolves here)',
 }
 
@@ -132,27 +144,186 @@ def _contents_rows(omex):
 
 
 # ----------------------------------------------------------------- discovery
-def discover_combos(root):
-    """Group run directories (each holding a `data.zarr`) by combination.
+def _combo_key(run_name):
+    """`<base>_comboNNN_repRR` -> `<base>_comboNNN`; a plain single run is its own
+    one-replicate combination."""
+    return re.sub(r'_rep\d+$', '', run_name)
 
-    Sweep/replicate runs use flat `<base>_comboNNN_repRR/` dirs, grouped here by
-    stripping the `_repRR` suffix. A plain single run has no `_repNN` suffix, so
-    its directory is treated as its own one-replicate combination — otherwise the
-    GUI's single runs would never produce a report.
+
+def discover_combos(root):
+    """Group RUN DIRECTORIES by combination, for the export step only.
+
+    A run directory is one that holds a `data.zarr`, a `run_metadata.json` or its
+    own `<name>.omex`. A run that failed before it wrote any Zarr store is
+    therefore still found, archived and listed, instead of vanishing from the
+    batch.
     """
     root = Path(root)
     combos = {}
     for d in sorted(root.iterdir()):
-        if not (d.is_dir() and (d / 'data.zarr').exists()):
+        if not d.is_dir():
             continue
-        key = re.sub(r'_rep\d+$', '', d.name) if re.search(r'_rep\d+$', d.name) else d.name
-        combos.setdefault(key, []).append(d)
+        if not ((d / 'data.zarr').exists() or (d / 'run_metadata.json').exists()
+                or (d / f"{d.name}.omex").exists()):
+            continue
+        combos.setdefault(_combo_key(d.name), []).append(d)
     return combos
 
 
-def _params(rep_dir):
+class ArchivedRun:
+    """One run, as its .omex archive describes it. Everything the report shows
+    about a run comes through this class, and this class opens only the archive.
+
+    `omex` is None for a run that has no archive (it could not be exported); such
+    a run is listed as excluded and nothing else is known about it.
+    """
+
+    def __init__(self, omex=None, name=None):
+        self.omex = Path(omex) if omex else None
+        self.name = name or self.omex.stem
+        self._meta = None
+        self._loaded = False
+        self._frame = None
+        self._fields = {}
+        self.metrics_check = 'not checked'
+
+    def _read_json(self, member):
+        if self.omex is None:
+            return None
+        try:
+            with zipfile.ZipFile(self.omex) as zf:
+                return json.loads(zf.read(member)) if member in zf.namelist() else None
+        except Exception:
+            return None
+
+    @property
+    def meta(self):
+        if self._meta is None:
+            self._meta = self._read_json('run_metadata.json') or {}
+        return self._meta
+
+    @property
+    def params(self):
+        return self.meta.get('parameters') or self._read_json('sim_params.json') or {}
+
+    @property
+    def status(self):
+        """The outcome the archive records; 'no archive' / 'unknown' otherwise."""
+        if self.omex is None:
+            return 'no archive'
+        status = self.meta.get('simulation_status')
+        if status not in og._ARCHIVE_STATUSES:
+            status = (self._read_json('status.json') or {}).get('status')
+        return status if status in og._ARCHIVE_STATUSES else 'unknown'
+
+    def _load(self):
+        """Read the archived trajectory once: metric series + final-step fields."""
+        if self._loaded:
+            return
+        self._loaded = True
+        embedded = recomputed = None
+        try:
+            with zipfile.ZipFile(self.omex) as zf:
+                if 'metrics.csv' in zf.namelist():
+                    embedded = pd.read_csv(io.BytesIO(zf.read('metrics.csv')))
+        except Exception as e:  # noqa: BLE001
+            print(f"[angio_report] {self.name}: metrics.csv unreadable: {e}")
+        with tempfile.TemporaryDirectory(prefix='angio_omex_',
+                                         ignore_cleanup_errors=True) as tmp:
+            try:
+                store = og.extract_archive_zarr(self.omex, tmp)
+            except Exception as e:  # noqa: BLE001
+                print(f"[angio_report] {self.name}: archived trajectory unreadable: {e}")
+                store = None
+            if store is not None:
+                csv = og.extract_zarr_metrics(store)
+                if csv:
+                    recomputed = pd.read_csv(io.StringIO(csv))
+                last = None
+                for _, data in og._load_zarr_steps(store):
+                    last = data
+                if last is not None:
+                    for channel in (0, 2):
+                        f = last[..., channel]
+                        while f.ndim > 2:
+                            f = f[..., 0] if f.shape[-1] == 1 else f.mean(axis=-1)
+                        self._fields[channel] = np.array(f)
+        # The archived trajectory is the raw state; the series are derived from it.
+        # metrics.csv is the archive's own copy of that derivation, so the two are
+        # compared, and it is the fallback when the trajectory cannot be read.
+        self._frame = recomputed if recomputed is not None else embedded
+        if recomputed is None:
+            self.metrics_check = ('trajectory unreadable; metrics.csv used'
+                                  if embedded is not None else 'no metric data')
+        elif embedded is None:
+            self.metrics_check = 'no metrics.csv in archive'
+        else:
+            same = (list(embedded.columns) == list(recomputed.columns)
+                    and embedded.shape == recomputed.shape
+                    and np.allclose(embedded.to_numpy(dtype=float),
+                                    recomputed.to_numpy(dtype=float),
+                                    rtol=0, atol=1e-6, equal_nan=True))
+            self.metrics_check = 'MATCH' if same else 'DIFFERS'
+
+    @property
+    def frame(self):
+        """Time + metric columns, derived from the archived trajectory (or None)."""
+        self._load()
+        return self._frame
+
+    def final_field(self, channel):
+        """Final-step 2D view of a channel (0 = cell type, 2 = VEGF), or None."""
+        self._load()
+        return self._fields.get(channel)
+
+
+def _is_scan_archive(omex):
     try:
-        return json.loads((rep_dir / 'run_metadata.json').read_text()).get('parameters', {})
+        with zipfile.ZipFile(omex) as zf:
+            names = zf.namelist()
+        return 'scan.sedml' in names or 'scan_metadata.json' in names
+    except Exception:
+        return True          # unreadable: not a run archive either
+
+
+def discover_archived_runs(root):
+    """{combo: [ArchivedRun]} for every per-run archive under root: a run
+    directory's own `<name>/<name>.omex`, or an .omex lying directly in root (an
+    experiment distributed as archives only). Experiment-level scan archives are
+    skipped. A run directory's archive wins over a loose copy of the same name."""
+    root = Path(root)
+    found = {}
+    for omex in sorted(root.glob('*.omex')):
+        if not _is_scan_archive(omex):
+            found[omex.stem] = omex
+    for omex in sorted(root.glob('*/*.omex')):
+        if omex.stem == omex.parent.name and not _is_scan_archive(omex):
+            found[omex.stem] = omex
+    combos = {}
+    for name in sorted(found):
+        combos.setdefault(_combo_key(name), []).append(ArchivedRun(found[name], name))
+    return combos
+
+
+def find_scan_archive(root):
+    """An experiment-level scan archive already present in root, or None."""
+    for omex in sorted(Path(root).glob('*.omex')):
+        try:
+            with zipfile.ZipFile(omex) as zf:
+                if 'scan.sedml' in zf.namelist():
+                    return omex
+        except Exception:
+            continue
+    return None
+
+
+def _params(run):
+    """Parameters of a run: from its archive (ArchivedRun), or — in the export
+    step, before an archive exists — from the run directory's run_metadata.json."""
+    if isinstance(run, ArchivedRun):
+        return run.params
+    try:
+        return json.loads((Path(run) / 'run_metadata.json').read_text()).get('parameters', {})
     except Exception:
         return {}
 
@@ -192,13 +363,79 @@ def derive_scan(combos):
 
 
 # ----------------------------------------------------------------- data + validation
-def replicate_metric_frames(rep_dirs):
-    frames = []
-    for d in rep_dirs:
-        csv = og.extract_zarr_metrics(Path(d) / 'data.zarr')
-        if csv:
-            frames.append(pd.read_csv(io.StringIO(csv)))
-    return frames
+def replicate_metric_frames(runs):
+    """One metrics frame per ArchivedRun, each derived from its archive."""
+    return [r.frame for r in runs if r.frame is not None]
+
+
+def _leaf_messages(nodes, trail=()):
+    """Flatten the validator's nested [message, [children]] lists into one line
+    per leaf: 'file -> element -> what is wrong'."""
+    lines = []
+    for node in nodes or []:
+        if isinstance(node, str):
+            lines.append(' → '.join(trail + (node.strip(),)))
+        elif isinstance(node, (list, tuple)) and node and isinstance(node[0], str):
+            message = ' '.join(node[0].split())
+            children = node[1] if len(node) > 1 else None
+
+            def _is_leaf(child):
+                return isinstance(child, str) or (
+                    isinstance(child, (list, tuple)) and len(child) == 1
+                    and isinstance(child[0], str)) or (
+                    isinstance(child, (list, tuple)) and len(child) == 2
+                    and isinstance(child[0], str) and not child[1])
+            if children and len(children) > 1 and all(_is_leaf(c) for c in children):
+                # details of ONE finding (e.g. the four numbers of a time course):
+                # keep them on its line instead of repeating the finding per detail
+                details = '; '.join(' '.join((c if isinstance(c, str) else c[0]).split())
+                                    for c in children)
+                lines.append(' → '.join(trail + (f"{message} ({details})",)))
+            elif children:
+                lines.extend(_leaf_messages(children, trail + (message,)))
+            else:
+                lines.append(' → '.join(trail + (message,)))
+        elif isinstance(node, (list, tuple)):
+            lines.extend(_leaf_messages(node, trail))
+    return lines
+
+
+_VALIDATION_CACHE = {}
+
+
+def validation_detail(omex):
+    """What the external validator (biosimulators-utils) said about an archive:
+    {'errors': [...], 'warnings': [...], 'notices': [...], 'skipped': reason|None}.
+    `warnings` are the validator's own findings, one line each; `notices` are what
+    it reported it did NOT check (raised as Python warnings)."""
+    key = (str(omex), Path(omex).stat().st_mtime_ns)
+    if key in _VALIDATION_CACHE:
+        return _VALIDATION_CACHE[key]
+    detail = {'errors': [], 'warnings': [], 'notices': [], 'skipped': None}
+    try:
+        from biosimulators_utils.combine.io import CombineArchiveReader
+        from biosimulators_utils.combine.validation import validate as bv
+        with tempfile.TemporaryDirectory() as ed, warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            arch = CombineArchiveReader().run(str(omex), ed)
+            errs, warns = bv(arch, archive_dirname=ed)
+        detail['errors'] = _leaf_messages(errs)
+        detail['warnings'] = _leaf_messages(warns)
+        notices = set()
+        for w in caught:
+            text = ' '.join(re.sub(r'\x1b\[[0-9;]*m', '', str(w.message)).split())
+            if 'not yet supported' not in text and 'biosimulators' not in str(
+                    getattr(w, 'filename', '')).lower():
+                continue
+            if text.startswith('The SED document is potentially incorrect'):
+                continue                  # a restatement of the warnings above
+            # the validator names its own temporary copy; keep the file name only
+            notices.add(re.sub(r'`[^`]*[\\/]([^`\\/]+)`', r'`\1`', text))
+        detail['notices'] = sorted(notices)
+    except Exception as e:  # noqa: BLE001
+        detail['skipped'] = str(e)
+    _VALIDATION_CACHE[key] = detail
+    return detail
 
 
 def run_validation(omex):
@@ -209,17 +446,51 @@ def run_validation(omex):
         man = zf.read('manifest.xml').decode()
     s_ok = og.validate_sedml_structure(sed)['valid'] if sed else False
     m_ok = og.validate_omex_manifest(man, [n for n in names if n != 'manifest.xml'])['valid']
-    try:
-        from biosimulators_utils.combine.io import CombineArchiveReader
-        from biosimulators_utils.combine.validation import validate as bv
-        with tempfile.TemporaryDirectory() as ed, warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            arch = CombineArchiveReader().run(str(omex), ed)
-            errs, warns = bv(arch, archive_dirname=ed)
-        bio = f"PASS ({len(errs)} errors, {len(warns)} warning group)" if not errs else f"FAIL ({len(errs)} errors)"
-    except Exception as e:  # noqa: BLE001
-        bio = f"SKIP ({e})"
+    d = validation_detail(omex)
+    if d['skipped'] is not None:
+        bio = f"SKIP ({d['skipped']})"
+    elif d['errors']:
+        bio = f"FAIL ({len(d['errors'])} errors)"
+    else:
+        n = len(d['warnings'])
+        bio = f"PASS (0 errors, {n} warning{'' if n == 1 else 's'})"
     return s_ok, m_ok, bio
+
+
+_VALIDATOR_SCOPE = (
+    "The external validator (biosimulators-utils) checks the COMBINE manifest and the "
+    "structure of the SED-ML document. It cannot validate a CompuCell3D model file and "
+    "says so in a warning; the model is therefore not validated by this step. Its "
+    "\"unusual number of steps\" warning is a rule of thumb raised whenever numberOfSteps "
+    "is not a multiple of 5; here that number is the count of recorded snapshots minus "
+    "one, with the first output at the first recorded step (the initial condition is not "
+    "stored).")
+
+
+def _validator_messages_block(omex_paths, SUB):
+    """Flowables quoting the validator's own messages for a set of archives (each
+    distinct message once), with what the validator does and does not check."""
+    errors, warns, notices, skipped = [], [], [], []
+    for o in omex_paths:
+        d = validation_detail(o)
+        for found, bucket in ((d['errors'], errors), (d['warnings'], warns),
+                              (d['notices'], notices)):
+            for line in found:
+                if line not in bucket:
+                    bucket.append(line)
+        if d['skipped'] and d['skipped'] not in skipped:
+            skipped.append(d['skipped'])
+
+    def _esc(text):
+        return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    out = [Paragraph(_VALIDATOR_SCOPE, SUB)]
+    for title, lines in (("Validator errors", errors), ("Validator warnings", warns),
+                         ("Not checked by the validator", notices),
+                         ("Validator not run", skipped)):
+        if lines:
+            out.append(Paragraph(f"<b>{title}:</b><br/>"
+                                 + "<br/>".join("&bull; " + _esc(l) for l in lines), SUB))
+    return out
 
 
 def read_provenance(omex):
@@ -249,8 +520,8 @@ def read_provenance(omex):
             'keywords': [e.text for e in root.findall('.//' + DCT + 'subject') if e.text]}
 
 
-def read_run_identity(rep_dirs):
-    """Per-replicate stochastic and code identity, from each run's metadata.
+def read_run_identity(runs):
+    """Per-replicate stochastic and code identity, from each archive's run_metadata.json.
 
     The seed matters to a reader of the report, not only to a re-executor: within a
     combination the replicates share a parameterization and differ ONLY in their
@@ -259,16 +530,15 @@ def read_run_identity(rep_dirs):
     parameter definitions were in force) and the code revision that produced the run.
     """
     rows = []
-    for d in rep_dirs:
-        try:
-            meta = json.loads((Path(d) / 'run_metadata.json').read_text())
-        except Exception:
+    for run in runs:
+        meta = run.meta
+        if not meta:
             continue
         prov = meta.get('provenance') or {}
         code = prov.get('code') or {}
         params = meta.get('parameters') or {}
         rows.append({
-            'replicate': Path(d).name,
+            'replicate': run.name,
             'seed': meta.get('random_seed', params.get('random_seed')),
             'origin': params.get('random_seed_origin'),
             'fingerprint': prov.get('schema_fingerprint') or meta.get('schema_fingerprint'),
@@ -286,7 +556,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     live schema. One table of the parameters an auditor must look at: changed
     from default, or sitting outside a documented range. Everything else is
     summarised in a line, so a report stays short when the run stayed inside
-    its documented evidence.
+    its documented ranges. Every verdict names what the range is based on.
     """
     # By package name, like omex_generator above: the bare name is only on
     # sys.path when the package is NOT installed, so a bare import alone failed
@@ -303,7 +573,7 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         return []
     audit = audits[0]                       # replicates share a parameterization
     s = audit.get('summary') or {}
-    out = [Paragraph("Parameter Credibility (run values against the schema's documented evidence)", H2),
+    out = [Paragraph("Parameter Audit (run values against the ranges the schema documents)", H2),
            Paragraph(_pa.audit_summary_line(audit) + ".", SUB)]
     header, rows = _pa.audit_table_rows(audit, include='attention')
     if rows:
@@ -316,15 +586,20 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
         out.append(Paragraph("Every parameter ran at its documented default and inside "
                              "every documented range.", SUB))
     out.append(Paragraph(
-        "<i>Credibility</i> places each executed value against the three range tiers the "
-        "schema documents: the implementation-admissible range (outside = inadmissible), the "
-        "evidence-supported range (outside = extrapolation beyond the documented evidence) and "
-        "the recommended range for this model's context of use. The evidence column names the "
-        "basis and citation the schema records for the supported range; "
-        "<i>not recorded</i> means the bound exists but its justification has not been "
-        "documented, which is itself an audit finding. Numeric parameters without any documented range "
-        "are listed as unassessable; switches and categories are not range-assessed. Full detail for every parameter is in "
-        "parameter_audit.json inside the archive.", SUB))
+        "Each executed value is placed against the range tiers the schema declares: the "
+        "<i>implementation limit</i>, the <i>documented working range</i> and the "
+        "<i>recommended range</i> for this model's context of use. A range is only as strong "
+        "as what it rests on, so every verdict states its basis: published literature, model "
+        "calibration, the modeler's judgement, a numerical or implementation limit, or "
+        "exploratory presets. \"Outside the documented working range\" therefore reports "
+        "where a value sits relative to the schema's documentation; it is evidence of "
+        "physiological implausibility only where the basis is published literature. The last "
+        "column gives the basis and, where recorded, the citation of the range that decided "
+        "the verdict; <i>basis not recorded</i> means the bound exists but its justification "
+        "has not been documented, which is itself an audit finding. Numeric parameters "
+        "without any documented range are listed as such; switches and categories are not "
+        "range-assessed. Full detail for every parameter is in parameter_audit.json inside "
+        "the archive.", SUB))
     if len(audits) > 1:
         diff = [k for k, e in audit['parameters'].items()
                 if e.get('parameter_type') != 'control'
@@ -335,9 +610,9 @@ def _parameter_credibility_block(audit_sources, H2, SUB, prows):
     return out
 
 
-def _run_identity_block(rep_dirs, H2, SUB, prows):
+def _run_identity_block(runs, H2, SUB, prows):
     """Flowables for the run-identity table; empty list when nothing was recorded."""
-    ident = read_run_identity(rep_dirs)
+    ident = read_run_identity(runs)
     if not any(r.get('seed') is not None for r in ident):
         return []
     rows = [["Replicate", "RNG seed", "Origin", "Schema fingerprint", "Code"]]
@@ -367,6 +642,26 @@ def _run_identity_block(rep_dirs, H2, SUB, prows):
 
 
 # ----------------------------------------------------------------- plots
+_METRIC_AXIS = {
+    'num_clusters': 'clusters (count)',
+    'largest_cluster_size': 'largest cluster (lattice sites)',
+    'cell_density': 'cell density (fraction of lattice sites)',
+    'vegf_mean': 'mean VEGF (model units)',
+}
+
+_METRIC_NOTE = (
+    "Clusters are connected groups of endothelial lattice sites (4-neighbour "
+    "connectivity) on the model's lattice, which is periodic in x and y: a cluster "
+    "that crosses a lattice edge is counted once. Cluster size is in lattice sites; "
+    "cell density is the fraction of lattice sites occupied by endothelial cells; "
+    "VEGF is in the model's concentration units, which are not calibrated to a "
+    "physical unit.")
+
+
+def _ylabel(metric):
+    return _METRIC_AXIS.get(metric, metric)
+
+
 def _per_time(frames, metric):
     """Replicates of one metric side by side on the Time index (one column each)."""
     cols = [df.groupby('Time')[metric].mean() for df in frames if metric in df]
@@ -383,13 +678,14 @@ def _metric_replicate_plot(metric, frames, tmpdir, fname):
     if per_t is not None:
         m = per_t.mean(axis=1)
         ax.plot(m.index, m.values, color=NAVY, lw=1.8,
-                label=f"mean of {per_t.shape[1]} replicate(s)")
+                label=(f"mean of {per_t.shape[1]} replicates" if per_t.shape[1] > 1
+                       else "single run (no replicate mean)"))
         if per_t.shape[1] > 1:
             sd = per_t.std(axis=1)
             ax.fill_between(m.index, m - sd, m + sd, color=NAVY, alpha=0.15, lw=0,
                             label="±1 SD")
         ax.legend(fontsize=7, frameon=False)
-    ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(metric, fontsize=8)
+    ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(_ylabel(metric), fontsize=7)
     ax.tick_params(labelsize=7); ax.grid(True, alpha=0.3, lw=0.4)
     ax.set_title(f"{metric} — replicate-aware", fontsize=8.5, color=NAVY)
     fig.tight_layout(); p = tmpdir / fname; fig.savefig(p, bbox_inches='tight'); plt.close(fig)
@@ -411,7 +707,7 @@ def _metric_compare_plot(metric, combo_frames, tmpdir, fname):
         if per_t.shape[1] > 1:
             sd = per_t.std(axis=1)
             ax.fill_between(m.index, m - sd, m + sd, color=cmap(i % 10), alpha=0.15, lw=0)
-    ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(metric, fontsize=8)
+    ax.set_xlabel('Time (MCS)', fontsize=8); ax.set_ylabel(_ylabel(metric), fontsize=7)
     ax.tick_params(labelsize=7); ax.grid(True, alpha=0.3, lw=0.4)
     ax.legend(fontsize=7, frameon=False)
     ax.set_title(f"{metric} across combinations (mean ± SD)", fontsize=8.5, color=NAVY)
@@ -511,22 +807,9 @@ def _endpoint_plot(panels, labels, tmpdir, fname, ncols=2):
     return p
 
 
-def _final_field(data_zarr, channel):
-    """Final-step 2D view of a channel (0=cell type, 2=VEGF) from the Zarr store."""
-    last = None
-    for _, data in og._load_zarr_steps(data_zarr):
-        last = data
-    if last is None:
-        return None
-    f = last[..., channel]
-    while f.ndim > 2:
-        f = f[..., 0] if f.shape[-1] == 1 else f.mean(axis=-1)
-    return f
-
-
-def _network_snapshot(data_zarr, tmpdir, fname, title):
-    """Render the final-step EC network (cell-type channel) from the Zarr store."""
-    ct = _final_field(data_zarr, 0)
+def _network_snapshot(run, tmpdir, fname, title):
+    """Render the final-step EC network (cell-type channel) from the run's archive."""
+    ct = run.final_field(0)
     if ct is None:
         return None
     fig, ax = plt.subplots(figsize=(3.1, 3.1), dpi=150)
@@ -537,9 +820,9 @@ def _network_snapshot(data_zarr, tmpdir, fname, title):
     return p
 
 
-def _vegf_snapshot(data_zarr, tmpdir, fname, title):
-    """Render the final-step VEGF field-of-view (channel 2) as a heatmap."""
-    vegf = _final_field(data_zarr, 2)
+def _vegf_snapshot(run, tmpdir, fname, title):
+    """Render the final-step VEGF field (channel 2) from the run's archive."""
+    vegf = run.final_field(2)
     if vegf is None:
         return None
     fig, ax = plt.subplots(figsize=(3.4, 3.1), dpi=150)
@@ -547,6 +830,7 @@ def _vegf_snapshot(data_zarr, tmpdir, fname, title):
     ax.set_title(title, fontsize=8, color=NAVY)
     ax.set_xticks([]); ax.set_yticks([])
     cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04); cb.ax.tick_params(labelsize=6)
+    cb.set_label('VEGF (model units)', fontsize=6)
     fig.tight_layout(); p = tmpdir / fname; fig.savefig(p, bbox_inches='tight'); plt.close(fig)
     return p
 
@@ -578,25 +862,22 @@ def _styles():
 # ----------------------------------------------------------------- reports
 _EXCLUDED_NOTE = (
     "Excluded from every plot, mean and summary metric in this report. A failed, "
-    "timed-out or cancelled run can leave a partial Zarr trajectory; averaging it "
-    "into a replicate mean would bias the result. Its archive keeps the logs, "
-    "parameters and partial outputs for diagnosis.")
+    "timed-out or cancelled run can leave a partial Zarr trajectory, or none at all; "
+    "averaging it into a replicate mean would bias the result. Its archive keeps the "
+    "logs, parameters and partial outputs for diagnosis. <i>no archive</i> marks a run "
+    "directory for which no archive could be built, so nothing about it is reported.")
 
 
 def _excluded_rows(excluded):
     rows = [["Replicate", "Status", "Exit code", "Error", "Archive"]]
-    for d, status in excluded:
-        try:
-            meta = json.loads((Path(d) / 'run_metadata.json').read_text())
-        except Exception:
-            meta = {}
+    for run, status in excluded:
+        meta = run.meta
         exit_code = (meta.get('execution') or {}).get('exit_code')
         err = str(meta.get('error_message') or '&mdash;').replace('<', '&lt;')
-        archive = Path(d) / f"{Path(d).name}.omex"
-        rows.append([Path(d).name, f"<b>{status}</b>",
+        rows.append([run.name, f"<b>{status}</b>",
                      '&mdash;' if exit_code is None else str(exit_code),
                      err[:200] + ('&hellip;' if len(err) > 200 else ''),
-                     archive.name if archive.exists() else '&mdash;'])
+                     run.omex.name if run.omex is not None else '&mdash;'])
     return rows
 
 
@@ -624,26 +905,27 @@ def build_excluded_only_report(combo, label, excluded, out_pdf):
     return Path(out_pdf)
 
 
-def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=()):
-    """rep_dirs / omex_paths: the combination's SUCCESSFUL replicates (plotted and
-    averaged). excluded: [(run_dir, status)] of the others, listed only."""
+def build_combo_report(combo, label, runs, omex_paths, sim_time, out_pdf, excluded=()):
+    """runs: the combination's SUCCESSFUL replicates, as ArchivedRun (plotted and
+    averaged); omex_paths: their archives. excluded: [(ArchivedRun, status)] of
+    the others, listed only. Nothing here reads a run directory."""
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='angio_combo_'))
     H, SUB, H2, N, prows = _styles()
-    frames = replicate_metric_frames(rep_dirs)
+    frames = replicate_metric_frames(runs)
     omex0 = omex_paths[0] if omex_paths else None
-    val = [(Path(o).parent.name, *run_validation(o)) for o in omex_paths]
+    val = [(r.name, *run_validation(r.omex), r.metrics_check) for r in runs]
     prov = read_provenance(omex0) if omex0 else None
 
     S = [Paragraph(f"Angio OMEX Combination Report — {label}", H),
-         Paragraph(f"{combo} &nbsp;|&nbsp; {len(rep_dirs)} replicate(s) &nbsp;|&nbsp; "
+         Paragraph(f"{combo} &nbsp;|&nbsp; {len(runs)} replicate(s) &nbsp;|&nbsp; "
                    f"sim_time {sim_time} MCS", SUB),
          HRFlowable(width="100%", thickness=1, color=colors.HexColor(NAVY))]
 
     S.append(Paragraph("Combination Overview", H2))
     S.append(prows([["Property", "Value"],
                     ["Scan point", label],
-                    ["Replicates", f"{len(rep_dirs)} successful (plotted and averaged)"
+                    ["Replicates", f"{len(runs)} successful (plotted and averaged)"
                      + (f"; {len(excluded)} unsuccessful, excluded" if excluded else "")],
                     ["Signals", ", ".join(METRICS)],
                     ["Time", "MCS (angio has no physical-time calibration)"]],
@@ -663,35 +945,48 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf, ex
             pr.append(["Keywords", ", ".join(prov['keywords'])])
         S.append(prows(pr, [1.6 * inch, 5.15 * inch]))
 
-    S.extend(_run_identity_block(rep_dirs, H2, SUB, prows))
-    S.extend(_parameter_credibility_block(list(rep_dirs) + list(omex_paths or []), H2, SUB, prows))
+    S.extend(_run_identity_block(runs, H2, SUB, prows))
+    S.extend(_parameter_credibility_block(list(omex_paths or []), H2, SUB, prows))
 
     if omex_paths:
         S.append(Paragraph("Per-replicate Archive Validation", H2))
-        rv = [["Replicate", "built-in SED-ML", "manifest", "biosimulators"]]
-        for repname, s_ok, m_ok, bio in val:
-            rv.append([repname, "PASS" if s_ok else "FAIL", "PASS" if m_ok else "FAIL", bio])
-        S.append(prows(rv, [2.2 * inch, 1.4 * inch, 1.1 * inch, 2.05 * inch]))
+        rv = [["Replicate", "built-in SED-ML", "manifest", "biosimulators",
+               "metrics.csv vs archived trajectory"]]
+        for repname, s_ok, m_ok, bio, check in val:
+            rv.append([repname, "PASS" if s_ok else "FAIL", "PASS" if m_ok else "FAIL", bio, check])
+        S.append(prows(rv, [1.75 * inch, 0.95 * inch, 0.75 * inch, 1.75 * inch, 1.55 * inch]))
+        S.append(Paragraph(
+            "Every figure and number in this report is read from the archives listed "
+            "here, not from the directory the runs were produced in. The metric series "
+            "are recomputed from the Zarr trajectory inside each archive (zarr/) and "
+            "compared with the archive's own metrics.csv, the table its SED-ML indexes: "
+            "<i>MATCH</i> means the two agree at every step. <i>DIFFERS</i> means the "
+            "archive's table was written under a different metric definition or does "
+            "not belong to this trajectory; the plots then show the recomputed series.",
+            SUB))
+        S.extend(_validator_messages_block(omex_paths, SUB))
 
     if omex0:
         S.append(Paragraph("Archive Contents (per replicate)", H2))
         S.append(prows(_contents_rows(omex0), [2.6 * inch, 0.9 * inch, 3.25 * inch]))
-        S.append(Paragraph(f"Each of the {len(rep_dirs)} replicate archives has this layout.", SUB))
+        S.append(Paragraph(f"Each of the {len(runs)} replicate archives has this layout.", SUB))
 
     # metric plots + spatial snapshots
     S.append(PageBreak())
-    S.append(Paragraph("Metrics (replicate-aware, from the Zarr trajectory)", H2))
-    S.append(Paragraph("Thin = each replicate; bold = across-replicate mean; shaded = "
-                       "&plusmn;1 SD across replicates. Time in MCS.", N))
+    S.append(Paragraph("Metrics (replicate-aware, from the archived Zarr trajectory)", H2))
+    S.append(Paragraph(("Thin = each replicate; bold = across-replicate mean; shaded = "
+                        "&plusmn;1 SD across replicates. " if len(runs) > 1 else
+                        "A single run: the line is that run's trajectory, not a mean. ")
+                       + "Time in MCS.", N))
+    S.append(Paragraph(_METRIC_NOTE, SUB))
     for i, metric in enumerate(METRICS):
         p = _metric_replicate_plot(metric, frames, tmpdir, f"m_{i}.png")
         S.append(Image(str(p), width=6.7 * inch, height=2.3 * inch)); S.append(Spacer(1, 3))
-    ec = _network_snapshot(Path(rep_dirs[0]) / 'data.zarr', tmpdir, "ec.png",
-                           "Final EC network")
-    vegf = _vegf_snapshot(Path(rep_dirs[0]) / 'data.zarr', tmpdir, "vegf.png",
-                          "Final VEGF field")
+    ec = _network_snapshot(runs[0], tmpdir, "ec.png", "Final EC network")
+    vegf = _vegf_snapshot(runs[0], tmpdir, "vegf.png", "Final VEGF field")
     if ec or vegf:
-        S.append(Paragraph("Final-step spatial fields (replicate 1)", H2))
+        S.append(Paragraph(f"Final-step spatial fields ({runs[0].name}, from "
+                           f"zarr/ in {runs[0].omex.name})", H2))
         cells = [c for c in (Image(str(ec), width=2.7 * inch, height=2.7 * inch) if ec else None,
                              Image(str(vegf), width=3.0 * inch, height=2.7 * inch) if vegf else None) if c]
         S.append(Table([cells], colWidths=[3.0 * inch, 3.3 * inch][:len(cells)]))
@@ -706,8 +1001,8 @@ def build_combo_report(combo, label, rep_dirs, omex_paths, sim_time, out_pdf, ex
 
 
 def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, excluded=None):
-    """combos: {combo: SUCCESSFUL replicate dirs}. excluded: {combo: [(dir,
-    status)]} of the others, listed and left out of every comparison."""
+    """combos: {combo: SUCCESSFUL replicates as ArchivedRun}. excluded: {combo:
+    [(ArchivedRun, status)]} of the others, listed and left out of every comparison."""
     import shutil
     tmpdir = Path(tempfile.mkdtemp(prefix='angio_exp_'))
     H, SUB, H2, N, prows = _styles()
@@ -757,6 +1052,7 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
         S.append(prows([["Layer", "Result"], ["Built-in SED-ML", "PASS" if s_ok else "FAIL"],
                         ["Built-in manifest", "PASS" if m_ok else "FAIL"],
                         ["biosimulators-utils", bio]], [3.3 * inch, 3.45 * inch]))
+        S.extend(_validator_messages_block([scan_omex], SUB))
         prov = read_provenance(scan_omex)
         if prov:
             S.append(Paragraph("Provenance (OMEX Metadata)", H2))
@@ -828,6 +1124,7 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
         "Each line is a combination's across-replicate mean and the shaded band "
         "&plusmn;1 SD across its replicates; the legend gives the number of replicates "
         "n. Time in MCS.", N))
+    S.append(Paragraph(_METRIC_NOTE, SUB))
     for i, metric in enumerate(METRICS):
         p = _metric_compare_plot(metric, combo_frames, tmpdir, f"c_{i}.png")
         S.append(Image(str(p), width=6.7 * inch, height=2.5 * inch)); S.append(Spacer(1, 3))
@@ -836,7 +1133,7 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
     S.append(Paragraph("Final-step EC networks (one per combination)", H2))
     ec_imgs = []
     for c in order:
-        snap = _network_snapshot(Path(combos[c][0]) / 'data.zarr', tmpdir, f"ec_{c}.png", labels[c])
+        snap = _network_snapshot(combos[c][0], tmpdir, f"ec_{c}.png", labels[c])
         if snap:
             ec_imgs.append(Image(str(snap), width=2.0 * inch, height=2.0 * inch))
     if ec_imgs:
@@ -845,7 +1142,7 @@ def build_experiment_report(root, scan_omex, combos, labels, sim_time, out_pdf, 
     S.append(Paragraph("Final-step VEGF fields (one per combination)", H2))
     vegf_imgs = []
     for c in order:
-        snap = _vegf_snapshot(Path(combos[c][0]) / 'data.zarr', tmpdir, f"vg_{c}.png", labels[c])
+        snap = _vegf_snapshot(combos[c][0], tmpdir, f"vg_{c}.png", labels[c])
         if snap:
             vegf_imgs.append(Image(str(snap), width=2.15 * inch, height=2.0 * inch))
     if vegf_imgs:
@@ -933,20 +1230,20 @@ def _creator_from_omex(omex):
     return c
 
 
-def generate(root, creator=None):
-    root = Path(root)
-    combos = discover_combos(root)
-    if not combos:
-        print(f"[angio_report] no runs with data.zarr under {root}")
-        return []
-    scan_spec, labels = derive_scan(combos)
-    num_replicates = max(len(v) for v in combos.values())
-    sim_params = _params(next(iter(combos.values()))[0])
-    sim_time = sim_params.get('sim_time', 100.0)
-
-    # Inherit the operator/creator from an existing per-run archive if not given.
-    if creator is None:
-        for c, dirs in combos.items():
+def _export_missing_archives(root, creator=None):
+    """Step 1 — export. Give every run DIRECTORY under root an archive (existing
+    worker-written archives are kept as they are) and build the experiment-level
+    scan archive. This is the only place a working directory is read. Returns the
+    scan archive path (or None), and the names of run directories for which no
+    archive could be built."""
+    dir_combos = discover_combos(root)
+    if not dir_combos:
+        return None, []
+    scan_spec, labels = derive_scan(dir_combos)
+    num_replicates = max(len(v) for v in dir_combos.values())
+    sim_params = _params(next(iter(dir_combos.values()))[0])
+    if creator is None:      # inherit the operator from an existing per-run archive
+        for dirs in dir_combos.values():
             for d in dirs:
                 o = d / f"{d.name}.omex"
                 if o.exists():
@@ -954,15 +1251,39 @@ def generate(root, creator=None):
                     break
             if creator:
                 break
-
     # Every run, whatever its outcome, gets a correctly typed archive (the scan
     # archive filters to successful replicates itself, via og.run_outcome).
-    omex_by_combo, scan = _regenerate_archives(combos, labels, scan_spec, sim_params, root, num_replicates, creator)
+    _, scan = _regenerate_archives(dir_combos, labels, scan_spec, sim_params, root,
+                                   num_replicates, creator)
+    unarchived = [d.name for dirs in dir_combos.values() for d in dirs
+                  if not (d / f"{d.name}.omex").exists()]
+    return scan, unarchived
+
+
+def generate(root, creator=None):
+    root = Path(root)
+    scan, unarchived = _export_missing_archives(root, creator)
+
+    # Step 2 — report, from the archives alone.
+    combos = discover_archived_runs(root)
+    for name in unarchived:
+        combos.setdefault(_combo_key(name), []).append(ArchivedRun(None, name))
+    if not combos:
+        print(f"[angio_report] no run archives (.omex) or run directories under {root}")
+        return []
+    archived = {c: [r for r in runs if r.omex is not None] for c, runs in combos.items()}
+    archived = {c: runs for c, runs in archived.items() if runs}
+    scan_spec, labels = derive_scan(archived) if archived else ({}, {})
+    labels = {c: labels.get(c, c) for c in combos}
+    first = next(iter(archived.values()))[0] if archived else None
+    sim_time = (first.params if first else {}).get('sim_time', 100.0)
+    scan = scan or find_scan_archive(root)
 
     # Results use successful replicates only; the rest are listed, never averaged.
     successful, excluded = {}, {}
-    for c, dirs in combos.items():
-        ok, other = og.split_replicates(dirs)
+    for c, runs in combos.items():
+        ok = [r for r in runs if r.status == 'success']
+        other = [(r, r.status) for r in runs if r.status != 'success']
         if ok:
             successful[c] = ok
         if other:
@@ -972,9 +1293,8 @@ def generate(root, creator=None):
     for c in sorted(combos):
         out_pdf = root / f"{c}_omex_report.pdf"
         if c in successful:
-            ok_names = {d.name for d in successful[c]}
-            omex_ok = [o for o in omex_by_combo.get(c, []) if Path(o).parent.name in ok_names]
-            written.append(build_combo_report(c, labels[c], successful[c], omex_ok, sim_time,
+            written.append(build_combo_report(c, labels[c], successful[c],
+                                              [r.omex for r in successful[c]], sim_time,
                                               out_pdf, excluded=excluded.get(c, [])))
         else:
             written.append(build_excluded_only_report(c, labels[c], excluded.get(c, []), out_pdf))

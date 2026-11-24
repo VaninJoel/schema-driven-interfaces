@@ -41,6 +41,10 @@ class AnalysisDataset:
         self.injury_time_days = None
         self.has_injury = False
         self.injury_type = None
+        # Per combination: {combo: {'has_injury', 'injury_time_days', 'sim_time_days'}}.
+        # Injury time, the injury switch and the simulation length can themselves be
+        # swept, so they are properties of a combination, not of the experiment.
+        self.combo_meta = {}
         self._load_metadata()
         # grouped {combo: [df per replicate]}
         self.count_data = self._group(self.count_files)
@@ -145,6 +149,13 @@ class AnalysisDataset:
 
     # ---- membrane baseline ----
     def _load_membrane(self):
+        """Per-X-bin height of the basement membrane (voxels), subtracted from the
+        tissue top position to give thickness.
+
+        Sets `membrane_source` (a sentence for figure captions and reports) and
+        `membrane_is_fallback`. The fallback is never silent: without the
+        reference file a flat 10-voxel baseline is used, which is NOT the model's
+        curved membrane, and every thickness figure and report says so."""
         bins = {i: [] for i in range(N_BINS)}
         bin_size = DOMAIN_X_VOXELS / N_BINS
         try:
@@ -153,9 +164,18 @@ class AnalysisDataset:
                 idx = int(x // bin_size)
                 if idx in bins:
                     bins[idx].append(h)
+            self.membrane_is_fallback = False
+            self.membrane_source = (
+                f"per-section mean of the model's basement-membrane height "
+                f"(analysis_data/{_MEMBRANE_CSV.name}, {len(raw)} lattice columns)")
             return {i: (float(np.mean(v)) if v else 10.0) for i, v in bins.items()}
         except Exception as e:
-            print(f"[analysis] membrane_height.csv unavailable ({e}); using flat 10-voxel baseline")
+            self.membrane_is_fallback = True
+            self.membrane_source = (
+                f"FALLBACK: a flat 10-voxel baseline, because the model's membrane "
+                f"reference ({_MEMBRANE_CSV.name}) could not be read ({e}). Thickness "
+                f"values are NOT comparable with the model's reference analysis.")
+            print(f"[analysis] WARNING: {self.membrane_source}")
             return {i: 10.0 for i in range(N_BINS)}
 
     def _to_thickness_um(self, thickness_data):
@@ -189,8 +209,14 @@ class AnalysisDataset:
             except Exception:
                 continue
             if 'simulation_config' in m or 'key_parameters' in m:
-                meta = m
-                break
+                c, k = m.get('simulation_config', {}), m.get('key_parameters', {})
+                self.combo_meta.setdefault(self._combo_key(mf), {
+                    'has_injury': bool(c.get('has_injury', k.get('IsInjury', False))),
+                    'injury_time_days': k.get('InjuryTime'),
+                    'sim_time_days': c.get('sim_time', k.get('SimTime')),
+                })
+                if meta is None:
+                    meta = m
         if meta is None:
             return
         cfg = meta.get('simulation_config', {})
@@ -200,6 +226,24 @@ class AnalysisDataset:
         # DAYS in the new metadata (schema is day-stored); never MCS.
         self.sim_time_days = cfg.get('sim_time', kp.get('SimTime'))
         self.injury_time_days = kp.get('InjuryTime')
+
+    def injury_day(self, combo):
+        """Injury time (days) of ONE combination, or None when it has no injury."""
+        m = self.combo_meta.get(combo)
+        if m is None:
+            return self.injury_time_days if self.has_injury else None
+        return m.get('injury_time_days') if m.get('has_injury') else None
+
+    def sim_days(self, combo):
+        """Simulation length (days) of ONE combination."""
+        m = self.combo_meta.get(combo)
+        return (m or {}).get('sim_time_days') or self.sim_time_days
+
+    def metadata_varies(self):
+        """True when injury switch, injury time or length differ between combinations."""
+        seen = {(m.get('has_injury'), m.get('injury_time_days'), m.get('sim_time_days'))
+                for m in self.combo_meta.values()}
+        return len(seen) > 1
 
     def _combo_names(self):
         """Label each combo by the swept parameter's value (sweeps), else dir name.
@@ -238,6 +282,8 @@ class AnalysisDataset:
         t = df['Time'].astype(float)
         t = t / HOURS_PER_DAY if unit == 'days' else t  # hours stay as-is
         if injury_centered and self.has_injury and self.injury_time_days is not None:
+            # NOTE: the experiment-level injury time. When injury time is itself
+            # swept use injury_day(combo) for the combination being drawn.
             offset = self.injury_time_days if unit == 'days' else self.injury_time_days * HOURS_PER_DAY
             t = t - offset
         return t

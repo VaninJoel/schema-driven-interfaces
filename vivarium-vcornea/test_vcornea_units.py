@@ -59,3 +59,36 @@ def test_display_labels_unchanged(schema):
     egf = info['EGF_ScreteAmount']
     assert units.display_unit_label(egf['_dimension'], egf['_display_unit']) == 'Normalized Conc. / hour'
     assert units.factor(egf['_dimension'], egf['_display_unit']) == units.factor('rate')
+
+
+def test_field_text_of_every_dimensioned_default_converts_back_to_the_default(schema):
+    """An editable field shows six significant figures. Re-entering what it shows
+    for a parameter's default (or leaving it untouched) must give back the default
+    exactly; it used to give 19.99995 for a default of 20 (shown as 13.3333)."""
+    checked = 0
+    for name, info in schema['inputs'].items():
+        dim, du = info.get('_dimension'), info.get('_display_unit')
+        default = info.get('_default')
+        if not dim or isinstance(default, bool) or not isinstance(default, (int, float)):
+            continue
+        integer = isinstance(default, int)
+        text = units.format_display(default, dim, du, integer)
+        assert units.parse_display(text, dim, du, integer, anchors=(default,)) == default, name
+        # as a float, as the GUI hands it over after parsing the text
+        assert units.parse_display(float(text), dim, du, integer, anchors=(default,)) == default, name
+        # without the anchor the conversion is that of the typed text: close, not equal
+        plain = units.parse_display(text, dim, du, integer)
+        assert plain == pytest.approx(default, rel=1e-5, abs=1e-9), name
+        checked += 1
+    assert checked >= 32
+
+
+def test_typed_values_are_converted_as_typed_and_text_is_refused():
+    # 13.3333 um^2/min is what the field shows for 20 voxel^2/MCS ...
+    assert units.format_display(20.0, 'diffusion') == '13.3333'
+    assert units.parse_display('13.3333', 'diffusion', anchors=(20.0,)) == 20.0
+    # ... but a different number is converted as typed, anchor or not
+    assert units.parse_display('13.4', 'diffusion', anchors=(20.0,)) == pytest.approx(20.1)
+    assert units.parse_display('26', 'length', integer=True) == 13
+    with pytest.raises(ValueError):
+        units.parse_display('abc', 'diffusion', anchors=(20.0,))

@@ -35,7 +35,7 @@ GUI (PyQt5) → Vivarium process (VCorneaProcess) → CC3D subprocess
 - **Schema-Driven UI**: Controls generated from `VCorneaProcess.ports_schema()`
 - **Expertise Levels**: Basic, Intermediate, Advanced parameter visibility
 - **Batch Execution**: Parameter sweeps and replicates
-- **Validation**: Physiological range checks with inline feedback
+- **Validation**: Working-range and implementation-limit checks with inline feedback
 - **Metadata Capture**: Full parameter and run provenance
 
 ---
@@ -66,9 +66,7 @@ For batch runs (parameter sweeps / replicates) these files live under
 
 ## Installation
 
-- **No coding:** download the desktop installer for your OS from the
-  [repository README](../README.md).
-- **From source:** follow [INSTALL.md](../INSTALL.md) — one conda environment
+- Follow [INSTALL.md](../INSTALL.md) — one conda environment
   (`vc`) provides CompuCell3D 4.7.0, Python 3.12, PyQt5 and the sibling
   `vivarium-vcornea` package, whose `VCorneaProcess` schema drives this GUI.
 

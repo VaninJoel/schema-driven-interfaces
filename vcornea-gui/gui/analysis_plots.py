@@ -32,9 +32,23 @@ def _combo_concat(df_list):
 
 
 def _default_stable_day(ds):
-    """Plateau start for histogram/Q-Q windows (days)."""
+    """Start of the analysis window for histogram/Q-Q/statistics views (days).
+
+    Without an injury: 40% of the run, after which the tissue is treated as at
+    steady state. WITH an injury the window starts at the injury time, so it
+    covers damage and recovery — it is a post-injury window, not a stable phase,
+    and is labelled as such (see window_label)."""
     end = ds.sim_time_days or 30
     return (ds.injury_time_days or end * 0.4) if ds.has_injury else end * 0.4
+
+
+def window_label(ds, stable_day):
+    """What the analysis window is, in words, for a title or caption."""
+    end = ds.sim_time_days
+    span = f"day {stable_day:g} to " + (f"day {end:g}" if end else "the end of the run")
+    if ds.has_injury:
+        return f"post-injury window, {span} (damage and recovery; not a steady state)"
+    return f"steady-state window, {span}"
 
 
 def _combos(ds, combo):
@@ -200,7 +214,7 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
     for b in bins:
         bm = mean_bin[mean_bin['Bin'] == b]
         ax0.plot(_tconv(bm['Time'], unit), bm['Height'] * 2, lw=1, color=cmap[b],
-                 label=f"x {b*bins_size}-{(b+1)*bins_size-1} µm")
+                 label=f"x {b*bins_size*2}-{(b+1)*bins_size*2} µm")
         stable_b = combined[(combined['Bin'] == b) & (combined['Time'] >= stable_h)]
         th_b = ((stable_b['Height'] - bin_memb.get(b, 10.0)) * 2).clip(lower=0.0)   # thickness µm
         bin_actual.append(th_b.mean())
@@ -223,7 +237,8 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
     # they are meaningful for control runs but not injury runs. Re-add here later
     # if desired (dash-dot Min/Max lines per paper Fig 8 middle).
 
-    ax0.axvline(stable_day if unit == 'days' else stable_h, color='black', linestyle='dashed', lw=1, label="Stability Time")
+    ax0.axvline(stable_day if unit == 'days' else stable_h, color='black', linestyle='dashed', lw=1,
+                label="Window start" + (" (injury)" if ds.has_injury else " (stability time)"))
     ax0.set_title("Longitudinal Variation of Tissue Top Position")
     ax0.set_xlabel(f"Time ({_unit_label(unit)})"); ax0.set_ylabel("Vertical Position (µm)")
     ax0.grid(True, lw=0.3); ax0.legend(title="Bins", fontsize=6, ncol=2, loc='lower right')
@@ -234,7 +249,11 @@ def paper_thickness(fig, ds, combo=None, unit='days', stable_day=None):
 
     ax1.plot(x_um, bin_actual, color='tab:red', linestyle='dotted', lw=1, label="Tissue Thickness")
     ax1.plot(x_um, bin_relative, color='tab:blue', linestyle='dotted', lw=1, label="Tissue Top Position")
-    ax1.set_title("Stable Tissue Top Position and Thickness Across Sections")
+    ax1.set_title("Tissue Top Position and Thickness Across Sections — "
+                  + window_label(ds, stable_day), fontsize=9)
+    if getattr(ds, 'membrane_is_fallback', False):
+        fig.text(0.5, 0.005, "WARNING: " + ds.membrane_source, ha='center', fontsize=7,
+                 color='red', wrap=True)
     ax1.set_xlabel("Horizontal Position (µm)"); ax1.set_ylabel("Vertical Position / Thickness (µm)")
     # boxplot positions are µm — set explicit ticks so the x-axis reads in µm
     # (otherwise matplotlib mislabels them as 1..N).
@@ -326,60 +345,101 @@ def enhanced_count(fig, ds, mode='individual', combo=None, unit='days',
     fig.tight_layout()
 
 
+def replicate_window_means(ds, stable_day):
+    """{combo: {'Total': [mean per replicate], <cell type>: [...], 'CV': [per replicate]}}.
+
+    One number per REPLICATE: its mean over the analysis window (and, for CV, its
+    own variability over time in that window). Replicates are the independent
+    units; the hourly samples of one run are not. Pooling every hourly sample of
+    every replicate into one group and testing those inflates n by three orders
+    of magnitude and turns any difference into a vanishing p-value.
+    """
+    cutoff_h = stable_day * 24                       # data Time is hours
+    out = {}
+    for combo, df_list in ds.count_data.items():
+        rows = {'Total': [], 'CV': [], **{ct: [] for ct in CELL_TYPES}}
+        for df in df_list:
+            w = df[df['Time'] >= cutoff_h]
+            if w.empty:
+                continue
+            total = w[[c for c in CELL_TYPES if c in w]].sum(axis=1)
+            rows['Total'].append(float(total.mean()))
+            rows['CV'].append(float(total.std() / total.mean()) if total.mean() else np.nan)
+            for ct in CELL_TYPES:
+                if ct in w:
+                    rows[ct].append(float(w[ct].mean()))
+        out[combo] = rows
+    return out
+
+
 def _enhanced_stats(fig, ds, stable_day, unit):
     axes = fig.subplots(2, 2)
-    cutoff_h = stable_day * 24  # data Time is hours
-    stable_stats = {}
-    for combo, df_list in ds.count_data.items():
-        cm = _combo_concat(df_list)
-        s = cm[cm['Time'] >= cutoff_h]
-        total = s[CELL_TYPES].sum(axis=1)
-        stable_stats[combo] = {'Total': total.values,
-                               'CV': (total.std() / total.mean()) if total.mean() else np.nan,
-                               **{ct: s[ct].values for ct in CELL_TYPES if ct in s}}
-    keys = list(stable_stats)
+    stats_by = replicate_window_means(ds, stable_day)
+    keys = list(stats_by)
     labels, param = _short_combo_labels(ds, keys)
     x = np.arange(len(keys))
     axlabel = param or "Combination"
-    # total boxplots
-    axes[0, 0].boxplot([stable_stats[k]['Total'] for k in keys], positions=x)
-    axes[0, 0].set_title("Total count (stable)"); axes[0, 0].set_ylabel("Cells")
-    _set_combo_xticks(axes[0, 0], x, labels); axes[0, 0].set_xlabel(axlabel)
-    # CV
-    axes[0, 1].bar(x, [stable_stats[k]['CV'] for k in keys], color='#7f8c8d')
+    n_txt = ", ".join(f"n={len(stats_by[k]['Total'])}" for k in keys)
+    # per-replicate window means of the total count: every replicate is one dot
+    ax = axes[0, 0]
+    for i, k in enumerate(keys):
+        v = stats_by[k]['Total']
+        ax.scatter(np.full(len(v), i), v, s=22, alpha=0.75, zorder=2)
+        if v:
+            ax.hlines(np.mean(v), i - 0.25, i + 0.25, color='black', lw=1.5, zorder=3)
+    ax.set_title("Total count, mean per replicate"); ax.set_ylabel("Cells")
+    _set_combo_xticks(ax, x, labels); ax.set_xlabel(axlabel)
+    # temporal CV of each replicate, averaged over replicates
+    cv = [np.nanmean(stats_by[k]['CV']) if stats_by[k]['CV'] else np.nan for k in keys]
+    axes[0, 1].bar(x, cv, color='#7f8c8d')
     axes[0, 1].axhline(0.1, color='red', ls='--', label='CV=0.1')
     _set_combo_xticks(axes[0, 1], x, labels); axes[0, 1].set_xlabel(axlabel)
-    axes[0, 1].set_title("Coefficient of variation (stability)"); axes[0, 1].legend(fontsize=7)
-    # mean per type
+    axes[0, 1].set_title("Variability over time within a run\n(CV per replicate, averaged)")
+    axes[0, 1].legend(fontsize=7)
+    # mean per type (mean of replicate means)
     w = 0.8 / len(CELL_TYPES)
     for i, ct in enumerate(CELL_TYPES):
-        means = [np.mean(stable_stats[k].get(ct, [0])) for k in keys]
+        means = [np.mean(stats_by[k][ct]) if stats_by[k][ct] else 0 for k in keys]
         axes[1, 0].bar(x + i*w, means, w, label=ct, color=CELL_COLORS[ct])
     _set_combo_xticks(axes[1, 0], x + w*1.5, labels); axes[1, 0].set_xlabel(axlabel)
     axes[1, 0].set_title("Mean count by type"); axes[1, 0].legend(fontsize=7)
-    # pairwise p-values (if >1 combo and scipy)
+    # pairwise tests on the per-replicate means
     ax = axes[1, 1]
-    if _HAS_SCIPY and len(keys) > 1:
+    testable = _HAS_SCIPY and len(keys) > 1 and all(len(stats_by[k]['Total']) >= 2 for k in keys)
+    if testable:
         n = len(keys); pm = np.ones((n, n))
         for i, a in enumerate(keys):
             for j, b in enumerate(keys):
                 if i != j:
                     try:
-                        pm[i, j] = _spstats.mannwhitneyu(stable_stats[a]['Total'], stable_stats[b]['Total'])[1]
+                        pm[i, j] = _spstats.mannwhitneyu(
+                            stats_by[a]['Total'], stats_by[b]['Total'],
+                            alternative='two-sided')[1]
                     except Exception:
                         pm[i, j] = np.nan
         im = ax.imshow(pm, cmap='RdYlGn_r', vmin=0, vmax=0.1)
         ax.set_xticks(range(n)); ax.set_yticks(range(n))
         ax.set_xticklabels(labels, rotation=30 if any(len(str(l)) > 6 for l in labels) else 0, fontsize=8)
         ax.set_yticklabels(labels, fontsize=8)
-        fig.colorbar(im, ax=ax); ax.set_title("Pairwise p-values (Mann-Whitney)")
+        for i in range(n):
+            for j in range(n):
+                if i != j and np.isfinite(pm[i, j]):
+                    ax.text(j, i, f"{pm[i, j]:.3f}", ha='center', va='center', fontsize=7)
+        fig.colorbar(im, ax=ax)
+        ax.set_title("Pairwise p (Mann-Whitney on replicate means;\ndescriptive, uncorrected)",
+                     fontsize=9)
     else:
         ax.axis('off')
-        ax.text(0.5, 0.5, "Pairwise stats need ≥2 combinations", ha='center', va='center')
-    ttl = "Cross-combination statistics (stable phase)"
+        ax.text(0.5, 0.5, "Pairwise tests need ≥2 combinations\nwith ≥2 replicates each",
+                ha='center', va='center')
+    ttl = f"Cross-combination statistics — {window_label(ds, stable_day)}\n" \
+          f"one value per replicate ({n_txt})"
     if param:
         ttl += f" — swept: {param}"
-    fig.suptitle(ttl); fig.tight_layout()
+    if ds.metadata_varies():
+        ttl += "\nNOTE: injury time / injury switch / length differ between combinations; " \
+               "one window is applied to all"
+    fig.suptitle(ttl, fontsize=9); fig.tight_layout()
 
 
 LIMBAL_BIN = 0                 # Bin 0 = Limbus

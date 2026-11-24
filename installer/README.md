@@ -1,5 +1,10 @@
 # Desktop installers (non-developer distribution)
 
+> **Not published from v1.1.0 on.** Releases up to v1.0.4 shipped installers built
+> with these scripts. Later releases are installed from source ([INSTALL.md](../INSTALL.md)).
+> The scripts are kept for anyone who wants to build an installer; they are not
+> tested against the current code.
+
 A **single double-click installer** per OS that bundles everything — a private
 Python distribution, the CompuCell3D + analysis environment, both GUI apps, the
 V-Cornea model data, and all Python packages. End users download one file, run

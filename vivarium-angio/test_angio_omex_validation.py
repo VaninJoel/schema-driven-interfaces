@@ -383,12 +383,13 @@ def test_report_plots_only_successful_replicates(tmp_path, monkeypatch):
     seen = {}
     real_combo, real_only = rep.build_combo_report, rep.build_excluded_only_report
 
-    def combo_spy(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=()):
-        seen[c] = ([Path(d).name for d in rep_dirs], [(Path(d).name, s) for d, s in excluded])
-        return real_combo(c, label, rep_dirs, omex_paths, sim_time, out_pdf, excluded=excluded)
+    # The builders receive archived runs (rep.ArchivedRun), not run directories.
+    def combo_spy(c, label, runs, omex_paths, sim_time, out_pdf, excluded=()):
+        seen[c] = ([r.name for r in runs], [(r.name, s) for r, s in excluded])
+        return real_combo(c, label, runs, omex_paths, sim_time, out_pdf, excluded=excluded)
 
     def only_spy(c, label, excluded, out_pdf):
-        seen[c] = ([], [(Path(d).name, s) for d, s in excluded])
+        seen[c] = ([], [(r.name, s) for r, s in excluded])
         return real_only(c, label, excluded, out_pdf)
 
     monkeypatch.setattr(rep, 'build_combo_report', combo_spy)
@@ -398,6 +399,145 @@ def test_report_plots_only_successful_replicates(tmp_path, monkeypatch):
     assert seen['exp_combo001'] == ([ok.name], [(bad.name, 'timed_out')])
     assert seen['exp_combo002'] == ([], [(lost.name, 'failed')])
     assert all(Path(p).exists() for p in written)
+
+
+def test_archive_built_through_a_file_path_load_still_carries_metrics(tmp_path):
+    # The GUI worker loads omex_generator.py by bare file path, where it has no
+    # package and relative imports fail. The shared metric code was then
+    # unreachable and every GUI-produced archive silently lost metrics.csv.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'angio_omex_generator_by_path',
+        REPO_ROOT / 'vivarium_angio' / 'utils' / 'omex_generator.py')
+    by_path = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(by_path)
+    d = _zarr_run(tmp_path, 'run_rep01', 'success', 4)
+    assert by_path.extract_zarr_metrics(d / 'data.zarr') is not None
+    meta = json.loads((d / 'run_metadata.json').read_text())
+    omex = by_path.create_omex_archive_from_zarr(d / 'data.zarr', meta, meta['parameters'],
+                                                 archive_path=d / 'run_rep01.omex')
+    with zipfile.ZipFile(omex) as zf:
+        assert 'metrics.csv' in zf.namelist()
+        assert 'metrics.csv' in zf.read('simulation.sedml').decode()
+
+
+def _spy_combo_reports(rep, monkeypatch):
+    """Record what each combination report was built from: per run, its name, the
+    metric series plotted, the final cell-type field and the metrics.csv check."""
+    seen = {}
+    real_combo, real_only = rep.build_combo_report, rep.build_excluded_only_report
+
+    def combo_spy(c, label, runs, omex_paths, sim_time, out_pdf, excluded=()):
+        seen[c] = {'runs': {r.name: (r.frame.copy(), r.final_field(0).copy(), r.metrics_check)
+                            for r in runs},
+                   'excluded': [(r.name, s) for r, s in excluded]}
+        return real_combo(c, label, runs, omex_paths, sim_time, out_pdf, excluded=excluded)
+
+    def only_spy(c, label, excluded, out_pdf):
+        seen[c] = {'runs': {}, 'excluded': [(r.name, s) for r, s in excluded]}
+        return real_only(c, label, excluded, out_pdf)
+
+    monkeypatch.setattr(rep, 'build_combo_report', combo_spy)
+    monkeypatch.setattr(rep, 'build_excluded_only_report', only_spy)
+    return seen
+
+
+def test_report_is_built_from_the_archives_alone(tmp_path, monkeypatch):
+    # The report must not need the directory the runs were produced in: the same
+    # report has to come out of a folder that holds nothing but the .omex files.
+    import shutil
+    import pandas as pd
+    rep = _report_tool()
+    work = tmp_path / 'work'
+    _zarr_run(work, 'exp_combo001_rep01', 'success', 4)
+    _zarr_run(work, 'exp_combo001_rep02', 'success', 6)
+    _zarr_run(work, 'exp_combo002_rep01', 'failed', 15)
+    seen = _spy_combo_reports(rep, monkeypatch)
+    assert rep.generate(work)
+    from_work = dict(seen)
+    seen.clear()
+
+    shipped = tmp_path / 'shipped'
+    shipped.mkdir()
+    for omex in work.glob('*/*.omex'):
+        shutil.copy(omex, shipped / omex.name)
+    assert not any(p.is_dir() for p in shipped.iterdir())
+    written = rep.generate(shipped)
+
+    assert written and all(Path(p).exists() for p in written)
+    assert seen.keys() == from_work.keys() == {'exp_combo001', 'exp_combo002'}
+    assert seen['exp_combo002'] == {'runs': {}, 'excluded': [('exp_combo002_rep01', 'failed')]}
+    runs = seen['exp_combo001']['runs']
+    assert sorted(runs) == ['exp_combo001_rep01', 'exp_combo001_rep02']
+    for name, (frame, field, check) in runs.items():
+        w_frame, w_field, _ = from_work['exp_combo001']['runs'][name]
+        pd.testing.assert_frame_equal(frame, w_frame)
+        assert (field == w_field).all() and check == 'MATCH'
+    # ...and the values are the archive's: 4 and 6 of 20 rows are endothelial.
+    assert runs['exp_combo001_rep01'][0]['cell_density'].iloc[-1] == pytest.approx(4 / 20)
+    assert runs['exp_combo001_rep02'][0]['cell_density'].iloc[-1] == pytest.approx(6 / 20)
+    assert runs['exp_combo001_rep01'][1].sum() == 4 * 20
+
+
+def test_report_ignores_a_working_directory_that_changed_after_export(tmp_path, monkeypatch):
+    # An archive and the working directory it came from can diverge after export.
+    # The report must show the archived trajectory, not the directory's.
+    import numpy as np
+    import zarr
+    rep = _report_tool()
+    d = _zarr_run(tmp_path, 'exp_rep01', 'success', 4)
+    rep._export_missing_archives(tmp_path)
+    assert (d / 'exp_rep01.omex').exists()
+    store = zarr.open(str(d / 'data.zarr'), mode='a')      # rewrite the directory copy
+    for step in (0, 10):
+        a = np.zeros((20, 20, 1, 3))
+        a[:15, :, 0, 0] = 1
+        store[str(step)]['data'][...] = a
+
+    seen = _spy_combo_reports(rep, monkeypatch)
+    rep.generate(tmp_path)
+    frame, field, check = seen['exp']['runs']['exp_rep01']
+    assert frame['cell_density'].iloc[-1] == pytest.approx(4 / 20)
+    assert field.sum() == 4 * 20 and check == 'MATCH'
+
+
+def test_report_flags_a_metrics_table_that_does_not_match_its_trajectory(tmp_path):
+    rep = _report_tool()
+    d = _zarr_run(tmp_path, 'exp_rep01', 'success', 4)
+    rep._export_missing_archives(tmp_path)
+    omex = d / 'exp_rep01.omex'
+    run = rep.ArchivedRun(omex)
+    assert run.frame is not None and run.metrics_check == 'MATCH'
+
+    tampered = tmp_path / 'tampered.omex'
+    with zipfile.ZipFile(omex) as src, zipfile.ZipFile(tampered, 'w') as dst:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == 'metrics.csv':
+                assert b'0.200000' in data
+                data = data.replace(b'0.200000', b'0.750000')
+            dst.writestr(item, data)
+    run = rep.ArchivedRun(tampered)
+    assert run.frame['cell_density'].iloc[-1] == pytest.approx(4 / 20)   # the trajectory wins
+    assert run.metrics_check == 'DIFFERS'
+
+
+def test_run_that_failed_before_writing_any_trajectory_is_still_listed(tmp_path, monkeypatch):
+    # A batch record that drops the runs that died at start-up overstates success.
+    rep = _report_tool()
+    _zarr_run(tmp_path, 'exp_combo001_rep01', 'success', 4)
+    dead = tmp_path / 'exp_combo001_rep02'
+    dead.mkdir()
+    (dead / 'run_metadata.json').write_text(json.dumps({
+        'run_id': 'id-dead', 'simulation_status': 'failed', 'parameters': {'sim_time': 10},
+        'error_message': 'crashed at start-up', 'execution': {'exit_code': 1}}))
+    seen = _spy_combo_reports(rep, monkeypatch)
+    written = rep.generate(tmp_path)
+    assert all(Path(p).exists() for p in written)
+    assert sorted(seen['exp_combo001']['runs']) == ['exp_combo001_rep01']
+    assert seen['exp_combo001']['excluded'] == [('exp_combo001_rep02', 'failed')]
+    names, doc = _status_doc(dead / 'exp_combo001_rep02.omex')
+    assert doc['status'] == 'failed' and not any(n.startswith('zarr/') for n in names)
 
 
 def test_report_rebuilds_legacy_archive_with_recorded_status(tmp_path):

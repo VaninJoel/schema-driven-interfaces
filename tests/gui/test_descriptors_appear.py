@@ -153,3 +153,43 @@ def test_info_dialog_opens_through_the_button_for_every_parameter(window, exc_gu
             if b is not None and b.isVisible() and b.isEnabled() and name not in seen:
                 QTest.mouseClick(b, Qt.LeftButton); settle(5); clicked += 1; seen.add(name)
     assert clicked >= len(schema_parameters(window)) * 0.9, f"only {clicked} info buttons were reachable"
+
+
+def test_ranges_are_named_by_one_vocabulary(gui, window):
+    """Working range (with its basis) and implementation limit, in both dialogs and
+    the export. The working range is called physiological only where its basis is
+    published literature; a range that rests on the modeler's judgement says so,
+    also in the warning raised for a value outside it."""
+    from schema_utils import extract_parameter_documentation, validate_parameter_value
+    old_words = ('Physiological Range', 'Mathematical Range', 'published evidence',
+                 'modeler judgement', 'extrapolation')
+    failures = []
+    doc = extract_parameter_documentation(window.schema)
+    failures += [f"export: {w}" for w in old_words if w in doc]
+    for name, info in schema_parameters(window).items():
+        ev = (info.get('_range_evidence') or {})
+        basis = (ev.get('physiological') or {}).get('basis')
+        for which, html in (('info', _info_html(gui, window, name)[0]),
+                            ('validation', _validation_html(gui, window, name))):
+            failures += [f"{name}/{which}: {w}" for w in old_words if w in html]
+            numeric = isinstance(info.get('_default'), (int, float)) and not isinstance(info.get('_default'), bool)
+            if info.get('_physiological_range') and (which == 'info' or numeric):
+                if 'Working range' not in html:
+                    failures.append(f"{name}/{which}: working range not named")
+                if ('Working range (physiological)' in html) != (basis == 'literature'):
+                    failures.append(f"{name}/{which}: 'physiological' shown for basis {basis}")
+                if basis == 'expert_judgement' and "Basis: the modeler's judgement" not in html:
+                    failures.append(f"{name}/{which}: modeler's judgement not stated")
+            if info.get('_mathematical_range') and (which == 'info' or numeric)                     and 'Implementation limit' not in html:
+                failures.append(f"{name}/{which}: implementation limit not named")
+        # A value just outside the working range: the warning names the range and its basis.
+        rng = info.get('_physiological_range')
+        if rng and basis == 'expert_judgement' and isinstance(info.get('_default'), float):
+            outside = rng[1] + abs(rng[1]) * 0.01 + 1e-9
+            limit = info.get('_mathematical_range')
+            if limit and outside > limit[1]:
+                continue
+            messages = ' '.join(i['message'] for i in validate_parameter_value(window.schema, name, outside))
+            if 'working range' not in messages or "the modeler's judgement" not in messages:
+                failures.append(f"{name}: warning does not name the modeler's judgement: {messages[:120]}")
+    assert not failures, failures[:15]

@@ -29,8 +29,8 @@ validation = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/joelvanin/vivarium-angio"
-"Bug Tracker" = "https://github.com/joelvanin/vivarium-angio/issues"
+"Homepage" = "https://github.com/VaninJoel/schema-driven-interfaces"
+"Bug Tracker" = "https://github.com/VaninJoel/schema-driven-interfaces/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -36,8 +36,41 @@ def to_cc3d_value(param_info, value):
     multiplier = UNIT_TO_MCS_MULTIPLIER.get(param_info.get('_unit', ''))
     if multiplier is None or not isinstance(value, (int, float)) or isinstance(value, bool):
         return value
-    converted = value * multiplier
-    return int(round(converted)) if isinstance(param_info.get('_default'), int) else converted
+    # The simulator counts whole Monte Carlo steps, and the model fires timed
+    # events on `mcs == value`. A fractional value never matches: 4.1 days is
+    # 983.9999999999999 MCS in floating point, and the injury silently never
+    # happened. Every time-valued parameter is therefore written as an integer.
+    return int(round(value * multiplier))
+
+
+def executed_time_parameters(schema_inputs, params):
+    """{name: {'given', 'unit', 'executed_mcs'}} for every time-valued parameter:
+    what the operator asked for and the whole number of MCS the simulator was
+    given, so a rounded time is visible in the record instead of implied."""
+    out = {}
+    for name, info in (schema_inputs or {}).items():
+        if not isinstance(info, dict) or info.get('_unit') not in UNIT_TO_MCS_MULTIPLIER:
+            continue
+        given = (params or {}).get(name, info.get('_default'))
+        if isinstance(given, (int, float)) and not isinstance(given, bool):
+            out[name] = {'given': given, 'unit': info['_unit'],
+                         'executed_mcs': to_cc3d_value(info, given)}
+    return out
+
+
+def package_version():
+    """Version of the installed vivarium-vcornea distribution, or 'unknown'."""
+    try:
+        from importlib.metadata import version
+        return version('vivarium-vcornea')
+    except Exception:
+        return 'unknown'
+
+
+# What the recorded seed does and does not determine, stamped on every run so a
+# reader of the record is not left to assume the widest meaning. Defined once, in
+# utils/seed_scope.py, which the archive writer and the reports also read.
+from ..utils.seed_scope import RANDOM_SEED_SCOPE  # noqa: E402
 
 
 def cc3d_child_env():
@@ -89,6 +122,17 @@ class VCorneaProcess(Process):
         # the 183-day paper-replication protocol on slow hardware.
         'run_timeout_seconds': 86400,
     }
+
+    # Keys a caller may pass that are launcher settings or run identity, not model
+    # parameters. Anything else that is not in ports_schema() is refused by the
+    # specification check: a misspelt parameter must not silently run at its default.
+    NON_SCHEMA_CONFIG_KEYS = frozenset(defaults) | frozenset((
+        'exp_name', 'parent_experiment', 'parent_experiment_id', 'allow_inadmissible',
+        'confirmed_by_operator',
+        # vivarium-core Process configuration
+        'time_step', 'timestep', 'name', '_schema', '_parallel', '_condition',
+        '_no_original_parameters', '_original_parameters', '_emit',
+    ))
 
     # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a negative
     # value is unambiguous. Each replicate's seed is resolved before launch.
@@ -4271,6 +4315,10 @@ class VCorneaProcess(Process):
               f"InjuryTime (days): {sim_params.get('InjuryTime')}  "
               f"IsInjury: {sim_params.get('IsInjury')}")
 
+        # One specification check for both interfaces (utils/spec_validation.py),
+        # run before any directory is created. Refused specifications raise here.
+        specification_check = self.check_specification(sim_params)
+
         parameter_changes = self._identify_parameter_changes(sim_params)
         run_name = self._generate_run_name(parameter_changes)
 
@@ -4279,6 +4327,13 @@ class VCorneaProcess(Process):
         else:
             output_base = Path.cwd() / "simulation_results"
         
+        # Windows refuses paths of 260 characters or more. Checked here, before
+        # anything is created, so the run is refused with the number of characters
+        # to shorten instead of failing half-way through the project copy
+        # (utils/path_budget.py).
+        from ..utils.path_budget import require_path_budget
+        require_path_budget(output_base, run_name, self.project_path, num_replicates)
+
         batch_output_dir = output_base / run_name
         batch_output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -4323,6 +4378,16 @@ class VCorneaProcess(Process):
             run_metadata['random_seed_origin'] = seed_origin
             replicate_params = dict(sim_params)
             replicate_params['random_seed'] = run_seed
+            # The complete resolved specification of THIS replicate, the check it
+            # passed, the whole-MCS values its time parameters were executed at, and
+            # the software environment: all known before launch, so all recorded
+            # before launch.
+            run_metadata['parameters'] = dict(replicate_params)
+            run_metadata['specification_check'] = specification_check
+            run_metadata['executed_time_parameters'] = executed_time_parameters(
+                self.ports_schema()['inputs'], replicate_params)
+            run_metadata['environment'] = self._environment_record(
+                run_metadata.get('provenance'))
 
             # Keep the working directory inside the user's chosen output
             # directory — it's where they can inspect Parameters.py and the
@@ -4376,9 +4441,43 @@ class VCorneaProcess(Process):
                                ignore=ignore_files,
                                copy_function=shutil.copyfile)
                 self._redirect_outputs_in_copy(temp_project, run_output_dir)
-                self._inject_random_seed_in_copy(temp_project, run_seed)
+                # The recorded seed describes the run only if it was actually
+                # written into the copy. If it was not, the run is not started:
+                # it would execute under a seed nobody recorded while its record
+                # and archive named another one.
+                # The model draws from two generators, so "applied" means both:
+                # CompuCell3D's (CC3DML) and Python's (generated Parameters.py).
+                cc3d_seeded = bool(self._inject_random_seed_in_copy(temp_project, run_seed))
                 sim_params_file = temp_project / "Simulation" / "Parameters.py"
-                self._write_parameters_file(sim_params_file, replicate_params)
+                python_seeded = bool(self._write_parameters_file(sim_params_file, replicate_params))
+                run_metadata['random_seed_applied_to'] = {
+                    'compucell3d': cc3d_seeded, 'python_random': python_seeded}
+                run_metadata['random_seed_applied'] = cc3d_seeded and python_seeded
+                run_metadata['random_seed_scope'] = RANDOM_SEED_SCOPE
+                if not (cc3d_seeded and python_seeded):
+                    missing = [name for name, ok in (
+                        ("CompuCell3D's generator (<Potts>/<RandomSeed> in the CC3DML)", cc3d_seeded),
+                        ("Python's generator (the generated Parameters.py)", python_seeded))
+                        if not ok]
+                    raise RuntimeError(
+                        f"random seed {run_seed} could not be applied to "
+                        f"{' and '.join(missing)}; run not started because its recorded "
+                        f"seed would not describe it")
+                # Launch record: the generated Parameters.py, the parameter audit
+                # and run_metadata.json (status 'running') reach the replicate
+                # directory now, not only after the process ends, so an interrupted
+                # run keeps its identity and its specification.
+                self._copy_parameters_file(temp_project, run_output_dir)
+                try:
+                    from ..utils.parameter_audit import build_parameter_audit
+                    with open(run_output_dir / "parameter_audit.json", 'w') as f:
+                        json.dump(build_parameter_audit(
+                            self.ports_schema(), replicate_params,
+                            schema_fingerprint=run_metadata.get('schema_fingerprint')),
+                            f, indent=2, default=str)
+                except Exception as e:  # noqa: BLE001
+                    print(f"  > Warning: could not write the parameter audit at launch: {e}")
+                self._write_launch_record(run_output_dir, run_metadata)
 
                 # Baseline for the generated-vs-collected audit (see
                 # _get_generated_files_list). BOTH locations are snapshotted: the
@@ -4401,6 +4500,7 @@ class VCorneaProcess(Process):
 
             except Exception as e:
                 print(f"  > FAILED to launch replicate {replicate_id}: {e}")
+                self._write_launch_record(run_output_dir, run_metadata)
                 # The partial workspace is kept: it is the evidence of how far
                 # setup got. Its uuid suffix keeps it from colliding with reruns.
                 job['launch_error'] = f"Failed during setup/launch phase: {e}"
@@ -4517,10 +4617,18 @@ class VCorneaProcess(Process):
 
             # Outcome. Exit code 0 is necessary but not sufficient: CC3D can exit
             # cleanly after crashing on startup (e.g. UNC-cwd failures on
-            # Windows), so success also requires a cell_count CSV.
-            has_real_outputs = any(
-                'cell_count' in str(f).lower() for f in files_moved
-            ) or any(run_output_dir.glob('cell_count_*'))
+            # Windows). Success therefore also requires evidence that the run
+            # reached its final step and delivered every output THIS replicate's
+            # configuration requested, each covering the requested period (see
+            # utils/output_check.py). It does not hinge on any one output: a run
+            # with CellCount switched off is judged on the outputs it did request.
+            from ..utils.output_check import check_requested_outputs
+            output_check = check_requested_outputs(
+                run_output_dir, replicate_params,
+                self._to_cc3d_units('SimTime', replicate_params.get('SimTime', 24)),
+                stdout_log=run_output_dir / "stdout.log",
+                not_before=job.get('started_at'))
+            run_metadata['output_check'] = output_check
             results = None
             if job.get('launch_error'):
                 status, error_message = 'failed', job['launch_error']
@@ -4537,19 +4645,39 @@ class VCorneaProcess(Process):
                 status = 'failed'
                 error_message = (f"Simulation process failed with exit code {exit_code}. "
                                  f"Check stderr.log in the output directory.")
-            elif not has_real_outputs:
+            elif not output_check['ok']:
                 status = 'failed'
-                error_message = (
-                    f"Simulation process exited cleanly (code {exit_code}) but produced no "
-                    f"cell_count_*.csv output. The CC3D simulation likely failed silently "
-                    f"during startup (check stderr.log for UNC path / missing .cc3d / conda "
-                    f"environment errors)."
-                )
+                if (output_check['completion_evidence'] is None
+                        and output_check.get('cc3d_end_of_run_report')):
+                    # CompuCell3D ran and ended normally, so this is not a start-up
+                    # failure: the run stopped before the step at which the model
+                    # writes its tables, or wrote them for another period.
+                    error_message = (
+                        f"Simulation process exited cleanly (code {exit_code}) and "
+                        f"CompuCell3D reported the end of a run, but the model did not "
+                        f"reach the final step of the requested period (step "
+                        f"{output_check['final_mcs'] + 1}): "
+                        f"{'; '.join(output_check['problems'])}. The run ended early or "
+                        f"covered a different period than requested."
+                    )
+                elif output_check['completion_evidence'] is None:
+                    error_message = (
+                        f"Simulation process exited cleanly (code {exit_code}) but nothing "
+                        f"shows it reached its final step: "
+                        f"{'; '.join(output_check['problems'])}. The CC3D simulation likely "
+                        f"failed silently during startup (check stderr.log for UNC path / "
+                        f"missing .cc3d / conda environment errors)."
+                    )
+                else:
+                    error_message = (
+                        f"Simulation process exited cleanly (code {exit_code}) and reached "
+                        f"its final step, but a requested output is missing or incomplete: "
+                        f"{'; '.join(output_check['problems'])}."
+                    )
             else:
                 status, error_message = 'success', None
                 print(f"    - Parsing simulation results...")
                 results = self._parse_simulation_results(run_output_dir, replicate_params)
-                run_metadata['healing_time'] = results.get('healing_time')
 
             run_metadata.update({
                 'simulation_status': status,
@@ -4589,9 +4717,15 @@ class VCorneaProcess(Process):
             except Exception as e:
                 print(f"    - Warning: Could not build parameter audit: {e}")
 
-            # Save metadata
-            with open(run_output_dir / "run_metadata.json", 'w') as f:
-                json.dump(run_metadata, f, indent=2, default=str)
+            # Save metadata. Guarded: one replicate directory that cannot be written
+            # (path too long, disk full) must not leave the remaining replicates of
+            # the batch without any record.
+            try:
+                with open(run_output_dir / "run_metadata.json", 'w') as f:
+                    json.dump(run_metadata, f, indent=2, default=str)
+            except Exception as e:  # noqa: BLE001
+                print(f"    - Warning: could not write run_metadata.json for replicate "
+                      f"{replicate_id}: {e}")
 
             # Always produce a typed COMBINE/OMEX archive — for every outcome. A
             # non-successful run gets an archive marked with its status (no
@@ -4615,8 +4749,11 @@ class VCorneaProcess(Process):
                 )
                 run_metadata['omex_archive'] = str(omex_path.name)
                 # Re-save metadata with OMEX info
-                with open(run_output_dir / "run_metadata.json", 'w') as f:
-                    json.dump(run_metadata, f, indent=2, default=str)
+                try:
+                    with open(run_output_dir / "run_metadata.json", 'w') as f:
+                        json.dump(run_metadata, f, indent=2, default=str)
+                except Exception as e:  # noqa: BLE001
+                    print(f"    - Warning: could not re-save run_metadata.json: {e}")
                 print(f"    - Generated {'' if status == 'success' else status.upper() + ' '}OMEX archive: {omex_path.name}")
             except Exception as e:
                 print(f"    - Warning: Could not generate OMEX archive: {e}")
@@ -4719,6 +4856,97 @@ class VCorneaProcess(Process):
                     continue
         
         return None
+
+    def check_specification(self, sim_params=None):
+        """Validate the complete specification with the check the GUI uses and
+        return its record (stored as run_metadata['specification_check']).
+
+        Raises SpecificationError when the specification is malformed (unknown
+        key, wrong type), when a value is outside a declared implementation limit
+        and `allow_inadmissible` was not set, or when an injury is scheduled at or
+        after the end of the simulation (it would never occur, while the run
+        would still be recorded as an injury run).
+        """
+        from ..utils import spec_validation as sv
+        inputs = self.ports_schema()['inputs']
+        given = {k: v for k, v in self.parameters.items()
+                 if k in inputs or k not in self.NON_SCHEMA_CONFIG_KEYS}
+        if sim_params is None:
+            sim_params = {k: self.parameters.get(k, info.get('_default'))
+                          for k, info in inputs.items()}
+        allow = bool(self.parameters.get('allow_inadmissible', False))
+        confirmed = self.parameters.get('confirmed_by_operator')
+        issues = sv.validate_specification(inputs, given)
+        if sim_params.get('IsInjury'):
+            injury = to_cc3d_value(inputs.get('InjuryTime'), sim_params.get('InjuryTime'))
+            end = to_cc3d_value(inputs.get('SimTime'), sim_params.get('SimTime'))
+            if (isinstance(injury, (int, float)) and isinstance(end, (int, float))
+                    and not isinstance(injury, bool) and injury >= end):
+                issues.append({
+                    'parameter': 'InjuryTime', 'severity': sv.MALFORMED, 'tier': None,
+                    'value': sim_params.get('InjuryTime'), 'range': None, 'basis': None,
+                    'message': (f"Injury Time ({sim_params.get('InjuryTime')} days = {injury} "
+                                f"MCS) is not before the end of the simulation "
+                                f"({sim_params.get('SimTime')} days = {end} MCS): the injury "
+                                f"would never occur. Shorten it, lengthen the simulation, or "
+                                f"switch the injury off")})
+        record = sv.check_record(
+            issues, allow_inadmissible=allow,
+            checked_by='gui' if confirmed is not None else 'process',
+            confirmed_by_operator=confirmed)
+        stop = sv.blocking_issues(issues, allow)
+        if stop:
+            hint = ('' if all(i['severity'] == sv.MALFORMED for i in stop) else
+                    ' Values outside an implementation limit run only with '
+                    'allow_inadmissible=True, which is recorded with the run.')
+            raise sv.SpecificationError(
+                "Experiment specification refused: "
+                + "; ".join(i['message'] for i in stop) + "." + hint, stop, record)
+        return record
+
+    def _environment_record(self, provenance=None):
+        """The software environment, for run_metadata.json (and, via the archive
+        writer, environment.json). States which interpreter it describes: the
+        record is taken in the wrapper's process, which is also the simulator's
+        interpreter unless CompuCell3D lives in a separate conda environment."""
+        import importlib.util
+        import sys as _sys
+        try:
+            from ..utils.omex_generator import generate_environment_manifest
+            env = json.loads(generate_environment_manifest(provenance))
+        except Exception as e:  # noqa: BLE001
+            env = {'error': f'environment capture failed: {e}'}
+        same = importlib.util.find_spec('cc3d') is not None
+        env['describes'] = 'the interpreter that ran the wrapper (' + _sys.executable + ')'
+        if same:
+            env['simulator_environment'] = {
+                'mode': 'same_interpreter',
+                'note': ('CompuCell3D was launched with this same interpreter, so the '
+                         'packages listed are the ones the simulation ran with.')}
+        else:
+            env['simulator_environment'] = {
+                'mode': 'conda_run',
+                'conda_env': self.parameters.get('cc3d_conda_env_name'),
+                'conda_executable': self.parameters.get('conda_executable_path'),
+                'note': ('CompuCell3D is not importable in the wrapper interpreter; the '
+                         'simulation was launched with `conda run` in the named '
+                         'environment. The package versions listed describe the wrapper '
+                         'interpreter, NOT that environment, whose packages are not '
+                         'recorded here.')}
+        return env
+
+    def _write_launch_record(self, run_output_dir, run_metadata):
+        """Write run_metadata.json as the replicate is launched (status 'running').
+
+        A run that is cancelled, killed or loses its wrapper before Phase 3 then
+        still has its identity (run_id), seed, resolved parameters, environment and
+        generated Parameters.py on disk. Best-effort: never stops a launch."""
+        try:
+            with open(Path(run_output_dir) / "run_metadata.json", 'w') as f:
+                json.dump({**run_metadata, 'simulation_status': 'running'}, f,
+                          indent=2, default=str)
+        except Exception as e:  # noqa: BLE001
+            print(f"  > Warning: could not write the launch record: {e}")
 
     def _identify_parameter_changes(self, sim_params):
         """Identify which parameters have been changed from their defaults."""
@@ -4860,7 +5088,7 @@ class VCorneaProcess(Process):
         metadata = {
             'run_name': run_name,
             'created_at': pd.Timestamp.now().isoformat(),
-            'vivarium_wrapper_version': '1.0.0',  # You can version your wrapper
+            'vivarium_wrapper_version': package_version(),
             'total_parameters': len(sim_params),
             'parameters_changed': len(parameter_changes),
             'parameter_changes': parameter_changes,
@@ -4872,7 +5100,11 @@ class VCorneaProcess(Process):
                 'cc3d_conda_env_name': self.parameters['cc3d_conda_env_name'],
                 'sim_time': sim_params.get('SimTime', 7700),
                 'has_injury': sim_params.get('IsInjury', False),
-                'injury_type': 'ablation' if sim_params.get('InjuryType', False) else 'chemical'
+                # Empty when there is no injury: 'chemical' used to be recorded
+                # for runs in which nothing was injured.
+                'injury_type': (None if not sim_params.get('IsInjury', False) else
+                                'ablation' if sim_params.get('InjuryType', False)
+                                else 'chemical'),
             },
             'key_parameters': {
                 param: sim_params.get(param, 'not_set') 
@@ -4994,10 +5226,25 @@ class VCorneaProcess(Process):
                     '<Potts>', f'<Potts>\n       <RandomSeed>{int(seed)}</RandomSeed>', 1)
             try:
                 xml_path.write_text(content)
-                print(f"  > [OK] seeded {xml_path.name} with RandomSeed={int(seed)}")
-                return True
             except Exception as e:
                 print(f"  > [WARNING] could not write seed into {xml_path.name}: {e}")
+                continue
+            # Verify on the parsed document, not on the text: a <RandomSeed> that
+            # sits inside a comment, or outside <Potts>, would satisfy the text
+            # edit above and leave the simulator unseeded.
+            try:
+                import xml.etree.ElementTree as _ET
+                node = _ET.parse(xml_path).getroot().find('.//Potts/RandomSeed')
+                effective = int((node.text or '').strip()) if node is not None else None
+            except Exception as e:
+                print(f"  > [WARNING] {xml_path.name} could not be parsed after seeding: {e}")
+                effective = None
+            if effective == int(seed):
+                print(f"  > [OK] seeded {xml_path.name} with RandomSeed={int(seed)}")
+                return True
+            print(f"  > [WARNING] {xml_path.name}: the effective <Potts>/<RandomSeed> is "
+                  f"{effective!r}, not {int(seed)}; run would be UNSEEDED")
+            return False
         print("  > [WARNING] no <Potts> block found; run will be UNSEEDED")
         return False
 
@@ -5165,6 +5412,21 @@ class VCorneaProcess(Process):
             for param_name, param_value in final_params.items():
                 cc3d_value = self._to_cc3d_units(param_name, param_value, schema)
                 f.write(f"{param_name}={repr(cc3d_value)}\n")
+            # One recorded seed for both generators the model draws from (see
+            # utils/seed_scope.py). Only for a resolved seed: the -1 sentinel
+            # ("draw one") never reaches a replicate's own parameters.
+            seed = final_params.get('random_seed')
+            try:
+                import operator
+                seed_ok = (not isinstance(seed, bool)) and operator.index(seed) >= 0
+            except TypeError:           # not an integer of any kind (None, float, text)
+                seed_ok = False
+            if seed_ok:
+                from ..utils.seed_scope import PYTHON_SEED_LINES
+                f.write(PYTHON_SEED_LINES)
+        # Whether Python's generator is seeded by this file. The caller refuses to
+        # launch a replicate whose recorded seed did not reach both generators.
+        return bool(seed_ok)
 
     def _run_cc3d_simulation(self, project_path, output_dir):
         """
@@ -5495,7 +5757,12 @@ class VCorneaProcess(Process):
         
         results = {
             'simulation_success': True,
-            'healing_time': 0.0,
+            # No healing time is computed here. The value this wrapper used to
+            # record was wrong for every run (days read as MCS, and "healed" taken
+            # as the first post-injury sample at 85% of baseline, which precedes
+            # the damage). Recovery endpoints are computed per replicate, with
+            # their definitions, by the combination report.
+            'healing_time': None,
             'cell_counts': {},
             'tissue_thickness': {},
             'output_files': {
@@ -5519,12 +5786,6 @@ class VCorneaProcess(Process):
                 cell_counts_df = pd.read_csv(cell_count_file)
                 results['cell_counts'] = cell_counts_df.to_dict('records')
                 
-                # Calculate healing time if injury occurred
-                if sim_params.get('IsInjury', False):
-                    results['healing_time'] = self._calculate_healing_time(
-                        cell_counts_df, sim_params
-                    )
-                    
             except Exception as e:
                 print(f"Warning: Could not parse cell counts: {e}")
         else:
@@ -5541,106 +5802,3 @@ class VCorneaProcess(Process):
             print("Warning: Thickness file not found")
         
         return results
-
-    def _calculate_healing_time(self, cell_counts_df, sim_params):
-        """Calculate healing time from cell count data."""
-        if cell_counts_df.empty:
-            return 0.0
-                
-        try:          
-            # Key fix: Convert injury time from MCS to hours for data comparison
-            injury_time_MCS = sim_params.get('InjuryTime', 500)
-            injury_time_hours = injury_time_MCS / 10.0  # Convert to hours
-            
-            print(f"  Injury at {injury_time_MCS} MCS = {injury_time_hours} hours")
-            
-            # Check data availability
-            max_time_hours = cell_counts_df['Time'].max()
-            print(f"  Data available until {max_time_hours} hours")
-            
-            if max_time_hours <= injury_time_hours:
-                print(f"  ERROR: No post-injury data (injury at {injury_time_hours}h, data until {max_time_hours}h)")
-                return 0.0
-            
-            # Get pre-injury baseline using HOURS
-            pre_injury = cell_counts_df[cell_counts_df['Time'] < injury_time_hours]
-            if len(pre_injury) < 3:
-                print(f"  Warning: Only {len(pre_injury)} pre-injury timepoints")
-                return 0.0
-            
-            # Use last 20% for baseline
-            baseline_window = max(3, len(pre_injury) // 5)
-            baseline_data = pre_injury.tail(baseline_window)
-            
-            cell_types = ['Superficial', 'Wing', 'Basal', 'Stem']
-            baseline_total = baseline_data[cell_types].sum(axis=1).mean()
-            print(f"  Baseline: {baseline_total:.0f} cells (from {len(baseline_data)} timepoints)")
-            
-            # Get post-injury data using HOURS
-            post_injury = cell_counts_df[cell_counts_df['Time'] > injury_time_hours]
-            if post_injury.empty:
-                print("  ERROR: No post-injury data found")
-                return 0.0
-            
-            # Find minimum (maximum damage)
-            post_totals = post_injury[cell_types].sum(axis=1)
-            min_cells = post_totals.min()
-            min_time_hours = post_injury.iloc[post_totals.argmin()]['Time']
-            
-            damage_percent = (baseline_total - min_cells) / baseline_total * 100
-            print(f"  Max damage: {damage_percent:.1f}% at {min_time_hours} hours post-injury")
-            
-            # Find recovery (85% of baseline for short simulations)
-            recovery_threshold = 0.85 * baseline_total
-            
-            for idx, row in post_injury.iterrows():
-                current_total = row[cell_types].sum()
-                if current_total >= recovery_threshold:
-                    healing_time_hours = row['Time'] - injury_time_hours
-                    healing_time_MCS = healing_time_hours * 10  # Convert back to MCS
-                    print(f"  Healing detected: {healing_time_hours} hours = {healing_time_MCS} MCS")
-                    return healing_time_MCS  # Return in MCS units
-            
-            # No full recovery
-            final_recovery = (post_totals.iloc[-1] / baseline_total) * 100
-            print(f"  No full recovery. Final: {final_recovery:.1f}% of baseline")
-            return 0.0
-            
-        except Exception as e:
-            print(f"  Error in healing calculation: {e}")
-            import traceback
-            traceback.print_exc()
-            return 0.0
-        
-            # injury_time = sim_params.get('InjuryTime', 500)
-            
-            # # Simple healing metric: when total cell count returns to 95% of pre-injury
-            # pre_injury_data = cell_counts_df[cell_counts_df['Time'] < injury_time]
-            # if pre_injury_data.empty:
-            #     return 0.0
-            
-            # # Calculate pre-injury baseline (last few time points before injury)
-            # baseline_data = pre_injury_data.tail(10)
-            # baseline_total = baseline_data[['Superficial', 'Wing', 'Basal', 'Stem']].sum(axis=1).mean()
-            
-            # # Find when post-injury levels return to 95% of baseline
-            # post_injury_data = cell_counts_df[cell_counts_df['Time'] > injury_time]
-        #     injury_time_MCS = sim_params.get('InjuryTime', 500)
-        #     injury_time_hours = injury_time_MCS / 10.0  # THE KEY FIX!
-            
-        #     # Now use injury_time_hours when filtering the dataframe
-        #     pre_injury = cell_counts_df[cell_counts_df['Time'] < injury_time_hours]
-        #     post_injury = cell_counts_df[cell_counts_df['Time'] > injury_time_hours]
-
-            
-        #     for idx, row in post_injury_data.iterrows():
-        #         current_total = row[['Superficial', 'Wing', 'Basal', 'Stem']].sum()
-        #         if current_total >= 0.95 * baseline_total:
-        #             healing_time = row['Time'] - injury_time
-        #             return max(0.0, healing_time)
-            
-        #     return 0.0  # No healing detected
-            
-        # except Exception as e:
-        #     print(f"Warning: Could not calculate healing time: {e}")
-        #     return 0.0

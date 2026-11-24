@@ -50,7 +50,8 @@ class SimulationWorker(QObject):
     finished = pyqtSignal(dict)      # {exp_name, store_path, final_step}
     error = pyqtSignal(str)          # Error message
 
-    def __init__(self, parameters, output_dir='experiments', parameter_audit=None):
+    def __init__(self, parameters, output_dir='experiments', parameter_audit=None,
+                 specification_check=None):
         """
         Initialize simulation worker.
 
@@ -70,6 +71,12 @@ class SimulationWorker(QObject):
         # its subprocess do not): what the schema documents about every value in
         # `parameters`. Stored into the archive and alongside run_metadata.json.
         self.parameter_audit = parameter_audit
+        # Record of the specification check for THIS run (shared with the process:
+        # vivarium_angio.utils.spec_validation). Supplied by the launcher that
+        # asked the operator (the main window) or, when absent, made here before
+        # anything is launched — so a run started without a window is checked and
+        # recorded exactly like one started from it.
+        self.specification_check = specification_check
         self.output_dir = Path(output_dir)
         self.exp_name = parameters.get('exp_name', 'unnamed_run')
         self.sim_time = parameters.get('sim_time', 100.0)
@@ -173,6 +180,11 @@ class SimulationWorker(QObject):
             self.exp_dir.mkdir(parents=True, exist_ok=True)
             self.logs_dir.mkdir(exist_ok=True)
 
+            # Checked once the run owns its directory, so that a refused
+            # specification still leaves a record: identity, the findings that
+            # refused it, and a failed-status archive.
+            self._check_specification()
+
             self.stdout_log = open(stdout_log_path, 'w')
             self.stderr_log = open(stderr_log_path, 'w')
 
@@ -196,7 +208,10 @@ class SimulationWorker(QObject):
                 exit_code = None
         except Exception as e:
             import traceback
-            self._launch_error = f"{e}\n\n{traceback.format_exc()}"
+            if type(e).__name__ == 'SpecificationError':
+                self._launch_error = str(e)          # the findings are the message
+            else:
+                self._launch_error = f"{e}\n\n{traceback.format_exc()}"
         finally:
             for handle in (getattr(self, 'stdout_log', None), getattr(self, 'stderr_log', None)):
                 if handle is not None and not handle.closed:
@@ -270,6 +285,25 @@ class SimulationWorker(QObject):
             f"Last 20 lines of stderr:\n"
             f"{self._get_tail(stderr, 20)}"
         )
+
+    def _check_specification(self):
+        """Make sure this run has a specification-check record, refusing the run
+        if the specification may not be executed. A record handed in by the
+        launcher is kept; the process re-applies the same check in the subprocess
+        either way."""
+        if self.specification_check is not None:
+            return
+        from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
+        from vivarium_angio.utils.spec_validation import SpecificationError
+        try:
+            self.specification_check = AngiogenesisProcess.check_specification(
+                self.parameters,
+                allow_inadmissible=bool(self.parameters.get('allow_inadmissible')),
+                checked_by='worker',
+                confirmed_by_operator=self.parameters.get('confirmed_by_operator'))
+        except SpecificationError as refused:
+            self.specification_check = refused.record
+            raise
 
     def _outcome(self, exit_code):
         """The run's status: the single success predicate for metadata, archive
@@ -486,6 +520,9 @@ except Exception as e:
             'simulation_status': status,
             'error_message': self._launch_error,
             'run_reference': self._build_run_reference(),  # Task B (None for single runs)
+            # How this specification was checked before launch, what was found, and
+            # whether anything outside an implementation limit was explicitly allowed.
+            'specification_check': self.specification_check,
             # The seed handed to the CPM kernel for THIS run (assigned per-run by
             # the scheduler, so it is never the -1 sentinel here).
             'random_seed': self.parameters.get('random_seed'),
@@ -545,6 +582,23 @@ except Exception as e:
             mod = _ilu.module_from_spec(spec)
             spec.loader.exec_module(mod)
             record = mod.run_provenance(start_path=mod_path.parent)
+            # The identity above is read from this source tree; the simulation
+            # subprocess imports `vivarium_angio` from wherever the environment
+            # resolves it. Record that location and whether the two are the same
+            # tree, so a mismatch (an older installed copy) is visible in the
+            # record instead of being silently mislabelled.
+            try:
+                import importlib.util as _find
+                found = _find.find_spec('vivarium_angio')
+                executed = (Path(found.origin).resolve().parent
+                            if found and found.origin else None)
+                described = mod_path.resolve().parents[1]
+                record['executed_package_path'] = str(executed) if executed else None
+                record['code_identity_is_of_executed_package'] = (
+                    executed is not None and executed == described)
+            except Exception as _e:
+                record['executed_package_path'] = None
+                record['code_identity_is_of_executed_package'] = None
             # The schema fingerprint is computed ONCE by the main window, which
             # already holds the schema, and handed to each worker, so every run of
             # a session records the definitions its controls were built from.
@@ -630,6 +684,7 @@ except Exception as e:
                 'cancelled_at': (time.strftime('%Y-%m-%dT%H:%M:%S')
                                  if status == 'cancelled' else None),
                 'run_reference': self._build_run_reference(),  # Task B (None for single runs)
+                'specification_check': self.specification_check,
                 # Run identity: which realization, which parameter definitions,
                 # which code. Consumed by the SED-ML writer and the PDF report.
                 'random_seed': self.parameters.get('random_seed'),

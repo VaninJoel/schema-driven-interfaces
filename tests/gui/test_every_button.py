@@ -185,3 +185,21 @@ def test_cancel_declined_keeps_the_batch_alive(gui, window, exc_guard, monkeypat
             break
     assert window.completed_combinations == total, "batch did not finish after a declined cancel"
     FW.delay_s = 0.0
+
+
+def test_entering_an_operator_name_does_not_block_the_run(gui, window, exc_guard):
+    """The operator name is run identity, not a parameter. The launch check once
+    took it for an unknown parameter and refused every run that named its operator."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    window.operator_name_input.setText('A. Operator')
+    window.operator_name_input.editingFinished.emit()
+    settle(50)
+    before = len(gui.main_window.SimulationWorker.instances)
+    QTest.mouseClick(window.run_button, Qt.LeftButton)
+    settle(300)
+    made = gui.main_window.SimulationWorker.instances[before:]
+    assert made, "a run that names its operator was refused"
+    creator = made[0].parameters.get('creator')
+    assert creator and 'Operator' in str(creator)
+    settle(300)

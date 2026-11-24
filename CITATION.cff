@@ -11,20 +11,32 @@ abstract: >-
 type: software
 license: MIT
 repository-code: "https://github.com/VaninJoel/schema-driven-interfaces"
-version: 1.0.0
+version: 1.1.0
+date-released: "2026-11-24"
 authors:
   - family-names: Vanin
     given-names: Joel
+    affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA; Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA"
+    orcid: "https://orcid.org/0000-0001-9227-9667"
   - family-names: Getz
     given-names: Michael
+    affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+    orcid: "https://orcid.org/0000-0001-9886-8454"
   - family-names: Sego
     given-names: Timothy J.
+    affiliation: "Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA"
+    orcid: "https://orcid.org/0000-0002-4274-656X"
   - family-names: Mahony
     given-names: Catherine
+    affiliation: "Procter & Gamble Technical Centre, Reading, UK"
   - family-names: Glazier
     given-names: James A.
+    affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+    orcid: "https://orcid.org/0000-0003-3634-190X"
   - family-names: Veschini
     given-names: Lorenzo
+    affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+    orcid: "https://orcid.org/0000-0003-3820-7472"
 keywords:
   - CompuCell3D
   - Vivarium
@@ -41,14 +53,25 @@ preferred-citation:
   authors:
     - family-names: Vanin
       given-names: Joel
+      affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA; Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA"
+      orcid: "https://orcid.org/0000-0001-9227-9667"
     - family-names: Getz
       given-names: Michael
+      affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+      orcid: "https://orcid.org/0000-0001-9886-8454"
     - family-names: Sego
       given-names: Timothy J.
+      affiliation: "Department of Medicine, Laboratory for Systems Medicine, University of Florida, Gainesville, FL, USA"
+      orcid: "https://orcid.org/0000-0002-4274-656X"
     - family-names: Mahony
       given-names: Catherine
+      affiliation: "Procter & Gamble Technical Centre, Reading, UK"
     - family-names: Glazier
       given-names: James A.
+      affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+      orcid: "https://orcid.org/0000-0003-3634-190X"
     - family-names: Veschini
       given-names: Lorenzo
+      affiliation: "Department of Intelligent Systems Engineering and Biocomplexity Institute, Indiana University, Bloomington, IN, USA"
+      orcid: "https://orcid.org/0000-0003-3820-7472"
   status: submitted

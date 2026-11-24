@@ -37,6 +37,7 @@ from typing import Any, Dict, Optional
 # git is invoked with a short timeout so a wedged/networked git can never stall a
 # run, and (on Windows) without a console window so the GUI does not flash a shell.
 _GIT_TIMEOUT_S = 5
+_GIT_KILL_WAIT_S = 2      # how long a killed git call is given to let go of its pipe
 _NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
 
 # Written next to the payload by the installer build so packaged (non-git)
@@ -93,6 +94,11 @@ def schema_fingerprint(schema: Dict[str, Any], *, port: str = 'inputs') -> str:
 # Code provenance (git checkout -> build stamp -> unavailable)
 # =============================================================================
 
+# Files that are code or model definition: an untracked one inside the package
+# is part of what ran.
+_SOURCE_SUFFIXES = ('.py', '.pyx', '.xml', '.cc3d', '.piff', '.json', '.toml', '.yml', '.yaml')
+
+
 def _run_git(args, cwd, allow_empty: bool = False) -> Optional[str]:
     """Run a git command, returning stripped stdout, or None on failure.
 
@@ -102,16 +108,44 @@ def _run_git(args, cwd, allow_empty: bool = False) -> Optional[str]:
     commit, which is exactly the case the caller needs to detect. Without it an
     unpushed commit is indistinguishable from a git error.
     """
+    # Two properties matter beyond the answer itself:
+    #  * The call must never wait without limit. subprocess.run(timeout=...) kills
+    #    the child on timeout and then waits, unbounded, for its pipes to close; on
+    #    Windows a helper process that inherited the pipe keeps that wait alive. So
+    #    the wait after the kill is bounded too, and the pipe is then closed here.
+    #  * The call must not write to the repository. `git status` normally refreshes
+    #    the index under .git/index.lock; a status killed at the timeout leaves that
+    #    lock behind and blocks the next commit. --no-optional-locks makes every
+    #    query here read-only.
     try:
-        proc = subprocess.run(
-            ['git', *args], cwd=str(cwd), capture_output=True, text=True,
-            timeout=_GIT_TIMEOUT_S, creationflags=_NO_WINDOW,
+        proc = subprocess.Popen(
+            ['git', '--no-optional-locks', *args], cwd=str(cwd),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, creationflags=_NO_WINDOW,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None  # git absent, not executable, or timed out
+        return None  # git absent or not executable
+    try:
+        stdout, _ = proc.communicate(timeout=_GIT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate(timeout=_GIT_KILL_WAIT_S)
+        except Exception:  # noqa: BLE001 - still not released: stop waiting for it
+            pass
+        finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        return None  # timed out
+    except Exception:  # noqa: BLE001
+        proc.kill()
+        return None
     if proc.returncode != 0:
         return None
-    out = proc.stdout.strip()
+    out = (stdout or '').strip()
     return out if (out or allow_empty) else None
 
 
@@ -161,15 +195,27 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
 
     commit = _run_git(['rev-parse', 'HEAD'], here)
     if commit:
-        # Modified TRACKED files and merely-untracked files are reported
-        # separately, because they carry different risk. A tracked modification
-        # means the commit demonstrably does not describe the code that ran. An
-        # untracked file usually does not affect the run at all (editor state,
-        # scratch output, tool configuration) — treating it as equivalent would
-        # leave every run flagged as modified and make the flag meaningless.
-        dirty = bool(_run_git(['status', '--porcelain', '--untracked-files=no'], here))
+        # Three cases, reported separately because they carry different risk.
+        #  * A modified TRACKED file: the commit demonstrably does not describe
+        #    the code that ran.
+        #  * An untracked SOURCE file inside this package: the same. A new module
+        #    that is imported by the package (and so can determine a result) is
+        #    invisible to `--untracked-files=no`, which used to leave such a tree
+        #    recorded as clean.
+        #  * Any other untracked path (editor state, scratch output, run folders):
+        #    usually irrelevant to the run. Counting it as a modification would
+        #    flag every run and make the flag meaningless, so it is only noted.
+        dirty_tracked = bool(_run_git(['status', '--porcelain', '--untracked-files=no'], here))
         untracked = [ln[3:] for ln in (_run_git(['status', '--porcelain'], here) or '')
                      .splitlines() if ln.startswith('??')]
+        package_dir = Path(__file__).resolve().parents[1]
+        untracked_source = sorted(
+            ln[3:].strip().strip('"')
+            for ln in (_run_git(['status', '--porcelain', '--untracked-files=all', '--',
+                                 str(package_dir)], here) or '').splitlines()
+            if ln.startswith('??')
+            and ln.strip().strip('"').lower().endswith(_SOURCE_SUFFIXES))
+        dirty = dirty_tracked or bool(untracked_source)
         remote = _normalize_remote(_run_git(['config', '--get', 'remote.origin.url'], here))
 
         # A commit URL is only worth publishing if the commit is actually reachable
@@ -189,6 +235,8 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
             'commit': commit,
             'commit_short': commit[:7],
             'dirty': dirty,
+            'dirty_tracked': dirty_tracked,
+            'untracked_source_files': untracked_source,
             'untracked_present': bool(untracked),
             'commit_on_remote': on_remote,
             # Human-facing version anchored to the repository's tag history when
@@ -204,11 +252,19 @@ def code_provenance(start_path=None) -> Dict[str, Any]:
         # (clean tree) and can actually be fetched by a reader (present on the
         # remote). Anything less is recorded as a note rather than a link.
         notes = []
-        if dirty:
+        if dirty_tracked:
             notes.append(
                 'Tracked files were modified relative to this commit when the run '
                 'executed. The commit identifies the nearest committed state only '
                 'and does NOT fully describe the code that produced this result.')
+        if untracked_source:
+            notes.append(
+                f'{len(untracked_source)} source file(s) inside the package were not '
+                'under version control when the run executed ('
+                + ', '.join(untracked_source[:5])
+                + (', ...' if len(untracked_source) > 5 else '')
+                + '). They are part of the code that ran and are NOT described by '
+                'this commit.')
         if on_remote is False:
             notes.append(
                 'This commit exists only in the local repository and has not been '

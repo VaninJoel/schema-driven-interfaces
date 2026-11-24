@@ -8,22 +8,30 @@ parameter and without the operator present:
 
 * which value ran, and whether it differs from the documented default;
 * where that value sits relative to each declared range tier, and therefore
-  whether the run is *supported* by the documented evidence, an
-  *extrapolation* beyond it, *inadmissible* for the implementation, or
-  *unassessable* because no range is documented;
-* what evidence (basis, citation, locator) backs each bound and the default.
+  whether it is inside the documented working range, outside it, outside the
+  declared implementation limit, or *unassessable* because no range is
+  documented;
+* what each range is based on (basis, citation, locator), and the provenance
+  of the default.
+
+A range is only as strong as its basis, and the audit never reports a verdict
+without it: "within the working range" backed by published measurements and
+"within the working range" chosen by the modeler are different statements, and
+the labels say which (see BASIS_PHRASES, credibility_label).
 
 The result is plain JSON, written into the COMBINE/OMEX archive as
 ``parameter_audit.json`` and summarised in the PDF reports. It is built where
 the live schema exists (the process, or the GUI main window) and handed down
 to the archive writer, which has no schema of its own.
 
-Credibility vocabulary (per parameter):
-    inadmissible          outside the mathematical/implementation range
-    extrapolation         admissible, but outside the physiological range
-    outside_recommended   within evidence, but outside the recommended range
-    supported             within every declared tier, physiological declared
-    admissible            within every declared tier, no physiological range
+Credibility vocabulary (per parameter; the keys are stable identifiers, the
+reader-facing wording comes from credibility_label and always names the basis):
+    inadmissible          outside the mathematical/implementation range, or not a
+                          number where the parameter is numeric
+    extrapolation         admissible, but outside the physiological (working) range
+    outside_recommended   within the working range, but outside the recommended range
+    supported             within every declared tier, working range declared
+    admissible            within every declared tier, no working range declared
     unassessable          numeric value, but no range declared at all
     not_applicable        boolean / categorical / text parameter (ranges do not apply)
 """
@@ -43,6 +51,8 @@ _RUN_STATE_KEYS = frozenset((
     '_schema_fingerprint', 'creator', 'random_seed_origin', 'parameter_scan',
     'scan_point', 'combination_index', 'total_combinations', 'replicate_id',
     'total_replicates', 'parent_experiment_id',
+    # launcher settings and the outcome of the specification check
+    'allow_inadmissible', 'confirmed_by_operator', 'store_path', 'run_timeout_seconds',
 ))
 
 
@@ -168,6 +178,10 @@ def build_parameter_audit(schema: Dict[str, Any], params: Dict[str, Any],
         ranges = {t: _jsonable(info.get(TIER_KEYS[t])) for t in TIERS}
         positions = {t: _position(value, ranges[t]) for t in TIERS}
         cred = _credibility(positions)
+        if _is_number(default) and not _is_number(value):
+            # A numeric parameter holding text is not a "category": it is a value
+            # the implementation cannot use.
+            cred = 'inadmissible'
         is_control = info.get('_parameter_type') == 'control'
         changed = (value != default) and not is_control
         entry = {
@@ -185,6 +199,7 @@ def build_parameter_audit(schema: Dict[str, Any], params: Dict[str, Any],
             'ranges': ranges,
             'position': positions,
             'credibility': cred,
+            'credibility_basis': None,          # filled below: basis of the deciding range
             'range_evidence': _range_evidence(info, resolve),
             'default_provenance': _default_provenance(info, resolve),
             'literature': [_cite(k, resolve) for k in (info.get('_literature') or [])],
@@ -193,6 +208,8 @@ def build_parameter_audit(schema: Dict[str, Any], params: Dict[str, Any],
             'affects_output': list(info.get('_affects_output') or []),
             'model_context': info.get('_model_context'),
         }
+        entry['credibility_basis'] = ((entry['range_evidence'].get(deciding_tier(entry)) or {})
+                                      .get('basis'))
         entries[key] = entry
         if cred in flagged:
             flagged[cred].append(key)
@@ -213,6 +230,10 @@ def build_parameter_audit(schema: Dict[str, Any], params: Dict[str, Any],
         'n_inadmissible': len(flagged['inadmissible']),
         'n_unassessable': len(flagged['unassessable']),
         'n_not_applicable': sum(1 for e in entries.values() if e['credibility'] == 'not_applicable'),
+        # How the "supported" verdicts are backed: {basis: count}. A reader must
+        # not take "within the working range" for "within published evidence".
+        'supported_by_basis': _count_by_basis(
+            e for e in entries.values() if e['credibility'] == 'supported'),
         'n_with_range_evidence': sum(
             1 for e in entries.values()
             if any(v and v.get('basis') for v in e['range_evidence'].values())),
@@ -232,14 +253,25 @@ def build_parameter_audit(schema: Dict[str, Any], params: Dict[str, Any],
     }
 
 
+def _count_by_basis(entries) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for e in entries:
+        basis = e.get('credibility_basis') or 'basis not recorded'
+        counts[basis] = counts.get(basis, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def audit_summary_line(audit: Dict[str, Any]) -> str:
     """One sentence for logs and report headers."""
     s = (audit or {}).get('summary') or {}
+    by_basis = s.get('supported_by_basis') or {}
+    backing = (" (" + ", ".join(f"{n} by {BASIS_PHRASES.get(b, b)}"
+                                for b, n in by_basis.items()) + ")") if by_basis else ""
     return (f"{s.get('n_parameters', 0)} parameters, "
             f"{s.get('n_changed_from_default', 0)} changed from default; "
-            f"{s.get('n_supported', 0)} within documented evidence, "
-            f"{s.get('n_extrapolation', 0)} extrapolations, "
-            f"{s.get('n_inadmissible', 0)} inadmissible, "
+            f"{s.get('n_supported', 0)} within their documented working range{backing}, "
+            f"{s.get('n_extrapolation', 0)} outside it, "
+            f"{s.get('n_inadmissible', 0)} outside a declared implementation limit, "
             f"{s.get('n_unassessable', 0)} numeric without a documented range, "
             f"{s.get('n_not_applicable', 0)} switches/categories")
 
@@ -248,15 +280,46 @@ def audit_summary_line(audit: Dict[str, Any]) -> str:
 # Report helpers (used by the PDF generators; plain data, no reportlab here)
 # ---------------------------------------------------------------------------
 
+# What a range rests on, in words. The schema records one of these per range
+# tier (`_range_evidence[tier]['basis']`).
+BASIS_PHRASES = {
+    'literature': 'published literature',
+    'calibration': 'model calibration',
+    'expert_judgement': "the modeler's judgement",
+    'numerical_stability': 'a numerical or implementation limit',
+    'exploratory': 'exploratory presets',
+}
+
+# Verdict wording without its basis. Prefer credibility_label(entry), which
+# appends what the deciding range is based on.
 CREDIBILITY_LABELS = {
-    'supported': 'within documented evidence',
-    'admissible': 'admissible (no physiological range documented)',
-    'outside_recommended': 'outside recommended range',
-    'extrapolation': 'EXTRAPOLATION beyond documented evidence',
-    'inadmissible': 'INADMISSIBLE for the implementation',
+    'supported': 'within the documented working range',
+    'admissible': 'within the declared limits (no working range documented)',
+    'outside_recommended': 'outside the recommended range',
+    'extrapolation': 'OUTSIDE the documented working range',
+    'inadmissible': 'OUTSIDE the declared implementation limit',
     'unassessable': 'no documented range',
     'not_applicable': 'switch / category (ranges do not apply)',
 }
+
+
+def basis_phrase(basis) -> str:
+    """'published literature' / "the modeler's judgement" / ... / 'basis not recorded'."""
+    return BASIS_PHRASES.get(basis, str(basis)) if basis else 'basis not recorded'
+
+
+def credibility_label(entry: Dict[str, Any]) -> str:
+    """The verdict with what it rests on, e.g. "OUTSIDE the documented working
+    range (range set by the modeler's judgement)". A verdict about a range is
+    never shown without the basis of that range."""
+    cred = entry.get('credibility')
+    label = CREDIBILITY_LABELS.get(cred, str(cred))
+    if cred in ('unassessable', 'not_applicable'):
+        return label
+    if cred == 'inadmissible' and all(
+            p not in ('below', 'above') for p in (entry.get('position') or {}).values()):
+        return 'NOT A NUMBER for a numeric parameter'
+    return f"{label} (range set by {basis_phrase(entry.get('credibility_basis'))})"
 
 
 def _short_cite(c: Dict[str, Any]) -> str:
@@ -279,7 +342,7 @@ def evidence_phrase(entry: Dict[str, Any], tier: str = 'physiological') -> str:
     ev = (entry.get('range_evidence') or {}).get(tier)
     if not ev:
         return 'range not declared' if entry['ranges'].get(tier) is None else 'not recorded'
-    bits = [ev.get('basis') or 'basis unspecified']
+    bits = [basis_phrase(ev.get('basis'))]
     if ev.get('refs'):
         bits.append(', '.join(_short_cite(c) for c in ev['refs']))
     loc = ev.get('locator') or {}
@@ -317,8 +380,8 @@ def audit_table_rows(audit: Dict[str, Any], include: str = 'attention'):
     Returns (header, rows); each row is [name, value, default, unit, credibility,
     evidence-for-physiological-range].
     """
-    header = ['Parameter', 'Run value', 'Default', 'Unit', 'Credibility',
-              'Evidence for the range assessed']
+    header = ['Parameter', 'Run value', 'Default', 'Unit', 'Position against the schema',
+              'Basis of the range assessed']
     rows = []
     order = {'inadmissible': 0, 'extrapolation': 1, 'outside_recommended': 2,
              'unassessable': 3, 'admissible': 4, 'supported': 5, 'not_applicable': 6}
@@ -332,7 +395,7 @@ def audit_table_rows(audit: Dict[str, Any], include: str = 'attention'):
         rows.append([
             f"{e.get('display_name') or key} ({key})",
             e['value'], e['default'], e.get('unit') or '',
-            CREDIBILITY_LABELS.get(e['credibility'], e['credibility']),
+            credibility_label(e),
             evidence_phrase(e, deciding_tier(e)),
         ])
     return header, rows

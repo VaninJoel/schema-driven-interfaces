@@ -423,89 +423,60 @@ def get_full_parameter_info(schema: Dict, param_name: str) -> Dict[str, Any]:
 # VALIDATION UTILITIES
 # =============================================================================
 
+def _spec_validation():
+    """The specification check shared with the program-facing process."""
+    from vivarium_angio.utils import spec_validation
+    return spec_validation
+
+
+# How a finding of the shared check is shown on a field.
+#   ERROR    malformed (cannot be used as written; never runs) or outside a
+#            declared implementation limit (runs only after explicit confirmation)
+#   WARNING  outside the documented working range (runs after confirmation)
+#   NOTE     outside the recommended range (runs; recorded; no confirmation)
+SEVERITY_ERROR, SEVERITY_WARNING, SEVERITY_NOTE = 'ERROR', 'WARNING', 'NOTE'
+
+
 def validate_parameter_value(schema: Dict, param_name: str, value: Any) -> List[Dict]:
     """
-    Validate a parameter value and return issues.
-
-    Args:
-        schema: The ports schema
-        param_name: Name of parameter
-        value: Value to validate
+    Findings for one parameter value, from the SAME check the process runs before
+    it executes a specification (vivarium_angio.utils.spec_validation), so a field
+    cannot be judged one way here and another way at execution.
 
     Returns:
-        list: [{'severity': str, 'message': str, 'reference': str}, ...]
+        list of dicts with
+          'severity'  'ERROR' | 'WARNING' | 'NOTE' (see above)
+          'kind'      'malformed' | 'inadmissible' | 'outside_range'
+          'tier'      'mathematical' | 'physiological' | 'recommended' | None
+          'basis'     what the violated range is based on (schema `_range_evidence`)
+          'message'   the shared check's wording; it names the range and its basis
+          'reference' the evidence statement of the violated range, if any
     """
     if 'inputs' not in schema or param_name not in schema['inputs']:
-        return [{'severity': 'ERROR', 'message': 'Parameter not found in schema'}]
+        return [{'severity': SEVERITY_ERROR, 'kind': 'malformed', 'tier': None,
+                 'basis': None, 'message': 'Parameter not found in schema'}]
 
+    sv = _spec_validation()
     param_info = schema['inputs'][param_name]
+    prefix = f"{param_info.get('_display_name') or param_name}: "
     issues = []
-
-    # Type checking. int and float are interchangeable for numeric parameters
-    # (a preset of 10.0 for an int default of 10 is not a type error); bool is
-    # its own type and never numeric.
-    expected_type = type(param_info['_default'])
-    numeric = (int, float)
-    if isinstance(param_info['_default'], bool) or isinstance(value, bool):
-        type_ok = isinstance(value, bool) and isinstance(param_info['_default'], bool)
-    elif isinstance(param_info['_default'], numeric):
-        type_ok = isinstance(value, numeric)
-    else:
-        type_ok = isinstance(value, expected_type)
-    if not type_ok:
-        issues.append({
-            'severity': 'ERROR',
-            'message': f'Expected {expected_type.__name__}, got {type(value).__name__}'
-        })
-        return issues  # Stop further validation if type is wrong
-
-    # String parameters: declared pattern / length (e.g. experiment names that
-    # become folder names).
-    if isinstance(value, str):
-        import re as _re
-        pattern = param_info.get('_validation_pattern')
-        if pattern and not _re.match(pattern, value):
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value!r} does not match the allowed pattern {pattern}'
-            })
-        max_len = param_info.get('_max_length')
-        if max_len and len(value) > max_len:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value is {len(value)} characters; at most {max_len} allowed'
-            })
-        return issues
-
-    # Physiological range check
-    if '_physiological_range' in param_info:
-        min_val, max_val = param_info['_physiological_range']
-        if value < min_val or value > max_val:
-            # The evidence behind the RANGE, not the citation of the default value.
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                'reference': format_range_evidence(param_info, 'physiological', fmt='markdown')
-            })
-
-    # Mathematical stability check
-    if '_mathematical_range' in param_info:
-        min_val, max_val = param_info['_mathematical_range']
-        if value < min_val or value > max_val:
-            issues.append({
-                'severity': 'ERROR',
-                'message': f'Value {value} outside stable range [{min_val}, {max_val}]. Simulation may fail!'
-            })
-
-    # Warning threshold check
-    if '_warning_threshold' in param_info:
-        threshold = param_info['_warning_threshold']
-        if value > threshold:
-            issues.append({
-                'severity': 'WARNING',
-                'message': f'Value exceeds recommended threshold of {threshold}'
-            })
-
+    for finding in sv.validate_value(param_name, param_info, value):
+        message = finding['message']
+        if message.startswith(prefix):          # the field already shows its own name
+            message = message[len(prefix):]
+        message = message[:1].upper() + message[1:]
+        if finding['severity'] in (sv.MALFORMED, sv.INADMISSIBLE):
+            severity = SEVERITY_ERROR
+        elif finding['tier'] == 'recommended':
+            severity = SEVERITY_NOTE
+        else:
+            severity = SEVERITY_WARNING
+        issue = {'severity': severity, 'kind': finding['severity'], 'tier': finding['tier'],
+                 'basis': finding['basis'], 'message': message}
+        if finding['tier']:
+            issue['reference'] = format_range_evidence(param_info, finding['tier'],
+                                                       fmt='markdown')
+        issues.append(issue)
     return issues
 
 
@@ -583,24 +554,47 @@ def schema_to_json_serializable(schema: Dict) -> Dict:
 
 RANGE_TIERS = (
     # (schema key, tier name, human label)
-    ('_physiological_range', 'physiological', 'Physiological Range'),
-    ('_recommended_range', 'recommended', 'Recommended Range'),
-    ('_mathematical_range', 'mathematical', 'Mathematical Range'),
+    # The schema keys are historical; the names shown to people are these.
+    ('_physiological_range', 'physiological', 'Working range'),
+    ('_recommended_range', 'recommended', 'Recommended range'),
+    ('_mathematical_range', 'mathematical', 'Implementation limit'),
 )
 
+# Two different things, never to be read as one:
+#   working range         the values the model is meant to be used with. What it
+#                         rests on (its basis) is always shown beside it; it is
+#                         called physiological only where that basis is published
+#                         literature.
+#   implementation limit  what the model code can run with. It is about the
+#                         model's function, not about biology.
 RANGE_TIER_MEANING = {
-    'physiological': 'values the evidence supports; outside is an extrapolation',
+    'physiological': 'the values the model is meant to be used with; a value outside it '
+                     'runs and is recorded as outside the working range',
     'recommended': 'values advised for this model\'s context of use',
-    'mathematical': 'values the implementation accepts; outside is an error',
+    'mathematical': 'what the model code can run with (model function, not biology); a '
+                    'value outside it is refused unless explicitly allowed',
 }
 
+# Same words as the run-time findings (vivarium_*/utils/spec_validation.py) and
+# the reports (utils/parameter_audit.py).
 RANGE_BASIS_LABELS = {
-    'numerical_stability': 'numerical stability of the implementation',
-    'literature': 'published evidence',
-    'calibration': 'calibration against reference data',
-    'expert_judgement': 'modeler judgement',
-    'exploratory': 'exploratory, not evidence-based',
+    'numerical_stability': 'a numerical or implementation limit',
+    'literature': 'published literature',
+    'calibration': 'model calibration',
+    'expert_judgement': "the modeler's judgement",
+    'exploratory': 'exploratory presets',
 }
+
+
+def range_tier_label(param_info: Dict, tier: str) -> str:
+    """The name a range tier is shown under. The working range is called
+    physiological only when its recorded basis is published literature."""
+    label = {t: l for _, t, l in RANGE_TIERS}.get(tier, tier)
+    if tier == 'physiological':
+        entry = (param_info.get('_range_evidence') or {}).get(tier)
+        if isinstance(entry, dict) and entry.get('basis') == 'literature':
+            return f'{label} (physiological)'
+    return label
 
 
 def _format_locator(locator) -> str:
@@ -708,7 +702,7 @@ ONTOLOGY_PREFIXES = {
 
 
 def format_ontology_term(term) -> str:
-    """'CBO:0000016' -> 'CBO:0000016 (Cell Behavior Ontology)'; lists are joined."""
+    """'cbo:AdhesionEnergy' -> 'cbo:AdhesionEnergy (Cell Behavior Ontology)'; lists are joined."""
     if not term:
         return ''
     terms = term if isinstance(term, (list, tuple)) else [term]
@@ -843,6 +837,7 @@ def extract_parameter_documentation(schema: Dict, output_format: str = 'markdown
                 for key, tier, label in RANGE_TIERS:
                     if key in param_info:
                         r = param_info[key]
+                        label = range_tier_label(param_info, tier)
                         doc += f"- **{label}**: [{r[0]}, {r[1]}]\n"
                         doc += f"  - {format_range_evidence(param_info, tier, fmt='markdown')}\n"
                 if '_default' in param_info:

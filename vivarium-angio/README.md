@@ -8,7 +8,8 @@ A demonstration of the **Integrated Architecture** pattern for wrapping CompuCel
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Running Simulations](#running-simulations)
-- [Verifying Results](#verifying-results)
+- [Reading a trajectory](#reading-a-trajectory)
+- [The archive](#the-archive)
 - [Architecture Comparison](#architecture-comparison)
 - [Advanced Usage](#advanced-usage)
 - [Troubleshooting](#troubleshooting)
@@ -22,8 +23,8 @@ This project demonstrates how to integrate CompuCell3D simulations into Vivarium
 
 - **Runtime control** - Fine-grained control via programmable `step()` methods
 - **Incremental data availability** - Data written to Zarr store during execution, not just at completion
-- **Checkpointing capability** - Simulations can be paused, resumed, or modified mid-run
-- **Unified data management** - All experiments in a single Zarr hierarchy with intrinsic parameter tracking
+- **Stepwise execution** - The process advances the model one Monte Carlo step per update, so intermediate state is observable and output timing is decided outside the model rules
+- **One store per run** - Each run writes its own Zarr hierarchy, with its parameters stored as attributes of the trajectory
 - **Cloud-ready** - Zarr format optimized for distributed/cloud computing
 
 ### Biological Model
@@ -61,15 +62,11 @@ The angiogenesis model simulates endothelial cell (EC) migration and VEGF (Vascu
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
                           ↓
-               temp_store.zarr/
-               └── experiments/
-                   ├── default_run/
-                   │   ├── .zattrs (params)
-                   │   ├── 10/data
-                   │   ├── 20/data
-                   │   └── ...
-                   ├── jem_8_run/
-                   └── jem_4_run/
+               <run directory>/data.zarr/        one store per run
+               ├── (attributes: exp_name, params)
+               ├── 10/data
+               ├── 20/data
+               └── ...
 ```
 
 ### Key Components
@@ -112,125 +109,169 @@ python -c "import vivarium, cc3d, zarr, vivarium_angio; print('OK')"
 
 ## Quick Start
 
-### Run the Parameter Sweep
+Run from the repository root, in the `vc` environment.
 
-The main script to run is `run_angiogenesis_parallel.py`, which executes three simulations concurrently with different `jem` values (`2.0`, `4.0`, and `8.0`).
+### One run, no window
 
 ```bash
-cd experiments
-python run_angiogenesis_parallel.py
+python angio-gui/run_headless.py sim_time=100 --name first_run --out results
 ```
 
-**Expected output:**
+This is the program-facing path. It goes through the same code as a run started
+from the GUI: the specification is checked against the schema, the run gets an
+identity (`run_id`) and its own directory, standard output and error are
+captured, and a COMBINE/OMEX archive typed with the outcome is written whether
+the run succeeds, fails or times out.
+
 ```
-============================================================
-PARALLEL ANGIOGENESIS SIMULATIONS
-Launching 3 simulations in parallel...
-============================================================
-Started process PID: ...
-Started process PID: ...
-Started process PID: ...
-
-Waiting for all simulations to complete...
-
-[default_run] ✓ Completed in ... seconds
-[jem_4_run] ✓ Completed in ... seconds
-[jem_8_run] ✓ Completed in ... seconds
-
-============================================================
-All simulations completed in ... seconds
-============================================================
+results/first_run_<timestamp>/first_run/
+├── data.zarr/            the trajectory (one store per run)
+├── run_metadata.json     parameters, seed, status, specification check, code identity
+├── parameter_audit.json  every value against the ranges the schema documents
+├── logs/stdout.log, logs/stderr.log
+└── first_run.omex        the archive (see "The archive" below)
 ```
 
-**Data location:** `temp_store.zarr/experiments/`
+### A sweep with replicates
+
+```bash
+python angio-gui/run_headless.py jem=2,4,8 sim_time=100 --replicates 3 --name jem_sweep --out results
+```
+
+A comma-separated list sweeps a numeric parameter, as in the GUI. Every run draws
+its own random seed and records it; a pinned `random_seed=<n>` applies to the first
+replicate only. When the batch ends, the experiment-level archive and the PDF
+reports are generated (skip with `--no-report`).
+
+### A specification saved from the GUI
+
+```bash
+python angio-gui/run_headless.py --params my_parameters.json --out results
+```
+
+`--params` takes the JSON written by the GUI's *Save Parameters*; `key=value`
+arguments override it.
+
+### What is refused
+
+The check is `vivarium_angio/utils/spec_validation.py`, shared by the GUI, the
+runner and `AngiogenesisProcess` itself:
+
+| Specification | What happens |
+|---|---|
+| a key that is not a parameter (for example a misspelt name), or a value of the wrong type | refused; nothing runs |
+| a value outside a declared implementation limit (`_mathematical_range`) | refused unless `--allow-inadmissible` is given; the permission is written into the run record |
+| a value outside the documented working range or the recommended range | runs; its position and the basis of the range are recorded |
+
+A refused run still leaves a directory with a `run_metadata.json` and a
+failed-status archive stating why.
 
 ---
 
 ## Running Simulations
 
-### 1. Single Simulation (Basic)
+### 1. Headless runner (recommended)
+
+See Quick Start. `experiments/run_angiogenesis_parallel.py` starts three runner
+processes at once; `experiments/run_angiogenesis_sequential.py` runs a
+three-point sweep in one call.
+
+### 2. Directly through Vivarium
 
 ```python
 from vivarium.core.engine import Engine
 from vivarium_angio.composites.angiogenesis_composer import AngiogenesisComposer
 
-# Define parameters
 params = {
     'angiogenesis_process': {
         'exp_name': 'my_experiment',
-        'jem': 8.0,  # EC-Medium adhesion
+        'jem': 8.0,                              # EC-Medium adhesion
+        'store_path': 'my_experiment/data.zarr',  # one store per run
     }
 }
-
-# Create and run
-composer = AngiogenesisComposer(params)
-composite = composer.generate()
+composite = AngiogenesisComposer(params).generate()
 engine = Engine(composite=composite)
-engine.update(100.0)  # Run for 100 steps
+engine.update(100.0)  # 100 MCS
 ```
 
-### 2. Multiple Simulations in Parallel
+Constructing the process checks the specification and raises
+`SpecificationError` for the cases in the table above (`'allow_inadmissible':
+True` in the parameters permits values outside an implementation limit). Driving
+the engine yourself gives you the trajectory only: the run identity, logs,
+failure capture and the archive for every outcome are produced by the runner and
+the GUI, not by the process. Use the runner unless you are composing this process
+with others.
 
-**Recommended for parameter sweeps!**
-
-```bash
-python run_angiogenesis_parallel.py
-```
-
-This launches 3 simulations concurrently:
-- `default_run` (jem=2.0)
-- `jem_8_run` (jem=8.0)
-- `jem_4_run` (jem=4.0)
-
-**Expected performance:**
-- Sequential: ~12-15 seconds
-- Parallel: ~7-8 seconds (40-50% speedup on multi-core systems)
-
-**Note**: On Windows, you may see zarr file locking warnings during concurrent writes. These are harmless - data is still written correctly.
-
-### 3. Multiple Simulations Sequentially
-
-For maximum stability (avoids concurrent write issues):
-
-```bash
-python run_angiogenesis_sequential.py
-```
-
-**Note**: You may see exit code `3221225477` (Windows ACCESS_VIOLATION) on some runs. This is a CC3D cleanup issue that occurs **after** data is written. All scientific results are valid.
+Give every run its own `store_path`. A store holds one run; the process refuses
+to start into a store that already contains recorded steps. Run one simulation
+per Python process (CompuCell3D keeps global state).
 
 ---
 
-## Verifying Results
+## Reading a trajectory
 
-### Visualizing Parameter Effects
+```python
+import zarr
 
-To understand the impact of the `jem` parameter (EC-Medium adhesion), you can run the `plot_results.py` script.
+root = zarr.open('results/first_run_<timestamp>/first_run/data.zarr', mode='r')
+print(dict(root.attrs)['params'])           # the parameters of the run
+steps = sorted(int(k) for k in root.keys()) # recorded MCS, e.g. 10, 20, ...
+data = root[str(steps[-1])]['data'][:]      # shape (200, 200, 1, 3)
 
-```bash
-python experiments/plot_results.py
+cell_types = data[..., 0]   # 0 = Medium, 1 = EC
+cell_ids = data[..., 1]     # cell identifiers
+vegf = data[..., 2]         # VEGF concentration (model units)
 ```
 
-This generates the image `aggregation_comparison_detailed.png` in the `experiments` directory, which visualizes the difference in cell network morphology at the initial and final steps of the simulation across different `jem` values.
+Network measures (clusters, largest cluster, boundary sites, compactness) are
+defined once, in `vivarium_angio/utils/network_metrics.py`, on the model's
+lattice: four-neighbour connectivity, periodic in x and y. The GUI analysis
+window and the archive's `metrics.csv` both use it.
 
-![Simulation Results](./experiments/aggregation_comparison_detailed.png)
+```python
+from vivarium_angio.utils import network_metrics as nm
+sizes = nm.cluster_sizes(cell_types == 1)
+print(len(sizes), max(sizes), nm.network_perimeter(cell_types == 1))
+```
 
-*Note: The image above is included directly in this README. To generate it yourself, run the script as described.*
+---
 
-### Interpreting Results
+## The archive
 
-The `jem` parameter defines the adhesion energy (or energy penalty) at the interface between Endothelial Cells (EC) and the Medium. A higher `jem` value means a higher energy cost for cells to be in contact with the medium.
+Each run's `.omex` is a COMBINE archive (a zip file):
 
-The simulation begins with cells arranged in a connected, grid-like network. The evolution of this network depends on the `jem` value:
+| Entry | Content |
+|---|---|
+| `simulation.sedml` | SED-ML description (successful runs only) |
+| `status.json` | machine-readable outcome |
+| `run_metadata.json`, `sim_params.json` | resolved parameters, seed, specification check, code identity |
+| `metadata.rdf` | OMEX metadata (creator, licence, citation) |
+| `metrics.csv` | cluster count, cell density, largest cluster, mean VEGF per recorded step |
+| `zarr/<run>/` | the full trajectory |
+| `logs/` | captured standard output and error |
+| `model/parameter_audit.json` | every value against the schema's documented ranges |
+| `model/environment.json` | Python, platform and package versions |
+| `model/angiogenesis.cc3d`, `model/Simulation/` | the run as a native CompuCell3D project |
+| `model/run_model.py`, `model/run_params.json` | re-run through Vivarium |
+| `model/src/` | a record of the Python module that executed the run (not an importable package) |
 
-- **Low `jem` (e.g., 2.0):** The energy penalty for the extensive cell-medium interface is low. The initial network structure is relatively stable and remains largely connected throughout the simulation.
+Re-executing, from the unpacked archive:
 
-- **High `jem` (e.g., 8.0):** The energy penalty for the cell-medium interface is high. To minimize total energy, the system breaks the initial connected network and reorganizes the cells into more compact, separate clusters. This minimizes the total surface area of cells exposed to the medium.
+```bash
+python -m cc3d.run_script -i model/angiogenesis.cc3d -o out   # stock CompuCell3D
+python model/run_model.py                                      # Vivarium path
+```
 
-This explains the counter-intuitive result from our analysis:
-- **Network Breakage:** A higher `jem` leads to an *increase* in the number of distinct cell clusters because the initial network is fragmenting.
-- **Cellular Aggregation:** Within each of those fragments, the cells are more tightly aggregated.
+The native project writes `model/native_output/step_<MCS>.npy` (beside the
+project, not into `-o`); `run_model.py` writes `model/rerun_output/data.zarr`.
+With the same software on one processor, each recorded step equals the archived
+one (`tests/test_angio_reexecution.py` runs both and compares).
 
-**Conclusion:** The `jem` parameter correctly controls cell aggregation as expected from the physical model. A higher `jem` drives cells to aggregate more strongly, which in this case manifests as the fragmentation of a connected network into dense, isolated clusters.
+Reports are built from the archives alone:
+
+```bash
+python vivarium-angio/make_omex_combo_report.py results/jem_sweep_<timestamp>
+```
 
 ---
 
@@ -294,48 +335,6 @@ params = {
 }
 ```
 
-### Accessing Stored Data
-
-```python
-import zarr
-import numpy as np
-
-# Open store
-root = zarr.open('temp_store.zarr', mode='r')
-
-# Access experiment
-exp = root['experiments']['default_run']
-
-# Get parameters
-params = dict(exp.attrs)
-print(f"Parameters: {params}")
-
-# Get data at timestep 10
-data = exp['10']['data'][:]  # Shape: (200, 200, 1, 3)
-
-# Extract channels
-cell_types = data[:,:,:,0]  # 0=Medium, 1=EC
-cell_ids = data[:,:,:,1]    # Unique cell IDs
-vegf_field = data[:,:,:,2]  # VEGF concentration
-
-# Analyze
-print(f"VEGF mean: {vegf_field.mean():.3f}")
-print(f"VEGF max: {vegf_field.max():.3f}")
-```
-
-### Process-Local Stores (Recommended for Parallel)
-
-To avoid concurrent write conflicts on Windows:
-
-```python
-# In angiogenesis_process.py, modify __init__:
-self.store = f'stores/{self.parameters["exp_name"]}.zarr'
-```
-
-This creates separate zarr stores per experiment, eliminating file locking issues.
-
----
-
 ## Troubleshooting
 
 ### Issue 1: "No module named 'zarr'"
@@ -346,58 +345,27 @@ conda activate vc
 pip install zarr
 ```
 
-### Issue 2: "VEGF field does not exist" on second run
+### Issue 2: "VEGF field does not exist" or "Cells 0" on a second run
 
-**Cause:** CC3D global state not cleaned up between runs in same process.
+**Cause:** CompuCell3D global state is not cleaned up between runs in one process.
 
-**Solution:** Use parallel or sequential runners which isolate each simulation in a separate process.
+**Solution:** One simulation per Python process. The headless runner and the GUI
+start a new process for every run.
 
-### Issue 3: Exit code 3221225477 (Windows)
+### Issue 3: Exit code 3221225477 (Windows) at interpreter shutdown
 
-**Cause:** CC3D C++ cleanup issue during Python shutdown.
+**Cause:** a CompuCell3D C++ cleanup fault during Python teardown, after the
+trajectory has been written. The runner and the GUI exit the simulation process
+before that teardown and decide the run's status from its record, not from this
+code.
 
-**Status:** Known issue, occurs **after** data is written. Does not affect results.
+### Issue 4: "Refusing to run into ... it already holds N recorded step(s)"
 
-**Verification:** Check `verify_zarr_data.py` - all data should be present.
+**Cause:** the store named by `store_path` (default `temp_store.zarr` in the
+working directory) already contains a run.
 
-### Issue 4: File permission errors during parallel execution
-
-**Cause:** Zarr v3 concurrent write locking on Windows.
-
-**Solutions:**
-1. Use sequential runner instead
-2. Use process-local stores (see Advanced Usage)
-3. Add file locking mechanism
-4. Use Zarr v2 (better Windows concurrency)
-
-### Issue 5: "Cells 0" in second simulation
-
-**Cause:** Running multiple simulations in same Python interpreter without process isolation.
-
-**Solution:** Always use `run_angiogenesis_parallel.py` or `run_angiogenesis_sequential.py` for multiple runs.
-
----
-
-## Key Achievements Demonstrated
-
-This implementation successfully demonstrates:
-
-**Process isolation** - Multiple simulations run without CC3D state conflicts   
-**Incremental data writes** - Data available every 10 steps during execution  
-**Parameter tracking** - All parameters stored as metadata with results \
-**Reproducibility** - Identical parameters produce identical results\
-**Parameter effects** - Different jem values produce measurably different outcomes\
-**Performance** - 40% speedup with parallel execution
-
-**Verification Results (from visual analysis):**
-
-| `jem` Value | Initial State (Step 10) | Final State (Step 100) | Interpretation |
-|:---:|:---:|:---:|:---|
-| **2.0** | Connected Network | Largely intact network | Low adhesion penalty; network is stable. |
-| **4.0** | Connected Network | Partially fragmented network | Medium adhesion penalty; network begins to break. |
-| **8.0** | Connected Network | Fragmented into dense clusters | High adhesion penalty; network breaks to minimize energy. |
-
-**Biological validity confirmed:** A higher `jem` (EC-Medium adhesion energy) drives cells to minimize their contact with the medium. This causes an initial, connected cell network to break apart and reorganize into more compact, separate aggregates.
+**Solution:** give the run its own `store_path`, or use the runner, which
+creates a new directory for every run.
 
 ---
 
@@ -409,8 +377,8 @@ vivarium-angio/
 │   ├── processes/angiogenesis_process.py   # AngiogenesisProcess + its parameter schema
 │   ├── composites/angiogenesis_composer.py # Vivarium composer
 │   └── utils/                              # OMEX/SED-ML export, parameter audit, provenance
-├── experiments/                            # stand-alone example scripts (no GUI)
-├── make_omex_combo_report.py               # PDF report from a run's OMEX archive
+├── experiments/                            # example scripts built on the headless runner
+├── make_omex_combo_report.py               # PDF reports, built from the OMEX archives alone
 ├── test_angio_*.py                         # tests (run with `pytest` from the repo root)
 └── pyproject.toml
 ```
@@ -423,7 +391,13 @@ The full parameter schema is tabulated in Supplementary Table S1 of the paper.
 
 Please cite the accompanying article and the archived software release — see the
 [repository README](../README.md#how-to-cite) and [`CITATION.cff`](../CITATION.cff).
-The angiogenesis model is adapted from Merks et al. (2006, 2008):
+The angiogenesis model is adapted from the contact-inhibited chemotaxis model of
+Merks et al. (2008), which is the reference each archive cites; cell elongation,
+the mechanism studied in Merks et al. (2006), is not represented:
+
+> Merks RMH, Perryn ED, Shirinifard A, Glazier JA. *Contact-inhibited chemotaxis in
+> de novo and sprouting blood-vessel growth.* PLoS Computational Biology.
+> 2008;4(9):e1000163. doi:[10.1371/journal.pcbi.1000163](https://doi.org/10.1371/journal.pcbi.1000163)
 
 > Merks RMH, Brodsky SV, Goligorksy MS, Newman SA, Glazier JA. *Cell elongation is
 > key to in silico replication of in vitro vasculogenesis and subsequent remodeling.*

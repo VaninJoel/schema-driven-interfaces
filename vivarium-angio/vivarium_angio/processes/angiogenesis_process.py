@@ -79,14 +79,39 @@ class StoreManager():
 
         root = zarr.open(self.store_path, mode='a')
 
-        # Write directly at root level
+        # A step that is already there belongs to another run (see
+        # refuse_used_store, which stops a run before its first step). Skipping
+        # it silently would leave that other run's snapshot in this trajectory.
         if str(step) in root:
-            print(f'Step {step} already exists, skipping')
-            return
+            raise RuntimeError(
+                f"{self.store_path} already holds step {step}; a store is single-use "
+                f"and this run would mix its snapshots with an earlier run's")
 
         mcs_group = root.require_group(str(step))
         # Zarr v3 API: use array assignment instead of create_dataset with compression
         mcs_group['data'] = data
+
+def refuse_used_store(store_path):
+    """Raise if store_path already holds recorded steps.
+
+    A Zarr store is the trajectory of ONE run. Two runs pointed at the same store
+    (for example several runs left on the default 'temp_store.zarr') used to
+    interleave: whichever wrote a step first kept it and the others were skipped
+    without an error, so the result looked complete and belonged to no run."""
+    import os
+    if not os.path.isdir(str(store_path)):
+        return
+    try:
+        root = zarr.open(str(store_path), mode='r')
+        steps = sorted(int(k) for k in root.keys() if str(k).isdigit())
+    except Exception:
+        steps = []
+    if steps:
+        raise RuntimeError(
+            f"Refusing to run into {store_path}: it already holds {len(steps)} recorded "
+            f"step(s) ({steps[0]}..{steps[-1]}) of an earlier run. Give every run its own "
+            f"store (parameter 'store_path') or remove the old one.")
+
 
 class WriterSteppable(SteppableBasePy):
     """
@@ -238,6 +263,21 @@ class AngiogenesisProcess(Process):
         'random_seed': -1,
     }
 
+    # Keys that legitimately accompany a specification without being schema
+    # parameters: where to write, who ran it, run identity, launcher settings and
+    # Vivarium's own process configuration. Anything else that is not in the
+    # schema is a mistake (typically a misspelt parameter) and is refused.
+    NON_SCHEMA_KEYS = frozenset((
+        'store_path', 'creator', 'run_timeout_seconds',
+        'allow_inadmissible', 'confirmed_by_operator',
+        '_schema_fingerprint', 'random_seed_origin', 'parameter_scan', 'scan_point',
+        'combination_index', 'total_combinations', 'replicate_id', 'total_replicates',
+        'parent_experiment_id',
+        # vivarium.core.process.Process configuration
+        'name', 'timestep', 'time_step', '_schema', '_parallel', '_condition',
+        '_original_parameters', '_no_original_parameters',
+    ))
+
     # Sentinel for "no seed chosen yet". CC3D seeds are non-negative, so a
     # negative value is unambiguous. The GUI/scheduler replaces it with a drawn
     # seed and writes that value into the experiment specification.
@@ -316,7 +356,37 @@ class AngiogenesisProcess(Process):
         }
     }
 
+    @classmethod
+    def schema_inputs(cls):
+        """The `inputs` port of the schema, without constructing a process (and so
+        without checking a specification or touching CompuCell3D)."""
+        return cls.__new__(cls).ports_schema()['inputs']
+
+    @classmethod
+    def check_specification(cls, parameters, allow_inadmissible=False,
+                            checked_by='process', confirmed_by_operator=None):
+        """Check a specification against the schema with the check both interfaces
+        share (utils/spec_validation.py). Returns the check record, or raises
+        SpecificationError: always for malformed input (unknown key, wrong type),
+        and for a value outside a declared implementation limit unless
+        allow_inadmissible is True."""
+        from ..utils import spec_validation
+        return spec_validation.enforce(
+            cls.schema_inputs(), dict(parameters or {}),
+            allow_inadmissible=allow_inadmissible, known_extra=cls.NON_SCHEMA_KEYS,
+            checked_by=checked_by, confirmed_by_operator=confirmed_by_operator)
+
     def __init__(self, parameters=None):
+        # The program-facing interface checks what it is given BEFORE anything is
+        # built: the same check, on the same schema, that the graphical interface
+        # runs. A specification the GUI would refuse cannot be executed by going
+        # around the GUI, and a run that was allowed past an implementation limit
+        # carries that permission in its record (self.specification_check).
+        given = dict(parameters or {})
+        self.specification_check = self.check_specification(
+            given, allow_inadmissible=bool(given.get('allow_inadmissible')),
+            confirmed_by_operator=given.get('confirmed_by_operator'))
+
         super().__init__(parameters)
 
         self.specs = []
@@ -398,6 +468,7 @@ class AngiogenesisProcess(Process):
         """Build and start the CC3D simulation service (once, on first use)."""
         if self.core_sim is not None:
             return
+        refuse_used_store(self.store)
         # Disable CC3D default output directory (we use Zarr instead)
         # Setting output_dir=None prevents CC3D from creating OutStore folder
         self.core_sim = CC3DSimService(output_dir=None, output_frequency=0)
@@ -543,7 +614,7 @@ class AngiogenesisProcess(Process):
                                  '= 0.2 corresponds to the mildly adhesive Merks 2006 J_cc = 20 case (γ/T = 10/50). No published '
                                  'source gives the number 2 itself.',
                     },
-                    '_ontology_term': 'CBO:0000015',  # Cell-cell adhesion
+                    '_ontology_term': 'cbo:AdhesionEnergy',  # energy of contact between two objects (here: two cells)
                     '_model_context': 'Contact energy term in Cellular Potts Model Hamiltonian. Appears in energy calculation: ΔH = Σ J(τ,τ\')(1-δ) for cell boundary modifications.',
 
                     # === RELATIONSHIPS ===
@@ -659,7 +730,7 @@ class AngiogenesisProcess(Process):
                                  'associate with blocked VE-cadherin signalling (anti-VE-cadherin antibody, Fig 1) — though in '
                                  'the paper that phenotype is produced by removing contact inhibition, not by changing J.',
                     },
-                    '_ontology_term': 'CBO:0000016',  # Cell-matrix adhesion
+                    '_ontology_term': 'cbo:AdhesionEnergy',  # same class as jee: CBO has no cell-medium-specific energy
                     '_model_context': 'EC-Medium contact energy in CPM Hamiltonian. Critical parameter controlling aggregation vs network formation.',
 
                     '_related_parameters': ['jee'],
@@ -783,7 +854,7 @@ class AngiogenesisProcess(Process):
                                  'to the membrane fluctuations that drive movement. Merks 2006 used χ = 1000 at T = 50 without '
                                  'contact inhibition.',
                     },
-                    '_ontology_term': 'CBO:0000072',  # Chemotaxis
+                    '_ontology_term': 'cbo:Chemotaxis',  # the process this coefficient parameterizes (CBO has no class for the coefficient)
                     '_model_context': 'Chemotaxis Hamiltonian term: H_chem = -λ_chem * Σ_membrane VEGF(x). Drives cell migration toward VEGF sources.',
 
                     '_related_parameters': ['vedir', 'vesec', 'lsc'],
@@ -891,14 +962,15 @@ class AngiogenesisProcess(Process):
                     },
 
                     '_reference_paper': {
-                        **self.REFERENCES['merks2008'],
+                        **self.REFERENCES['model_specific'],
                         'value': 0.1,
-                        'locator': {'table': None, 'equation': 'Methods: saturation parameter s = 0 (standard; varied 0–0.15)', 'page': None},
-                        'notes': "The saturating form is Merks et al. 2008's; their standard value is s = 0 (linear) and they "
-                                 "sweep 0–0.15 to show the effect. This model's default 0.1 sits inside that sweep but is not the "
-                                 'published standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
+                        'locator': {'table': None, 'equation': 'angiogenesis_process.py, AngiogenesisProcess.__init__() specs: ChemotaxisTypeParameters(linear_sat_cf=lsc)', 'page': None},
+                        'notes': "The default 0.1 is this implementation's choice, not a published value. The saturating form "
+                                 'is that of Merks et al. 2008, whose standard value is s = 0 (linear); they call 0.05 moderate '
+                                 'and sweep 0–0.15 to show the effect. 0.1 lies inside that sweep but is not the published '
+                                 'standard; the "binary 0 / 0.1" presets are the model author\'s choice.',
                     },
-                    '_ontology_term': 'CBO:0000072',  # Chemotaxis (same as lchem)
+                    '_ontology_term': 'cbo:Chemotaxis',  # the process, as for lchem
                     '_model_context': 'Saturation parameter in chemotaxis term. Determines if cells respond linearly or with saturation to VEGF concentration.',
 
                     '_related_parameters': ['lchem'],
@@ -1010,7 +1082,7 @@ class AngiogenesisProcess(Process):
                                  "DiffusionSolverFE); the comparison values assume Merks et al.'s mapping of 2 µm per lattice "
                                  'site and 30 s per MCS.',
                     },
-                    '_ontology_term': 'CBO:0000090',  # Molecular diffusion
+                    '_ontology_term': 'cbo:MoleculeDiffusion',
                     '_model_context': 'Diffusion term in VEGF field PDE: ∂C/∂t = D∇²C + production - decay. Solved using DiffusionSolverFE.',
 
                     '_related_parameters': ['veder', 'vesec', 'lchem'],
@@ -1090,16 +1162,18 @@ class AngiogenesisProcess(Process):
                         },
                         'physiological': {
                             'basis': 'expert_judgement',
-                            'refs': ['merks2008', 'merks2006'],
+                            'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'Merks et al. 2008, Methods (ε = α = 1e-3 s⁻¹); Merks et al. 2006, Results (1.8e-4 s⁻¹)',
-                                'page': 50,
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
+                                'page': None,
                             },
-                            'note': "0.1–0.5 per MCS is the model author's band around the default. On the Merks scale the "
-                             "literature values are 0.0054–0.03 per MCS and VEGF165's 30–60 min half-life gives 0.006–0.012 "
-                             'per MCS, all BELOW this band. Labelled expert judgement, not literature, for that reason; see '
-                             'the default-value note for the consequence (shorter gradients).',
+                            'note': "0.1–0.5 per MCS is the model author's band around this implementation's default of 0.3; "
+                             'no publication supports it. The published values lie BELOW the band: Merks et al. 2008 use '
+                             'ε = 1e-3 s⁻¹ (0.03 per MCS on their scale, so the default is ten times that reference), Merks '
+                             "et al. 2006 use 1.8e-4 s⁻¹ (0.0054 per MCS), and VEGF165's 30–60 min half-life gives "
+                             '0.006–0.012 per MCS. The papers are named here for comparison only; see the default-value '
+                             'note for the consequence (shorter gradients).',
                         },
                         'recommended': {
                             'basis': 'exploratory',
@@ -1129,7 +1203,7 @@ class AngiogenesisProcess(Process):
                                  'sets no physical scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks '
                                  "et al.'s mapping of 2 µm per lattice site and 30 s per MCS.",
                     },
-                    '_ontology_term': 'CBO:0000091',  # Molecular degradation
+                    '_ontology_term': 'cbo:MoleculeDeletion',
                     '_model_context': 'Decay term in VEGF field PDE. Combined with diffusion, determines gradient spatial scale.',
 
                     '_related_parameters': ['vedir', 'vesec'],
@@ -1207,15 +1281,17 @@ class AngiogenesisProcess(Process):
                         },
                         'physiological': {
                             'basis': 'expert_judgement',
-                            'refs': ['merks2008', 'merks2006'],
+                            'refs': [],
                             'locator': {
                                 'table': None,
-                                'equation': 'Merks et al. 2008, Methods (Cellular Potts model; chemotaxis; chemoattractant dynamics)',
+                                'equation': '_presets of this parameter in AngiogenesisProcess.ports_schema()',
                                 'page': None,
                             },
-                            'note': "0.1–0.5 per MCS is the model author's band around the default; the literature values "
-                             '(0.0054–0.03 per MCS on the Merks scale) lie below it. Only the ratio to veder is constrained '
-                             'by the papers (α = ε), not the absolute rate.',
+                            'note': "0.1–0.5 per MCS is the model author's band around this implementation's default of 0.3; "
+                             'no publication supports it. The published values (0.03 per MCS in Merks et al. 2008, so the '
+                             'default is ten times that reference; 0.0054 per MCS in Merks et al. 2006) lie BELOW the band '
+                             'and are named for comparison only. The papers constrain only the ratio to veder (α = ε), '
+                             'which this implementation keeps.',
                         },
                         'recommended': {
                             'basis': 'exploratory',
@@ -1242,7 +1318,7 @@ class AngiogenesisProcess(Process):
                                  "scale (Δx = Δt = 1 in DiffusionSolverFE); the comparison values assume Merks et al.'s mapping "
                                  'of 2 µm per lattice site and 30 s per MCS.',
                     },
-                    '_ontology_term': 'CBO:0000092',  # Molecular secretion
+                    '_ontology_term': 'cbo:MoleculeCreation',
                     '_model_context': 'Source term in VEGF field PDE. ECs secrete VEGF, creating gradients that guide chemotaxis.',
 
                     '_related_parameters': ['vedir', 'veder', 'lchem'],
@@ -1699,47 +1775,23 @@ class AngiogenesisProcess(Process):
         return params
 
     def validate_parameters(self, params):
-        """
-        Validate parameter set and return warnings/errors.
+        """Findings of the shared specification check for a parameter set.
 
-        Args:
-            params (dict): Parameter values to validate
+        Kept for callers of the old method; the logic is utils/spec_validation.py,
+        the same code the GUI and the constructor use (this method used to carry
+        its own, weaker rules: it ignored the implementation limit entirely).
 
         Returns:
-            dict: {param_name: [{'severity': str, 'message': str}]}
+            dict: {param_name: [finding, ...]}, each finding a dict with
+            'severity' ('malformed' | 'inadmissible' | 'outside_range'), 'tier',
+            'range', 'basis' and 'message'. Empty when nothing is flagged.
         """
-        schema = self.ports_schema()
+        from ..utils import spec_validation
         issues = {}
-
-        for param_name, value in params.items():
-            if param_name not in schema['inputs']:
-                continue
-
-            param_schema = schema['inputs'][param_name]
-            param_issues = []
-
-            # Check physiological range
-            if '_physiological_range' in param_schema:
-                min_val, max_val = param_schema['_physiological_range']
-                if value < min_val or value > max_val:
-                    param_issues.append({
-                        'severity': 'WARNING',
-                        'message': f'Value {value} outside physiological range [{min_val}, {max_val}]',
-                        'reference': param_schema.get('_reference_paper', {}).get('source', 'N/A')
-                    })
-
-            # Check warning threshold
-            if '_warning_threshold' in param_schema:
-                threshold = param_schema['_warning_threshold']
-                if value > threshold:
-                    param_issues.append({
-                        'severity': 'WARNING',
-                        'message': f'Value exceeds recommended threshold of {threshold}'
-                    })
-
-            if param_issues:
-                issues[param_name] = param_issues
-
+        for finding in spec_validation.validate_specification(
+                self.ports_schema()['inputs'], dict(params or {}),
+                known_extra=self.NON_SCHEMA_KEYS):
+            issues.setdefault(finding['parameter'], []).append(finding)
         return issues
 
     def export_model_export_dir(self, dest_dir):
@@ -1780,8 +1832,12 @@ class AngiogenesisProcess(Process):
             steps_override = self.mcs or int(self.parameters.get('sim_time', 0) or 0)
             potts = next((s for s in self.specs if isinstance(s, PottsCore)), None)
             prior_steps = getattr(potts, 'steps', None) if potts is not None else None
+            # The stock runner executes steps 0 .. Steps-1 and the dumper writes a
+            # snapshot on each step it is called for, so the archived run's last
+            # recorded step N is produced only with Steps = N + 1. (Exporting N
+            # stopped the native re-run one snapshot short of the final state.)
             if potts is not None and steps_override > 0:
-                potts.steps = int(steps_override)
+                potts.steps = int(steps_override) + 1
             try:
                 cc3dml = build_xml(*self.specs).getCC3DXMLElementString()
             finally:
@@ -1882,6 +1938,7 @@ class AngiogenesisProcess(Process):
             'parameters': params,
             'parameter_changes': param_changes,
             'validation': self.validate_parameters(params),
+            'specification_check': getattr(self, 'specification_check', None),
             'schema_version': '1.0',
             # The seed actually handed to the CPM kernel (resolved in __init__,
             # so this is never the -1 sentinel).

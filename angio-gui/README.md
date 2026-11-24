@@ -258,9 +258,7 @@ This integrated approach trades implementation complexity for performance and fl
 
 ## 📦 Installation
 
-- **No coding:** download the desktop installer for your OS from the
-  [repository README](../README.md).
-- **From source:** follow [INSTALL.md](../INSTALL.md) (one conda environment, `vc`,
+- Follow [INSTALL.md](../INSTALL.md) (one conda environment, `vc`,
   provides CompuCell3D 4.7.0, Python 3.12 and every dependency), then:
 
 ```bash
@@ -330,8 +328,8 @@ Experiment: adhesion_sweep
 
 ### Parameter Reference
 
-Every exposed parameter — its meaning, units, default, implementation-admissible
-range, evidence-supported range and the sources behind them — is defined in
+Every exposed parameter — its meaning, units, default, implementation
+limit, working range and what each range rests on — is defined in
 `AngiogenesisProcess.ports_schema()` and tabulated in
 Supplementary Table S1 of the paper. The same information is shown in the app: click the
 ⓘ button next to any parameter.

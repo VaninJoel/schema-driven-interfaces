@@ -12,7 +12,7 @@ This repository is the software accompanying the article
 
 The unifying idea: a simulation is exposed as a Vivarium process whose
 `ports_schema()` declares every parameter together with its meaning, units,
-default, admissible and evidence-supported ranges, and the evidence behind them.
+default, implementation limit and working range, and what each range rests on.
 A PyQt5 GUI is **generated from that schema**, and the same definitions validate
 each run and are written into its provenance record — so the interface, the
 validation, the documentation and the run archive cannot drift apart.
@@ -30,45 +30,28 @@ environment record, logs, outputs and status — including failed and cancelled 
 
 ### 📄 See what a run produces
 
-These are two real parameter sweeps, one per case study, run with the v1.0.3
-installer. Each sweep has an experiment report that compares the parameter values
+These are two real parameter sweeps, one per case study, run from a source
+checkout by operating the GUI with a script
+([`examples/run_example_sweep.py`](examples/run_example_sweep.py)). Each sweep has an experiment report that compares the parameter values
 with per-replicate statistics, one audit report per value, and the full
 COMBINE/OMEX archive of every run.
 
 | Case study | Sweep | Reports |
 |---|---|---|
-| **Angio-GUI** | Chemotaxis strength `lchem` = 100, 500, 1000 × 10 replicates | [📄 Experiment report (PDF)](examples/angio-gui_lchem_sweep/angio_lchem_sweep_20261021_114558_experiment_report.pdf) · [lchem=1000 audit report](examples/angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
-| **V-Cornea GUI** | Surfactant dose `SLS_Concentration` = 1500, 2000, 2500 × 5 replicates, 30 days | [📄 Experiment report (PDF)](examples/vcornea_sls_sweep/vcornea_sls_sweep_20261021_115344_experiment_report.pdf) · [SLS=2500 audit report](examples/vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
+| **Angio-GUI** | Chemotaxis strength `lchem` = 100, 500, 1000 × 10 replicates | [📄 Experiment report (PDF)](examples/angio-gui_lchem_sweep/angio_lchem_sweep_20261123_184815_experiment_report.pdf) · [lchem=1000 audit report](examples/angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
+| **V-Cornea GUI** | Surfactant dose `SLS_Concentration` = 1500, 2000, 2500 × 5 replicates, 30 days | [📄 Experiment report (PDF)](examples/vcornea_sls_sweep/vcornea_sls_sweep_20261123_184813_experiment_report.pdf) · [SLS=2500 audit report](examples/vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
 
 The [examples/](examples/) folder links every report and archive and explains what each contains.
 
 ---
 
-## ⬇️ Download & install — no coding required
+## Install and run
 
-Pre-built desktop installers bundle **everything** (including CompuCell3D) — no
-Python or conda setup. Download the one for your computer, then follow the last
-column. All builds live on the **[Releases page](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest)**.
-
-| Your computer | Download | Then |
-|---|---|---|
-| **Windows** (64-bit) | [Windows installer (.zip)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-Windows-x86_64.zip) | Extract the zip, double-click **`install.bat`**, then open **V-Cornea Simulation** / **Angiogenesis Simulation** from the Start menu. |
-| **macOS** (Apple Silicon) | [macOS installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-macOS-arm64.sh) | Open Terminal and run `bash ~/Downloads/SchemaDrivenInterfaces-macOS-arm64.sh`, then launch from the desktop. |
-| **Linux** (64-bit) | [Linux installer (.sh)](https://github.com/VaninJoel/schema-driven-interfaces/releases/latest/download/SchemaDrivenInterfaces-Linux-x86_64.sh) | In a terminal, run `bash ~/Downloads/SchemaDrivenInterfaces-Linux-x86_64.sh`, then launch from the app menu. |
-
-Installs into your user folder — **no admin rights needed**. The installers are
-unsigned, so Windows SmartScreen ("More info → Run anyway") and macOS Gatekeeper
-may ask for confirmation the first time. Prefer to run from the source code
-instead? See [Run from source](#run-from-source-developers).
-
-**Where your runs are saved:** by default in your Documents folder, under
+The applications are installed from source; no prebuilt installer is published
+from v1.1.0 on. Runs are saved by default in your Documents folder, under
 `Documents/SchemaDrivenInterfaces/vcornea-gui/experiments` and
-`Documents/SchemaDrivenInterfaces/angio-gui/experiments`. Use **Browse...** in
-the app to choose another folder. Reinstalling or updating never deletes saved runs.
-
----
-
-## Run from source (developers)
+`Documents/SchemaDrivenInterfaces/angio-gui/experiments`; use **Browse...** in
+the app to choose another folder.
 
 Everything runs in a single self-contained conda environment (`vc`) — one file
 sets up CompuCell3D 4.7.0, Python 3.12 and the full Python stack:
@@ -89,10 +72,13 @@ display (X11) notes, verification and troubleshooting.
 From the repository root, with the environment active:
 
 ```bash
-pytest
+pytest tests
+pytest vivarium-angio
+pytest vivarium-vcornea
 ```
 
-This runs, in one session, the unit tests of both Vivarium packages (including the
+Run the three suites as separate commands (in a single session an Angio run
+late in the session has been seen to stall). Together they run the unit tests of both Vivarium packages (including the
 check that every exposed parameter carries the required schema fields), the
 COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 ([`tests/gui/`](tests/gui/)).
@@ -110,7 +96,7 @@ COMBINE/OMEX and SED-ML conformance checks, and the headless GUI tests
 | [`vcornea_paper/`](vcornea_paper/) | The published **V-Cornea** CompuCell3D model (Vanin et al. 2025, *PLOS Comput Biol* 21(12):e1013410), unmodified, in its `Local/` and `HPC/` layouts. |
 | [`examples/`](examples/) | One example parameter sweep per case study: experiment and audit reports (PDF) and every run archive (OMEX). |
 | [`tests/`](tests/) | Repository-level tests (headless GUIs). |
-| [`installer/`](installer/) | Scripts that build the self-contained desktop installers. |
+| [`installer/`](installer/) | Scripts that built the desktop installers of releases up to v1.0.4. No installer is published from v1.1.0 on. |
 
 Each GUI finds its sibling process package by relative path (e.g.
 `vcornea-gui/run_gui.py` expects `../vivarium-vcornea`), so keep the folders

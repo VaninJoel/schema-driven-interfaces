@@ -44,8 +44,8 @@ CompuCell3D is launched with the current interpreter when it can import `cc3d`
 (the single-environment install), and through `conda run -n <cc3d_conda_env_name>`
 (default `vc`) otherwise. More examples are in [`experiments/`](experiments/).
 
-The full parameter schema — meaning, units, default, admissible and
-evidence-supported ranges and their sources — is tabulated in
+The full parameter schema — meaning, units, default, implementation limit and
+working range, and what each range rests on — is tabulated in
 Supplementary Table S2 of the paper.
 
 ## What a run writes
@@ -56,6 +56,35 @@ thickness `*.parquet`, …), `logs/stdout.log` and `logs/stderr.log`,
 the runnable project, the SED-ML description, the environment record and a status
 record. Failed, cancelled and timed-out runs keep the same structure and are
 marked as unsuccessful.
+
+## Re-executing, from the unpacked archive
+
+A run archive (`<run>.omex`, a zip file) carries the model project this
+replicate executed under `model/`: the unmodified model code, the `Parameters.py`
+generated for the replicate and the CC3DML with its seed. Stock CompuCell3D runs
+it; neither the wrapper nor the GUI is needed.
+
+```bash
+unzip <run>.omex -d replay && cd replay
+python -m cc3d.run_script -i model/vCornea_v2.cc3d -o out
+python <repository>/vivarium-vcornea/compare_replay.py . model/Simulation <final step>
+```
+
+The model writes its tables beside its code, in `model/Simulation/`
+(`cell_count_<N>.csv`, `surfactant_<N>.csv`, `thickness_rep_<N>.parquet`, where
+`N` is `SimTime + 1`, the final step); `-o out` receives only CompuCell3D's copy
+of the project. `compare_replay.py` compares the three tables with the archived
+ones, row for row.
+
+A full-length run takes hours (the 30-day examples took about 5 h each). For a
+quick check, lower `SimTime` in `model/Simulation/Parameters.py` (240 steps is
+one simulated day, a few minutes) before running: the tables of the shorter
+replay must equal the archived tables over the period they cover, and
+`compare_replay.py` checks exactly that. With the same software on one
+processor the replay is identical; what was observed in a fresh environment is
+tabulated in [`examples/README.md`](../examples/README.md#re-executing-the-examples).
+The seed reaches both random generators the model uses, CompuCell3D's through
+the CC3DML and Python's through the last lines of `Parameters.py`.
 
 ## Tests
 

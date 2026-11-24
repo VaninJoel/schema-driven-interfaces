@@ -103,6 +103,8 @@ conda env update -f environment.yml --prune
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
   ```
+  A conda without the `tos` command (seen with Miniforge's conda 26.7.2) raises
+  no such error; there the two lines above do not exist and are not needed.
 - **`nothing provides vs2015_win-64 needed by cc3d`** (Windows) — the
   `defaults` channel is missing from the solve. Use the `environment.yml` from
   this repo unmodified (it lists `defaults`), and check that your

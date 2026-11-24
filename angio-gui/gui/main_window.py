@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
+    range_tier_label,
     format_ontology_term,
     default_provenance_lines,
     literature_lines,
@@ -142,6 +143,7 @@ class ValidationInfoDialog(QDialog):
             .valid {{ background-color: #d4edda; padding: 10px; border-left: 4px solid #28a745; margin: 10px 0; }}
             .warning {{ background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin: 10px 0; }}
             .error {{ background-color: #f8d7da; padding: 10px; border-left: 4px solid #dc3545; margin: 10px 0; }}
+            .note {{ background-color: #e8f1fb; padding: 10px; border-left: 4px solid #2980b9; margin: 10px 0; }}
             .range-item {{ margin: 8px 0; padding: 5px; background-color: #f8f9fa; border-radius: 3px; }}
             .label {{ font-weight: bold; color: #2c3e50; }}
             .sweep-value {{ margin: 5px 0; padding: 5px; background-color: #e8f4f8; border-radius: 3px; }}
@@ -158,8 +160,9 @@ class ValidationInfoDialog(QDialog):
         if not issues:
             html += """
             <div class="valid">
-                <strong>✓ Parameter is VALID</strong><br>
-                The current value is within all recommended ranges.
+                <strong>✓ No finding</strong><br>
+                The current value is well-formed and inside every range the schema declares
+                for this parameter. What each range is based on is stated below.
             </div>
             """
         else:
@@ -171,6 +174,9 @@ class ValidationInfoDialog(QDialog):
                 if severity in ['ERROR', 'CRITICAL']:
                     css_class = 'error'
                     icon = '❌'
+                elif severity == 'NOTE':
+                    css_class = 'note'
+                    icon = 'ℹ️'
                 else:
                     css_class = 'warning'
                     icon = '⚠️'
@@ -182,7 +188,11 @@ class ValidationInfoDialog(QDialog):
                 """
 
         # Explain validation ranges
-        html += "<h3>Validation Ranges Explained</h3>"
+        html += "<h3>Ranges of this parameter</h3>"
+        html += ("<p><small><b>Working range</b>: the values the model is meant to be "
+                 "used with; what it rests on is stated with it. "
+                 "<b>Implementation limit</b>: what the model code can run with; it "
+                 "concerns the model's function, not biology.</small></p>")
 
         # Check if we have a sweep (comma-separated values)
         is_sweep = isinstance(current_value, str) and ',' in str(current_value)
@@ -211,7 +221,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -229,7 +239,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -247,7 +257,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -271,7 +281,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
@@ -283,7 +293,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
@@ -295,7 +305,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
@@ -330,14 +340,36 @@ class ValidationInfoDialog(QDialog):
             if ref.get('value') is not None:
                 html += f"<p>Reference value: {ref['value']}</p>"
 
-        # Warning about consequences
-        if issues and any(i['severity'] in ['ERROR', 'CRITICAL'] for i in issues):
+        # What the findings mean for launching — stated per kind, not as a blanket threat.
+        kinds = {i.get('kind') for i in (issues or [])}
+        if 'malformed' in kinds:
             html += """
-            <h3>⚠️ Important</h3>
+            <h3>What happens at launch</h3>
             <p style="color: #dc3545;">
-            Values outside the mathematical range may cause the simulation to crash or produce
-            nonsensical results. It is strongly recommended to use values within the physiological
-            or recommended ranges for scientifically valid results.
+            This value cannot be used as written (wrong type or format). A run is not
+            started until it is corrected.
+            </p>
+            """
+        elif 'inadmissible' in kinds:
+            html += """
+            <h3>What happens at launch</h3>
+            <p style="color: #dc3545;">
+            The value is outside the limit the schema declares for the implementation
+            (schema key _mathematical_range; the name is historical). What lies beyond that limit differs by parameter
+            and is described in the range's own note above: for some it is a failure of
+            the numerical scheme, for others a cap chosen by the modeler. The run starts
+            only if you confirm it, and the confirmation is recorded with the run.
+            </p>
+            """
+        elif 'outside_range' in kinds:
+            html += """
+            <h3>What happens at launch</h3>
+            <p>
+            The value is outside a range the schema documents. That is a statement about
+            the documentation, and its weight depends on what the range is based on
+            (stated above): a range taken from published measurements and a working range
+            chosen by the modeler are not the same kind of limit. The run is allowed and
+            the position of the value is recorded in its audit.
             </p>
             """
 
@@ -419,10 +451,11 @@ class ParameterInfoDialog(QDialog):
 
         # Validation ranges
         if any(key in param_info for key, _, _ in RANGE_TIERS):
-            html += "<h3>Valid Ranges</h3><ul>"
+            html += "<h3>Ranges</h3><ul>"
             unit = param_info.get('_unit', '')
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:
+                    label = range_tier_label(param_info, tier)
                     r = param_info[key]
                     html += (f"<li><span class='label'>{label}:</span> [{r[0]}, {r[1]}] {unit}"
                              f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
@@ -1361,7 +1394,7 @@ class AngiogenesisMainWindow(QMainWindow):
             <div class="feature"><strong>Schema-Driven Interface:</strong> All parameter info comes from scientific metadata</div>
             <div class="feature"><strong>Three Expertise Levels:</strong> Progressive disclosure hides complexity for beginners</div>
             <div class="feature"><strong>Literature Integration:</strong> Direct links to source papers via DOI</div>
-            <div class="feature"><strong>Smart Validation:</strong> Real-time checking against physiological ranges</div>
+            <div class="feature"><strong>Smart Validation:</strong> Real-time checking against each parameter's working range and implementation limit</div>
             <div class="feature"><strong>Preset Library:</strong> Pre-configured parameter sets from publications</div>
             <div class="feature"><strong>Parameter History:</strong> Load/save parameter configurations</div>
             <div class="feature"><strong>Reproducibility:</strong> Complete metadata saved with every run</div>
@@ -1490,12 +1523,12 @@ batch_sweep_20251106_143052/
         <div class="section">
             <h2>Tips for Successful Simulations</h2>
             <ul>
-                <li><span class="check">✓</span><strong>Stay within physiological ranges</strong> for biologically realistic results</li>
+                <li><span class="check">✓</span><strong>Stay within the working ranges</strong>: the values the model is meant to be used with (each range states what it rests on)</li>
                 <li><span class="check">✓</span><strong>Start with presets</strong> to understand typical parameter combinations</li>
                 <li><span class="check">✓</span><strong>Change one parameter at a time</strong> to understand its effect</li>
                 <li><span class="check">✓</span><strong>Check validation warnings</strong> before running</li>
                 <li><span class="check">✓</span><strong>Save interesting configurations</strong> using "Save Parameters"</li>
-                <li><span class="warning"></span> Values outside mathematical ranges may crash the simulation</li>
+                <li><span class="warning"></span> Values outside an implementation limit may crash the simulation</li>
                 <li><span class="warning"></span> Extreme parameter combinations may produce nonsensical results</li>
             </ul>
         </div>
@@ -1667,16 +1700,19 @@ batch_sweep_20251106_143052/
         if not issues:
             indicator.setText("✓")
             indicator.setStyleSheet("color: green; font-size: 16px;")
-            indicator.setToolTip("Parameter is valid")
+            indicator.setToolTip("No finding: inside every range the schema declares")
         else:
             # Show worst severity
             severities = [issue['severity'] for issue in issues]
             if 'ERROR' in severities or 'CRITICAL' in severities:
                 indicator.setText("❌")
                 indicator.setStyleSheet("color: red; font-size: 16px;")
-            else:
+            elif 'WARNING' in severities:
                 indicator.setText("⚠️")
                 indicator.setStyleSheet("color: orange; font-size: 16px;")
+            else:   # NOTE: outside the recommended range only
+                indicator.setText("ℹ")
+                indicator.setStyleSheet("color: #2980b9; font-size: 16px;")
 
             tooltip = "\n".join([f"{i['severity']}: {i['message']}" for i in issues])
             indicator.setToolTip(tooltip)
@@ -1727,7 +1763,7 @@ batch_sweep_20251106_143052/
 
             except ValueError:
                 all_issues.append({
-                    'severity': 'ERROR',
+                    'severity': 'ERROR', 'kind': 'malformed', 'tier': None, 'basis': None,
                     'message': f"Value #{i+1} ({val_str}): Cannot convert to {expected_type.__name__}"
                 })
 
@@ -1740,6 +1776,11 @@ batch_sweep_20251106_143052/
         all_issues = {}
 
         for param_name, value in self.current_params.items():
+            # Only schema parameters are checked here. The window also stamps
+            # run identity onto this dict (the operator entered as `creator`),
+            # which is not a parameter and must not block or flag a run.
+            if param_name not in self.schema.get('inputs', {}):
+                continue
             # Handle sweep parameters with custom validation
             if isinstance(value, str) and ',' in value:
                 issues = self._validate_sweep_parameter(param_name, value)
@@ -1973,6 +2014,11 @@ batch_sweep_20251106_143052/
         all_issues = {}
 
         for param_name, value in self.current_params.items():
+            # Only schema parameters are checked here. The window also stamps
+            # run identity onto this dict (the operator entered as `creator`),
+            # which is not a parameter and must not block or flag a run.
+            if param_name not in self.schema.get('inputs', {}):
+                continue
             # Handle sweep parameters with custom validation
             if isinstance(value, str) and ',' in value:
                 issues = self._validate_sweep_parameter(param_name, value)
@@ -1984,41 +2030,58 @@ batch_sweep_20251106_143052/
                 if issues:
                     all_issues[param_name] = issues
 
-        # Check for errors and warnings
-        errors = {p: issues for p, issues in all_issues.items()
-                  if any(i['severity'] == 'ERROR' for i in issues)}
-        warnings = {p: issues for p, issues in all_issues.items()
-                    if any(i['severity'] == 'WARNING' for i in issues)}
+        def _of_kind(kind, tier=None):
+            return {p: [i for i in issues if i.get('kind') == kind
+                        and (tier is None or i.get('tier') == tier)]
+                    for p, issues in all_issues.items()
+                    if any(i.get('kind') == kind and (tier is None or i.get('tier') == tier)
+                           for i in issues)}
 
-        # Show warning dialog but allow user to proceed (pedagogical approach)
-        if errors or warnings:
+        def _listing(found):
+            text = ""
+            for param_name, issues in found.items():
+                text += f"• {self.display_names.get(param_name, param_name)}:\n"
+                for issue in issues:
+                    text += f"  - {issue['message']}\n"
+            return text
+
+        malformed = _of_kind('malformed')
+        inadmissible = _of_kind('inadmissible')
+        outside_working = _of_kind('outside_range', 'physiological')
+
+        # Malformed input is refused outright: there is nothing to confirm about a
+        # value the model cannot read. (It used to be offered "proceed anyway".)
+        if malformed:
+            QMessageBox.warning(
+                self, "Cannot run: specification is malformed",
+                f"{len(malformed)} parameter(s) cannot be used as written:\n\n"
+                + _listing(malformed)
+                + "\nCorrect them and run again. Nothing was started.")
+            return
+
+        # Anything else may run, but only on an explicit, recorded confirmation.
+        self._launch_confirmation = {'allow_inadmissible': False,
+                                     'confirmed_by_operator': None}
+        if inadmissible or outside_working:
             msg = ""
-            if errors:
-                msg += f"⚠️ Found {len(errors)} parameter error(s):\n\n"
-                for param_name, issues in errors.items():
-                    display_name = self.display_names.get(param_name, param_name)
-                    msg += f"• {display_name}:\n"
-                    for issue in issues:
-                        msg += f"  - {issue['message']}\n"
-                msg += "\n"
-
-            if warnings:
-                msg += f"⚠️ Found {len(warnings)} parameter warning(s):\n\n"
-                for param_name, issues in warnings.items():
-                    display_name = self.display_names.get(param_name, param_name)
-                    msg += f"• {display_name}:\n"
-                    for issue in issues:
-                        msg += f"  - {issue['message']}\n"
-
-            msg += "\n⚠️ Running with invalid parameters may cause:\n"
-            msg += "  • Simulation crashes\n"
-            msg += "  • Nonsensical results\n"
-            msg += "  • Numerical instabilities\n\n"
-            msg += "Do you want to proceed anyway?"
+            if inadmissible:
+                msg += (f"{len(inadmissible)} parameter(s) outside a declared "
+                        f"implementation limit:\n\n" + _listing(inadmissible) + "\n"
+                        "The schema declares these limits for the implementation. What "
+                        "happens beyond one differs by parameter (see its validation "
+                        "details): the numerical scheme may fail, or the limit may be a "
+                        "cap chosen by the modeler.\n\n")
+            if outside_working:
+                msg += (f"{len(outside_working)} parameter(s) outside the documented "
+                        f"working range:\n\n" + _listing(outside_working) + "\n"
+                        "These values run. The run is recorded as outside the working "
+                        "range, whose basis is named for each parameter.\n\n")
+            msg += ("Run with these values? Your confirmation and each value's position "
+                    "are recorded in the run record.")
 
             reply = QMessageBox.question(
                 self,
-                "Validation Issues Detected",
+                "Values outside documented ranges",
                 msg,
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
@@ -2026,6 +2089,8 @@ batch_sweep_20251106_143052/
 
             if reply == QMessageBox.No:
                 return
+            self._launch_confirmation = {'allow_inadmissible': bool(inadmissible),
+                                         'confirmed_by_operator': True}
 
         # Detect sweep parameters and generate combinations
         is_sweep = self.detect_sweep_parameters()
@@ -2074,7 +2139,7 @@ batch_sweep_20251106_143052/
             f"{replicate_info}"
             f"Total runs: {self.total_combinations}\n"
             f"Duration per run: {self.current_params.get('sim_time', 100)} MCS\n"
-            f"Warnings: {len(all_issues)}",
+            f"Parameters with a validation finding: {len(all_issues)}",
             QMessageBox.Yes | QMessageBox.No
         )
 
@@ -2244,7 +2309,34 @@ batch_sweep_20251106_143052/
 
     def _make_worker(self, params_copy):
         return SimulationWorker(params_copy, str(self.batch_output_folder),
-                                parameter_audit=self._build_parameter_audit(params_copy))
+                                parameter_audit=self._build_parameter_audit(params_copy),
+                                specification_check=self._check_run_specification(params_copy))
+
+    def _check_run_specification(self, params_copy):
+        """The specification-check record of ONE run (the resolved values of this
+        combination and replicate), from the check the process itself applies. If
+        the operator confirmed values outside an implementation limit, that
+        permission is put on this run's parameters — and only on runs that need
+        it — so the process accepts it and the record shows it."""
+        try:
+            from vivarium_angio.utils import spec_validation as sv
+            from vivarium_angio.processes.angiogenesis_process import AngiogenesisProcess
+            confirmation = getattr(self, '_launch_confirmation', None) or {}
+            issues = sv.validate_specification(self.schema['inputs'], params_copy,
+                                               known_extra=AngiogenesisProcess.NON_SCHEMA_KEYS)
+            needs_permission = any(i['severity'] == sv.INADMISSIBLE for i in issues)
+            allowed = bool(confirmation.get('allow_inadmissible')) and needs_permission
+            asked = any(i['severity'] == sv.INADMISSIBLE or i.get('tier') == 'physiological'
+                        for i in issues)
+            if allowed:
+                params_copy['allow_inadmissible'] = True
+            return sv.check_record(
+                issues, allow_inadmissible=allowed, checked_by='gui',
+                confirmed_by_operator=(confirmation.get('confirmed_by_operator')
+                                       if asked else None))
+        except Exception as e:
+            print(f"Warning: could not build the specification check record: {e}")
+            return None
 
 
     def on_simulation_progress(self, percentage, message):
@@ -2557,4 +2649,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main()

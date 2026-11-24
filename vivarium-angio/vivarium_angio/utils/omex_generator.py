@@ -54,12 +54,14 @@ KISAO_RANDOM_SEED_ID = "KISAO:0000488"
 SEDML_SYMBOL_TIME = "urn:sedml:symbol:time"
 MODEL_LANGUAGE_URI = "urn:sedml:language:compucell3d"
 
-# The angiogenesis model's reference paper.
+# The angiogenesis model's reference paper: the contact-inhibited chemotaxis model.
+# (The archives used to cite Merks et al. 2006, "Cell elongation is key ...", whose
+# central mechanism — cell elongation — this implementation does not represent.)
 ANGIO_CITATION = (
-    "Merks, R.M.H., Brodsky, S.V., Goligorksy, M.S., Newman, S.A., Glazier, J.A. "
-    "(2006). Cell elongation is key to in silico replication of in vitro "
-    "vasculogenesis and subsequent remodeling. Developmental Biology 289(1), 44-54. "
-    "https://doi.org/10.1016/j.ydbio.2005.10.003")
+    "Merks, R.M.H., Perryn, E.D., Shirinifard, A., Glazier, J.A. (2008). "
+    "Contact-inhibited chemotaxis in de novo and sprouting blood-vessel growth. "
+    "PLoS Computational Biology 4(9), e1000163. "
+    "https://doi.org/10.1371/journal.pcbi.1000163")
 
 # Standard scalar signals extracted from the Zarr store (Time in MCS + these).
 ANGIO_METRIC_COLUMNS = ['num_clusters', 'cell_density', 'largest_cluster_size', 'vegf_mean']
@@ -201,6 +203,71 @@ def _load_zarr_steps(store, strict=False):
                 yield int(p.name), data
 
 
+def _network_metrics():
+    """The shared cluster/boundary definitions (network_metrics.py, next to this
+    file): 4-neighbour clusters on the model's periodic lattice, the same code the
+    GUI analysis layer uses.
+
+    This module is imported as part of the package AND loaded by bare file path
+    (the GUI worker does that so archiving works from a source tree). In the
+    second case it has no package, so the sibling is loaded by path too."""
+    try:
+        from . import network_metrics
+        return network_metrics
+    except ImportError:
+        import importlib.util
+        import sys
+        name = 'vivarium_angio_network_metrics'
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(
+                name, Path(__file__).with_name('network_metrics.py'))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            sys.modules[name] = module
+        return sys.modules[name]
+
+
+def recorded_time_course(sim_params):
+    """(first recorded MCS, last recorded MCS, numberOfSteps) of a run.
+
+    The writer records a snapshot whenever the step count is a multiple of
+    write_frequency, starting at write_frequency: there is no snapshot of the
+    initial condition (step 0). A SED-ML uniformTimeCourse with numberOfSteps = n
+    describes n + 1 output points, so a run that stored k snapshots is
+    outputStartTime = write_frequency, outputEndTime = last recorded step,
+    numberOfSteps = k - 1 (1, of zero length, when k = 1). Used by the per-run and the experiment-level SED-ML,
+    which previously disagreed with each other and both declared an output at
+    time 0 that no archive contains."""
+    sim_time = float(sim_params.get('sim_time', 100.0))
+    write_freq = float(sim_params.get('write_frequency', 10.0) or 0)
+    if write_freq <= 0 or write_freq > sim_time:
+        return sim_time, sim_time, 1
+    count = int(sim_time // write_freq)
+    # SED-ML requires numberOfSteps >= 1. A run that stored a single snapshot is
+    # therefore written as one step of zero length (start = end = that step):
+    # still no output at time 0, and both declared points are the stored one.
+    return write_freq, count * write_freq, max(count - 1, 1)
+
+
+def extract_archive_zarr(omex_path, dest_dir):
+    """Unpack the Zarr trajectory an archive carries (`zarr/<exp_name>/...`) into
+    dest_dir and return the store path, or None when the archive has none.
+
+    This is how a consumer reads spatial state from the archive alone, without
+    the working directory the run was produced in."""
+    dest_dir = Path(dest_dir)
+    with zipfile.ZipFile(omex_path) as zf:
+        members = [n for n in zf.namelist()
+                   if n.startswith('zarr/') and not n.endswith('/')]
+        if not members:
+            return None
+        stores = {n.split('/')[1] for n in members if n.count('/') >= 2}
+        if len(stores) != 1:
+            return None
+        zf.extractall(dest_dir, members)
+    return dest_dir / 'zarr' / stores.pop()
+
+
 def extract_zarr_metrics(zarr_store_path):
     """Best-effort scalar time-series from the Zarr store (each timestep `data`
     array is [X,Y,Z,3]: cell-type / cell-id / VEGF). Returns CSV text
@@ -208,8 +275,11 @@ def extract_zarr_metrics(zarr_store_path):
     timestep cannot be read (a series with a hole would be averaged as if whole)."""
     try:
         import numpy as np
-        from scipy.ndimage import label
-    except Exception:
+        cluster_sizes = _network_metrics().cluster_sizes
+    except Exception as e:  # noqa: BLE001
+        # Never silent: an archive without metrics.csv must say why.
+        print(f"[omex] metrics not extracted from {zarr_store_path}: "
+              f"metric code unavailable ({type(e).__name__}: {e})")
         return None
     rows = ["Time," + ",".join(ANGIO_METRIC_COLUMNS)]
     try:
@@ -221,14 +291,8 @@ def extract_zarr_metrics(zarr_store_path):
             mask = (cell_types == EC_CELL_TYPE)
             total = cell_types.size
             density = (int(mask.sum()) / total) if total else 0.0
-            flat = mask
-            while flat.ndim > 2:
-                flat = flat.squeeze(-1) if flat.shape[-1] == 1 else flat.any(axis=-1)
-            try:
-                lab, num = label(flat)
-                largest = int(np.bincount(lab.ravel())[1:].max()) if num else 0
-            except Exception:
-                num, largest = 0, 0
+            sizes = cluster_sizes(mask)
+            num, largest = len(sizes), (max(sizes) if sizes else 0)
             rows.append(f"{step},{num},{density:.6f},{largest},{float(np.mean(vegf)):.6f}")
     except Exception as e:  # noqa: BLE001
         print(f"[omex] metrics not extracted from {zarr_store_path}: {e}")
@@ -392,8 +456,12 @@ def generate_environment_manifest(provenance=None):
         # Belongs here as much as the third-party versions do: "what you need to
         # reproduce this" is the packages AND the model source revision.
         'code': _provenance_block(provenance),
-        'note': ('These packages must be installed to re-execute the embedded model '
-                 'source. They are named, not embedded; see model/run_model.py.'),
+        'note': ('These packages must be installed to re-execute the run through '
+                 'model/run_model.py. They are named, not embedded. vivarium-angio is '
+                 'not published on a package index: install it from the source '
+                 'repository at the code revision given under "code". The files under '
+                 'model/src/ record the module that executed this run; they are not an '
+                 'importable package and run_model.py does not load them.'),
     }, indent=2, default=str)
 
 
@@ -401,25 +469,39 @@ def generate_environment_manifest(provenance=None):
 # mirroring the path the GUI worker uses (Engine + AngiogenesisComposer).
 _RUN_MODEL_SCRIPT = '''"""Re-run the integrated angiogenesis model from this OMEX archive.
 
-Prerequisites: install the packages named in environment.json (CompuCell3D,
-vivarium-core, vivarium-angio). Then, with model/src on PYTHONPATH, run:
+Prerequisites: CompuCell3D, vivarium-core and the vivarium-angio package, at the
+versions listed in environment.json. vivarium-angio is installed from the source
+repository at the code revision recorded in run_metadata.json (provenance.code);
+the files under model/src/ are a record of the module that executed this run, not
+an importable package. Then:
 
     python run_model.py
 
-This reconstructs the run from run_params.json using the same Vivarium
-Engine + AngiogenesisComposer path the GUI uses.
+This reconstructs the run from run_params.json (same parameters, same seed) through
+the Vivarium Engine + AngiogenesisComposer path the GUI uses, and writes a new
+trajectory to rerun_output/data.zarr beside this script. With the same software on
+one processor, each recorded step is expected to equal the archived zarr/ step.
 """
 import json
+import sys
 from pathlib import Path
 
 from vivarium.core.engine import Engine
 from vivarium_angio.composites.angiogenesis_composer import AngiogenesisComposer
 
-params = json.loads((Path(__file__).parent / "run_params.json").read_text())
+here = Path(__file__).parent
+params = json.loads((here / "run_params.json").read_text())
+store = here / "rerun_output" / "data.zarr"
+if store.exists():
+    # The writer skips steps that already exist, so reusing a store would
+    # silently keep the earlier run's snapshots.
+    sys.exit(f"{store} already exists; remove it before re-running.")
+store.parent.mkdir(parents=True, exist_ok=True)
+params["store_path"] = str(store)
 composer = AngiogenesisComposer({"angiogenesis_process": params})
 engine = Engine(composite=composer.generate())
 engine.update(params.get("sim_time", 100.0))
-print("Re-run complete.")
+print(f"Re-run complete: {store}")
 '''
 
 
@@ -431,13 +513,17 @@ def generate_run_model_script():
 # Exact wording of the output-cadence caveat for the exported native CC3D project.
 # Stated verbatim in model_summary.json whenever a native .cc3d is bundled.
 NATIVE_CADENCE_CAVEAT = (
-    "The exported native CC3D project (model/angiogenesis.cc3d) reproduces the archived "
-    "run's model, random seed, and number of Monte Carlo steps, so re-executing it "
-    "reproduces the same trajectory. It supplies output through a CC3D-native "
-    "frequency-based dumper steppable substituted for the Vivarium-directed "
-    "WriterSteppable used in the archived run, writing .npy snapshots under "
-    "native_output/ rather than the Zarr hierarchy. The on-disk output format therefore "
-    "differs from the archived trajectory even though the dynamics it records do not.")
+    "The exported native CC3D project (model/angiogenesis.cc3d) carries the archived "
+    "run's model, random seed and length. Re-executed with stock CompuCell3D on one "
+    "processor it writes a snapshot at every recorded step of the archived run, and each "
+    "is expected to equal the archived snapshot with the same step number. Output comes "
+    "from a CC3D-native dumper steppable substituted for the Vivarium-directed "
+    "WriterSteppable of the archived run: .npy files named step_<MCS>.npy, written to "
+    "native_output/ beside the project (not to the -o directory), each holding the same "
+    "[x, y, z, (cell type, cell id, VEGF)] array as the Zarr group of that step. The "
+    "native run also writes step_000000.npy, the initial condition, which the archived "
+    "trajectory does not record. The on-disk format therefore differs from the archive; "
+    "the recorded state is the same.")
 
 
 def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
@@ -474,18 +560,23 @@ def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
         'environment': 'model/environment.json',
         'rerun': {
             'reproducible_from_archive': 'native+partial' if has_native else 'partial',
-            'how': ('Install the packages listed in environment.json, put model/src '
-                    'on PYTHONPATH, then run model/run_model.py (it reads '
-                    'run_params.json).'),
+            'how': ('Install the packages listed in environment.json (vivarium-angio '
+                    'from the source repository at the recorded code revision), then '
+                    'run model/run_model.py. It reads run_params.json and writes a new '
+                    'trajectory to model/rerun_output/data.zarr; it refuses to run if '
+                    'that store already exists.'),
+            'source_record': ('model/src/ holds the Python module that executed this '
+                              'run, as a record. It is not an importable package and '
+                              'is not what run_model.py imports.'),
             'limitation': ('This model is defined in Python and depends on the '
                            'CompuCell3D + vivarium_angio packages, which are named in '
                            'environment.json rather than embedded as bytes. The archive '
                            'carries the complete model definition and the exact '
                            'parameters, not the full Python runtime.'),
         },
-        'note': ('The model is encoded in the Python angiogenesis process. The bundled '
-                 'source + parameters identify and reconstruct the exact model; full '
-                 'trajectory data is under zarr/.'),
+        'note': ('The model is encoded in the Python angiogenesis process. The recorded '
+                 'source, the code revision and the parameters identify the exact model; '
+                 'full trajectory data is under zarr/.'),
         'schema_version': run_metadata.get('schema_version', '1.0'),
         'reference': ANGIO_CITATION,
         'parameters': sim_params,
@@ -502,7 +593,11 @@ def generate_model_summary(run_metadata, sim_params, *, artifact_files=None,
         summary['rerun']['native'] = (
             'Open model/angiogenesis.cc3d with stock CompuCell3D '
             '(e.g. `python -m cc3d.run_script -i model/angiogenesis.cc3d -o out`). '
-            'No vivarium/zarr required; output via the native dumper. ' + NATIVE_CADENCE_CAVEAT)
+            'No vivarium/zarr required. Snapshots are written to '
+            'model/native_output/step_<MCS>.npy, beside the project; the -o directory '
+            'receives only CompuCell3D\'s copy of the project files. '
+            + NATIVE_CADENCE_CAVEAT)
+        summary['native_project']['output_location'] = 'model/native_output/step_<MCS>.npy'
     return json.dumps(summary, indent=2, default=str)
 
 
@@ -613,7 +708,7 @@ def generate_sedml_document(
                   or datetime.now().isoformat())
     sim_time = float(sim_params.get('sim_time', 100.0))
     write_freq = float(sim_params.get('write_frequency', 10.0))
-    n_steps = max(int(round(sim_time / write_freq)), 1) if write_freq > 0 else int(sim_time)
+    first_out, last_out, n_steps = recorded_time_course(sim_params)
     metric_columns = metric_columns or []
 
     n_replicates = run_metadata.get('total_replicates', 1)
@@ -632,7 +727,9 @@ def generate_sedml_document(
         f"Angiogenesis Cellular Potts Simulation: {exp_name}",
         f"Created: {created_at}",
         f"Simulation time: {sim_time} MCS (time is in MCS; angio has no physical-time "
-        f"calibration). Output every {write_freq} MCS -> {n_steps} steps.",
+        f"calibration). State recorded every {write_freq:g} MCS, from MCS {first_out:g} to "
+        f"MCS {last_out:g}: {max(int(round((last_out - first_out) / write_freq)), 0) + 1 if write_freq > 0 else 1} "
+        f"snapshot(s). The initial condition (MCS 0) is not recorded.",
         f"Zarr trajectory under: {zarr_archive_root} (spatial ndarrays per timestep).",
         ("Scalar signals indexed from metrics.csv: " + ", ".join(metric_columns) + "."
          if metric_columns else
@@ -699,8 +796,8 @@ def generate_sedml_document(
     sim = ET.SubElement(list_of_sims, 'uniformTimeCourse')
     sim.set('id', 'sim_mcs')
     sim.set('initialTime', '0')
-    sim.set('outputStartTime', '0')
-    sim.set('outputEndTime', str(sim_time))
+    sim.set('outputStartTime', str(first_out))
+    sim.set('outputEndTime', str(last_out))
     sim.set('numberOfSteps', str(n_steps))
 
     algorithm = ET.SubElement(sim, 'algorithm')
@@ -1128,6 +1225,7 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name, sim_para
     root = ET.Element('sedML')
     root.set('xmlns', SEDML_NAMESPACE); root.set('level', '1'); root.set('version', SEDML_VERSION_ATTR)
     sim_time = float(sim_params.get('sim_time', 100.0))
+    first_out, last_out, n_steps = recorded_time_course(sim_params)
     scan_dims = "; ".join(f"{p} in {list(v)}" for p, v in scan_spec.items())
     n_points = len({c['safe'] for c in combo_info})
 
@@ -1139,6 +1237,14 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name, sim_para
         "bundled combo_data/ CSV holds its replicate-MEAN metric series (time in MCS).",
         "plot2D outputs below place the combinations side by side, one curve per combo "
         f"per metric ({', '.join(ANGIO_METRIC_COLUMNS)}).",
+        f"Time course of every point: state recorded from MCS {first_out:g} to MCS "
+        f"{last_out:g} (the initial condition is not recorded), "
+        "as in the per-run archives.",
+        "The repeatedTask's setValue targets are the schema keys of the swept parameters "
+        "(for example 'lchem'). The model is a CompuCell3D model built from those "
+        "parameters, not an XML document, so there is no XPath to address; the keys are "
+        "the names under which each run's archive records its parameters "
+        "(sim_params.json, model/run_params.json).",
     ]:
         ET.SubElement(body, '{%s}p' % XHTML_NAMESPACE).text = line
 
@@ -1146,8 +1252,9 @@ def generate_comparison_sedml_document(scan_spec, combo_info, run_name, sim_para
     model.set('id', 'model_angio'); model.set('name', 'Angiogenesis Cellular Potts Model')
     model.set('source', 'model/model_summary.json'); model.set('language', MODEL_LANGUAGE_URI)
     sim = ET.SubElement(ET.SubElement(root, 'listOfSimulations'), 'uniformTimeCourse')
-    sim.set('id', 'sim_mcs'); sim.set('initialTime', '0'); sim.set('outputStartTime', '0')
-    sim.set('outputEndTime', str(sim_time)); sim.set('numberOfSteps', str(int(sim_time)))
+    sim.set('id', 'sim_mcs'); sim.set('initialTime', '0')
+    sim.set('outputStartTime', str(first_out))
+    sim.set('outputEndTime', str(last_out)); sim.set('numberOfSteps', str(n_steps))
     ET.SubElement(sim, 'algorithm').set('kisaoID', KISAO_ALGORITHM_ID)
 
     lot = ET.SubElement(root, 'listOfTasks')
@@ -1283,12 +1390,39 @@ def split_replicates(replicate_dirs):
     return ok, other
 
 
+def _replicate_metrics_csv(rep_dir):
+    """(metrics CSV text or None, where the series came from) for one replicate.
+
+    The series is computed from the trajectory INSIDE the run's archive when the
+    archive exists, so the experiment-level archive is derived from the per-run
+    archives it catalogues and cannot disagree with them if a working directory
+    is altered after export. Only a run directory that has no archive yet falls
+    back to its working-directory store, and the source is recorded either way."""
+    import tempfile
+    rep_dir = Path(rep_dir)
+    archive = rep_dir / f"{rep_dir.name}.omex"
+    if archive.exists():
+        try:
+            with tempfile.TemporaryDirectory(prefix='angio_scan_',
+                                             ignore_cleanup_errors=True) as tmp:
+                store = extract_archive_zarr(archive, tmp)
+                if store is not None:
+                    return extract_zarr_metrics(store), 'archive'
+        except Exception as e:  # noqa: BLE001
+            print(f"[omex] could not read the trajectory in {archive.name}: {e}")
+    store = rep_dir / 'data.zarr'
+    if store.exists():
+        return extract_zarr_metrics(store), 'working_directory'
+    return None, None
+
+
 def _read_combo_metric_means(combinations):
-    """For each combo, average the per-replicate metric series (extracted from each
-    SUCCESSFUL replicate's data.zarr) on Time. combinations entries: {label, safe,
-    replicate_dirs}. Returns [{safe,label,df(Time+metrics),included,excluded}];
-    combos without a successful replicate are omitted. Needs pandas; empty if
-    unavailable.
+    """For each combo, average the per-replicate metric series on Time, using only
+    SUCCESSFUL replicates and reading each series from the replicate's own archive
+    (see _replicate_metrics_csv). combinations entries: {label, safe,
+    replicate_dirs}. Returns [{safe,label,df(Time+metrics),included,excluded,
+    sources}]; combos without a successful replicate are omitted. Needs pandas;
+    empty if unavailable.
 
     Replicates that failed, timed out or were cancelled are excluded even when they
     left a data.zarr: averaging a truncated trajectory into a replicate mean would
@@ -1302,24 +1436,32 @@ def _read_combo_metric_means(combinations):
     out = []
     for combo in combinations or []:
         ok, excluded = split_replicates(combo.get('replicate_dirs', []))
-        frames, included = [], []
+        frames, included, sources = [], [], {}
         for rep_dir in ok:
-            store = rep_dir / 'data.zarr'
-            if not store.exists():
-                excluded.append((rep_dir, 'no data.zarr'))
+            csv, source = _replicate_metrics_csv(rep_dir)
+            if source is None:
+                excluded.append((rep_dir, 'no trajectory'))
                 continue
-            csv = extract_zarr_metrics(store)
             if not csv:
                 excluded.append((rep_dir, 'no metrics'))
                 continue
             frames.append(pd.read_csv(io.StringIO(csv)).set_index('Time'))
             included.append(rep_dir)
+            sources[str(rep_dir)] = source
         if not frames:
             continue
         mean = pd.concat(frames).groupby(level=0).mean(numeric_only=True).reset_index()
         out.append({'safe': _safe_sid(combo['label']), 'label': combo['label'], 'df': mean,
-                    'included': included, 'excluded': excluded})
+                    'included': included, 'excluded': excluded, 'sources': sources})
     return out
+
+
+# Parameters that describe ONE run, not the experiment: they have no place in an
+# experiment-level archive's description of "the model".
+_PER_RUN_PARAM_KEYS = frozenset((
+    'exp_name', 'store_path', 'random_seed', 'random_seed_origin', 'scan_point',
+    'combination_index', 'replicate_id', 'allow_inadmissible', 'confirmed_by_operator',
+))
 
 
 def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, sim_params,
@@ -1383,7 +1525,9 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
             'replicates': len(c.get('replicate_dirs', [])),
             'replicates_in_mean': len(included),
             'mean_series': f"combo_data/{_safe_sid(c['label'])}.csv" if s is not None else None,
-            'included': [_replicate_identity(d, batch_output_dir) for d in included],
+            'included': [{**_replicate_identity(d, batch_output_dir),
+                          'series_source': (s or {}).get('sources', {}).get(str(d))}
+                         for d in included],
             'excluded': [{**_replicate_identity(d, batch_output_dir), 'reason': why}
                          for d, why in excluded],
         })
@@ -1396,7 +1540,11 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
         'metrics': ANGIO_METRIC_COLUMNS,
         'replicate_mean_policy': ('Mean series average only replicates whose run '
                                   'completed successfully; failed, timed-out and '
-                                  'cancelled replicates are listed under "excluded".'),
+                                  'cancelled replicates are listed under "excluded". '
+                                  'Each series is computed from the Zarr trajectory inside '
+                                  'the replicate\'s own archive ("series_source": '
+                                  '"archive"); "working_directory" marks a replicate that '
+                                  'had no archive when this one was built.'),
         'combinations': combo_records,
     }
     cr = creator
@@ -1417,9 +1565,15 @@ def create_experiment_scan_archive(batch_output_dir, scan_spec, combinations, si
     # descriptive summary here (the experiment-level archive compares combinations
     # and intentionally does not embed per-run model source); the per-run archives
     # at each scan point carry the re-runnable model artifact.
+    # Only what the scan points SHARE describes the experiment: one run's seed,
+    # name, store and scan point are left out, and the swept parameters are given
+    # as the values scanned, not as whichever run's value happened to be passed in.
+    shared_params = {k: v for k, v in (sim_params or {}).items()
+                     if k not in _PER_RUN_PARAM_KEYS and k not in scan_spec}
+    shared_params['swept_parameters'] = {k: list(v) for k, v in scan_spec.items()}
     model_summary = generate_model_summary(
         {'model_name': 'Angiogenesis', 'schema_version': '1.0',
-         'provenance': scan_provenance}, sim_params)
+         'provenance': scan_provenance}, shared_params)
 
     with zipfile.ZipFile(omex_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('scan.sedml', sedml)

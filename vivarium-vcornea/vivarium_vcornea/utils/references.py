@@ -58,7 +58,7 @@ REFERENCES = {
     51: {"cite": 'Ban Y, Dota A, Cooper LJ, Fullwood NJ, Nakamura T, Tsuzuki M. Tight junction-related protein expression and distribution in human corneal epithelium. Exp Eye Res. 2003;76(6):663–9.', "doi": '10.1016/s0014-4835(03)00054-x', "pmid": '12742348'},
     52: {"cite": 'Estil S, Primo EJ, Wilson G. Apoptosis in shed human corneal cells. Invest Ophthalmol Vis Sci. 2000;41(11):3360–4.', "doi": None, "pmid": '11006225'},
     53: {"cite": 'Yoon JJ, Ismail S, Sherwin T. Limbal stem cells: Central concepts of corneal epithelial homeostasis. World J Stem Cells. 2014;6(4):391–403.', "doi": '10.4252/wjsc.v6.i4.391', "pmid": '25258661'},
-    54: {"cite": 'Peterson JL, Ceresa BP. Epidermal Growth Factor Receptor Expression in the Corneal Epithelium. Cells. 2021;10(9):2409. cells10092409.', "doi": '10.3390/', "pmid": '34572058'},
+    54: {"cite": 'Peterson JL, Ceresa BP. Epidermal Growth Factor Receptor Expression in the Corneal Epithelium. Cells. 2021;10(9):2409. cells10092409.', "doi": '10.3390/cells10092409', "pmid": '34572058'},
     55: {"cite": 'Savage CR Jr, Cohen S. Proliferation of corneal epithelium induced by epidermal growth factor. Exp Eye Res. 1973;15(3):361–6.', "doi": '10.1016/0014-4835(73)90151-6', "pmid": '4695441'},
     56: {"cite": 'Wee P, Wang Z. Epidermal growth factor receptor cell proliferation signaling pathways. Cancers. 2017;9(5):52.', "doi": '10.3390/cancers9050052', "pmid": '28513565'},
     57: {"cite": 'Gouveia RM, Lepert G, Gupta S, Mohan RR, Paterson C, Connon CJ. Assessment of corneal substrate biomechanics and its effect on epithelial stem cell maintenance and differentiation. Nat Commun. 2019;10(1):1496.', "doi": '10.1038/s41467-019-09331-6', "pmid": '30944320'},

@@ -405,7 +405,15 @@ class AnalysisWindow(QMainWindow):
 
             # Check if this is an experiment directory or contains experiments
             if (directory / 'data.zarr').exists():
-                # Single experiment
+                # Single experiment — only a run recorded as completed is a result.
+                from analysis_utils import completed_run_problem
+                problem = completed_run_problem(directory)
+                if problem:
+                    QMessageBox.warning(
+                        self, "Not a completed run",
+                        f"{directory.name} was not loaded: {problem}.\n\n"
+                        "Its files remain in the run folder and its archive for diagnosis.")
+                    return
                 self.load_experiment(directory)
             else:
                 # Directory containing experiments
@@ -498,15 +506,17 @@ class AnalysisWindow(QMainWindow):
         self.metrics_table.setRowCount(len(metrics))
 
         for row, (key, value) in enumerate(metrics.items()):
-            # Metric name
-            name_item = QTableWidgetItem(key.replace('_', ' ').title())
+            # Metric name with its unit; the definition is the tooltip
+            from analysis_utils import metric_label, metric_definition
+            name_item = QTableWidgetItem(metric_label(key))
+            name_item.setToolTip(metric_definition(key))
             self.metrics_table.setItem(row, 0, name_item)
 
             # Metric value
             if value is None:
                 value_str = "N/A"
             elif isinstance(value, float):
-                value_str = f"{value:.4f}"
+                value_str = "undefined" if value != value else f"{value:.4f}"
             else:
                 value_str = str(value)
 
@@ -514,62 +524,81 @@ class AnalysisWindow(QMainWindow):
             self.metrics_table.setItem(row, 1, value_item)
 
     def plot_time_series(self, time_series: dict):
-        """Plot time series metrics."""
+        """Plot every network and field measure of the run as a time series.
+
+        Six panels: cell density; number of clusters; cluster sizes (largest and
+        mean); the dimensionless indices (connectivity, compactness,
+        fragmentation); network perimeter; and the VEGF field (min, mean, max).
+        Axis labels carry the unit of each measure (analysis_utils.metric_label);
+        the definitions are the tooltips of the metrics table.
+        """
+        from analysis_utils import metric_label
         self.metrics_figure.clear()
 
         timesteps = time_series['timesteps']
         network_metrics = time_series['network_metrics']
         vegf_stats = time_series['vegf_stats']
 
-        # Create subplots
-        gs = self.metrics_figure.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        def series(key):
+            values = [m.get(key) for m in network_metrics]
+            return [float('nan') if v is None else v for v in values]
 
-        # Plot 1: Cell density over time
-        ax1 = self.metrics_figure.add_subplot(gs[0, 0])
-        if network_metrics:
-            densities = [m['cell_density'] for m in network_metrics]
-            ax1.plot(timesteps, densities, 'b-o', linewidth=2)
-            ax1.set_xlabel('Timestep (MCS)')
-            ax1.set_ylabel('Cell Density')
-            ax1.set_title('Cell Density Over Time')
-            ax1.grid(True, alpha=0.3)
+        def finish(ax, ylabel, title, legend=False):
+            ax.set_xlabel('Time (MCS)', fontsize=8)
+            ax.set_ylabel(ylabel, fontsize=8)
+            ax.set_title(title, fontsize=9)
+            ax.tick_params(labelsize=7)
+            ax.grid(True, alpha=0.3)
+            if legend:
+                ax.legend(fontsize=7)
 
-        # Plot 2: Number of clusters
-        ax2 = self.metrics_figure.add_subplot(gs[0, 1])
-        if network_metrics and SCIPY_AVAILABLE:
-            clusters = [m.get('num_clusters', 0) for m in network_metrics]
-            ax2.plot(timesteps, clusters, 'r-o', linewidth=2)
-            ax2.set_xlabel('Timestep (MCS)')
-            ax2.set_ylabel('Number of Clusters')
-            ax2.set_title('Network Fragmentation')
-            ax2.grid(True, alpha=0.3)
+        gs = self.metrics_figure.add_gridspec(2, 3, hspace=0.45, wspace=0.4)
+        have_network = bool(network_metrics) and len(network_metrics) == len(timesteps)
 
-        # Plot 3: VEGF mean concentration
-        ax3 = self.metrics_figure.add_subplot(gs[1, 0])
-        if vegf_stats:
-            vegf_mean = [v['mean'] for v in vegf_stats]
-            ax3.plot(timesteps, vegf_mean, 'g-o', linewidth=2)
-            ax3.set_xlabel('Timestep (MCS)')
-            ax3.set_ylabel('Mean VEGF Concentration')
-            ax3.set_title('VEGF Field Evolution')
-            ax3.grid(True, alpha=0.3)
+        ax = self.metrics_figure.add_subplot(gs[0, 0])
+        if have_network:
+            ax.plot(timesteps, series('cell_density'), 'b-o', linewidth=2, markersize=3)
+        finish(ax, metric_label('cell_density'), 'Cell density')
 
-        # Plot 4: VEGF statistics (min, max, mean)
-        ax4 = self.metrics_figure.add_subplot(gs[1, 1])
-        if vegf_stats:
+        ax = self.metrics_figure.add_subplot(gs[0, 1])
+        if have_network and SCIPY_AVAILABLE:
+            ax.plot(timesteps, series('num_clusters'), 'r-o', linewidth=2, markersize=3)
+        finish(ax, metric_label('num_clusters'), 'Number of clusters')
+
+        ax = self.metrics_figure.add_subplot(gs[0, 2])
+        if have_network and SCIPY_AVAILABLE:
+            ax.plot(timesteps, series('largest_cluster_size'), '-o', color='#8e44ad',
+                    linewidth=2, markersize=3, label='largest')
+            ax.plot(timesteps, series('mean_cluster_size'), '--', color='#8e44ad',
+                    linewidth=1.5, label='mean')
+        finish(ax, 'Cluster size (lattice sites)', 'Cluster size', legend=True)
+
+        ax = self.metrics_figure.add_subplot(gs[1, 0])
+        if have_network and SCIPY_AVAILABLE:
+            ax.plot(timesteps, series('connectivity_index'), '-', color='#16a085',
+                    linewidth=2, label='connectivity (largest / all EC sites)')
+            ax.plot(timesteps, series('compactness'), '-', color='#d35400',
+                    linewidth=2, label='compactness (interior EC fraction)')
+            ax.plot(timesteps, series('fragmentation_index'), '-', color='#7f8c8d',
+                    linewidth=2, label='fragmentation (clusters per EC site)')
+        finish(ax, 'Index (dimensionless)', 'Network indices', legend=True)
+
+        ax = self.metrics_figure.add_subplot(gs[1, 1])
+        if have_network and SCIPY_AVAILABLE:
+            ax.plot(timesteps, series('network_perimeter'), '-o', color='#2c3e50',
+                    linewidth=2, markersize=3)
+        finish(ax, metric_label('network_perimeter'), 'Network perimeter')
+
+        ax = self.metrics_figure.add_subplot(gs[1, 2])
+        if vegf_stats and len(vegf_stats) == len(timesteps):
             vegf_min = [v['min'] for v in vegf_stats]
             vegf_max = [v['max'] for v in vegf_stats]
             vegf_mean = [v['mean'] for v in vegf_stats]
-
-            ax4.plot(timesteps, vegf_min, 'b-', linewidth=2, label='Min', alpha=0.7)
-            ax4.plot(timesteps, vegf_mean, 'g-', linewidth=2, label='Mean')
-            ax4.plot(timesteps, vegf_max, 'r-', linewidth=2, label='Max', alpha=0.7)
-            ax4.fill_between(timesteps, vegf_min, vegf_max, alpha=0.2, color='gray')
-            ax4.set_xlabel('Timestep (MCS)')
-            ax4.set_ylabel('VEGF Concentration')
-            ax4.set_title('VEGF Range')
-            ax4.legend()
-            ax4.grid(True, alpha=0.3)
+            ax.plot(timesteps, vegf_min, 'b-', linewidth=1.5, label='min', alpha=0.7)
+            ax.plot(timesteps, vegf_mean, 'g-', linewidth=2, label='mean')
+            ax.plot(timesteps, vegf_max, 'r-', linewidth=1.5, label='max', alpha=0.7)
+            ax.fill_between(timesteps, vegf_min, vegf_max, alpha=0.2, color='gray')
+        finish(ax, 'VEGF (model units)', 'VEGF field', legend=bool(vegf_stats))
 
         self.metrics_canvas.draw()
 
@@ -949,7 +978,8 @@ class AnalysisWindow(QMainWindow):
         metric_layout.addWidget(QLabel("Metric to analyze:"))
         self.replicate_metric_combo = QComboBox()
         self.replicate_metric_combo.addItems([
-            "cell_density", "num_clusters", "fragmentation_index",
+            "cell_density", "num_clusters", "largest_cluster_size",
+            "mean_cluster_size", "network_perimeter", "fragmentation_index",
             "connectivity_index", "compactness", "num_cells",
             "mean_cell_size", "vegf_mean", "vegf_max"
         ])
@@ -1044,14 +1074,16 @@ class AnalysisWindow(QMainWindow):
             added_count = 0
             invalid_dirs = []
 
+            from analysis_utils import completed_run_problem
             for directory in directories:
                 directory = Path(directory)
-                if (directory / 'data.zarr').exists():
+                problem = completed_run_problem(directory)
+                if problem is None:
                     if directory not in self.replicate_experiments:
                         self.replicate_experiments.append(directory)
                         added_count += 1
                 else:
-                    invalid_dirs.append(directory.name)
+                    invalid_dirs.append(f"{directory.name}: {problem}")
 
             if added_count > 0:
                 self.update_replicate_list()
@@ -1061,7 +1093,8 @@ class AnalysisWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "Invalid Experiments",
-                    f"The following directories do not contain data.zarr:\n" +
+                    f"The following directories were not added (only completed runs "
+                    f"can be analysed):\n" +
                     "\n".join(invalid_dirs[:5]) +
                     (f"\n... and {len(invalid_dirs)-5} more" if len(invalid_dirs) > 5 else "")
                 )
@@ -1099,6 +1132,13 @@ class AnalysisWindow(QMainWindow):
 
             # Load all replicate experiments
             exp_data_list = [ExperimentData(exp_path) for exp_path in self.replicate_experiments]
+
+            from analysis_utils import replicate_set_problem
+            problem = replicate_set_problem(exp_data_list)
+            if problem:
+                QMessageBox.warning(self, "Not a replicate set",
+                                    f"Statistics were not computed: {problem}.")
+                return
 
             # Get selected metric
             metric_name = self.replicate_metric_combo.currentText()
@@ -1235,14 +1275,16 @@ class AnalysisWindow(QMainWindow):
             added_count = 0
             invalid_dirs = []
 
+            from analysis_utils import completed_run_problem
             for directory in directories:
                 directory = Path(directory)
-                if (directory / 'data.zarr').exists():
+                problem = completed_run_problem(directory)
+                if problem is None:
                     if directory not in self.experiments:
                         self.experiments.append(directory)
                         added_count += 1
                 else:
-                    invalid_dirs.append(directory.name)
+                    invalid_dirs.append(f"{directory.name}: {problem}")
 
             if added_count > 0:
                 self.update_comparison_list()
@@ -1252,7 +1294,8 @@ class AnalysisWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "Invalid Experiments",
-                    f"The following directories do not contain data.zarr:\n" +
+                    f"The following directories were not added (only completed runs "
+                    f"can be analysed):\n" +
                     "\n".join(invalid_dirs[:5]) +
                     (f"\n... and {len(invalid_dirs)-5} more" if len(invalid_dirs) > 5 else "")
                 )

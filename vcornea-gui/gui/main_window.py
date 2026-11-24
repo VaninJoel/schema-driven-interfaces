@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
+    range_tier_label,
     format_ontology_term,
     default_provenance_lines,
     evidence_basis_lines,
@@ -166,8 +167,10 @@ class ValidationInfoDialog(QDialog):
         if not issues:
             html += """
             <div class="valid">
-                <strong>✓ Parameter is VALID</strong><br>
-                The current value is within all recommended ranges.
+                <strong>✓ No finding</strong><br>
+                The value has the right type and lies inside every range the schema
+                documents for this parameter (implementation limit, working range and
+                recommended range, where declared).
             </div>
             """
         else:
@@ -190,7 +193,11 @@ class ValidationInfoDialog(QDialog):
                 """
 
         # Explain validation ranges
-        html += "<h3>Validation Ranges Explained</h3>"
+        html += "<h3>Ranges of this parameter</h3>"
+        html += ("<p><small><b>Working range</b>: the values the model is meant to be "
+                 "used with; what it rests on is stated with it. "
+                 "<b>Implementation limit</b>: what the model code can run with; it "
+                 "concerns the model's function, not biology.</small></p>")
 
         # Check if we have a sweep (comma-separated values)
         is_sweep = isinstance(current_value, str) and ',' in str(current_value)
@@ -219,7 +226,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -237,7 +244,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -255,7 +262,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -279,7 +286,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
@@ -291,7 +298,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
@@ -303,7 +310,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
@@ -343,9 +350,10 @@ class ValidationInfoDialog(QDialog):
             html += """
             <h3>⚠️ Important</h3>
             <p style="color: #dc3545;">
-            Values outside the mathematical range may cause the simulation to crash or produce
-            nonsensical results. It is strongly recommended to use values within the physiological
-            or recommended ranges for scientifically valid results.
+            A value of the wrong type cannot be run. A value outside a declared implementation
+            limit can be run only after you confirm it at launch, and the confirmation is written
+            into the run record. What the limit means (a hard bound, a modeler's cap, a lattice
+            edge) is stated in the range notes above; the simulation is not guaranteed to fail.
             </p>
             """
 
@@ -522,9 +530,10 @@ class ParameterInfoDialog(QDialog):
 
         # Validation ranges (shown in physical + simulation units)
         if any(k in param_info for k in ('_physiological_range', '_recommended_range', '_mathematical_range')):
-            html += "<h3>Valid Ranges</h3><ul>"
+            html += "<h3>Ranges</h3><ul>"
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:
+                    label = range_tier_label(param_info, tier)
                     html += (f"<li><span class='label'>{label}:</span> {_fmt_range(param_info[key])}"
                              f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
             html += "</ul>"
@@ -1380,6 +1389,16 @@ class VCorneaMainWindow(QMainWindow):
         # Update dependent parameter visibility if needed
         self.update_parameter_visibility()
 
+    def _issues_for(self, param_name, value):
+        """Findings for one stored value, from the check the process applies, worded
+        in the units the operator sees in the field."""
+        dim, du = self._param_dim(param_name)
+        display = None
+        if _units is not None and dim and abs(_units.factor(dim, du) - 1.0) > 1e-12:
+            label = _units.display_unit_label(dim, du)
+            display = lambda v, _d=dim, _u=du, _l=label: (_units.to_display(v, _d, _u), _l)
+        return validate_parameter_value(self.schema, param_name, value, display=display)
+
     def _param_dim(self, param_name):
         """Return (dimension, display_unit) for a parameter, or (None, None)."""
         info = self.schema['inputs'].get(param_name, {})
@@ -1406,7 +1425,7 @@ class VCorneaMainWindow(QMainWindow):
             return str(sim_value)
 
         def one(x):
-            return self._fmt_num(param_name, _units.to_display(float(x), dim, du))
+            return _units.format_display(float(x), dim, du, self._is_int_param(param_name))
 
         if isinstance(sim_value, str):
             if ',' in sim_value:
@@ -1437,9 +1456,17 @@ class VCorneaMainWindow(QMainWindow):
             return display_value
         is_int = self._is_int_param(param_name)
 
+        # The field shows six significant figures, so its text does not convert
+        # back to the stored value in general (20 -> "13.3333" -> 19.99995). Text
+        # that IS what the field shows for the default or for the value currently
+        # stored maps back to that value exactly; anything else is converted as typed.
+        anchors = [self.schema['inputs'].get(param_name, {}).get('_default')]
+        stored_now = getattr(self, 'current_params', {}).get(param_name)
+        if isinstance(stored_now, (int, float)) and not isinstance(stored_now, bool):
+            anchors.append(stored_now)
+
         def one(x):
-            s = _units.to_model_units(float(x), dim, du)
-            return int(round(s)) if is_int else s
+            return _units.parse_display(x, dim, du, is_int, anchors)
 
         if isinstance(display_value, str):
             if ',' in display_value:
@@ -1557,7 +1584,7 @@ class VCorneaMainWindow(QMainWindow):
         if isinstance(current_value, str) and ',' in current_value:
             issues = self._validate_sweep_parameter(param_name, current_value)
         else:
-            issues = validate_parameter_value(self.schema, param_name, current_value)
+            issues = self._issues_for(param_name, current_value)
 
         # Create and show the dialog
         dialog = ValidationInfoDialog(param_name, param_info, current_value, issues, self)
@@ -1696,7 +1723,7 @@ class VCorneaMainWindow(QMainWindow):
         if isinstance(value, str) and ',' in value:
             issues = self._validate_sweep_parameter(param_name, value)
         else:
-            issues = validate_parameter_value(self.schema, param_name, value)
+            issues = self._issues_for(param_name, value)
 
         indicator = self.param_widgets[param_name]['validation']
 
@@ -1754,7 +1781,7 @@ class VCorneaMainWindow(QMainWindow):
                     converted_val = val_str
 
                 # Validate the converted value
-                issues = validate_parameter_value(self.schema, param_name, converted_val)
+                issues = self._issues_for(param_name, converted_val)
 
                 # Add index info to issues
                 for issue in issues:
@@ -1763,7 +1790,7 @@ class VCorneaMainWindow(QMainWindow):
 
             except ValueError:
                 all_issues.append({
-                    'severity': 'ERROR',
+                    'severity': 'ERROR', 'kind': 'malformed', 'tier': None, 'basis': None,
                     'message': f"Value #{i+1} ({val_str}): Cannot convert to {expected_type.__name__}"
                 })
 
@@ -1776,6 +1803,11 @@ class VCorneaMainWindow(QMainWindow):
         all_issues = {}
 
         for param_name, value in self.current_params.items():
+            # Only schema parameters are checked here. The window also stamps
+            # run identity onto this dict (the operator entered as `creator`),
+            # which is not a parameter and must not block or flag a run.
+            if param_name not in self.schema.get('inputs', {}):
+                continue
             # Handle sweep parameters with custom validation
             if isinstance(value, str) and ',' in value:
                 issues = self._validate_sweep_parameter(param_name, value)
@@ -1783,7 +1815,7 @@ class VCorneaMainWindow(QMainWindow):
                     all_issues[param_name] = issues
             else:
                 # Regular validation for single values
-                issues = validate_parameter_value(self.schema, param_name, value)
+                issues = self._issues_for(param_name, value)
                 if issues:
                     all_issues[param_name] = issues
 
@@ -2140,6 +2172,11 @@ class VCorneaMainWindow(QMainWindow):
         all_issues = {}
 
         for param_name, value in self.current_params.items():
+            # Only schema parameters are checked here. The window also stamps
+            # run identity onto this dict (the operator entered as `creator`),
+            # which is not a parameter and must not block or flag a run.
+            if param_name not in self.schema.get('inputs', {}):
+                continue
             if param_name in gui_only_fields:
                 continue
             # Handle sweep parameters with custom validation
@@ -2149,52 +2186,77 @@ class VCorneaMainWindow(QMainWindow):
                     all_issues[param_name] = issues
             else:
                 # Regular validation for single values
-                issues = validate_parameter_value(self.schema, param_name, value)
+                issues = self._issues_for(param_name, value)
                 if issues:
                     all_issues[param_name] = issues
 
-        # Check for errors and warnings
-        errors = {p: issues for p, issues in all_issues.items()
-                  if any(i['severity'] == 'ERROR' for i in issues)}
-        warnings = {p: issues for p, issues in all_issues.items()
-                    if any(i['severity'] == 'WARNING' for i in issues)}
+        # Cross-parameter check the process also applies: an injury scheduled at or
+        # after the end of the run would never occur. (Sweeps of these parameters
+        # are checked per combination by the process at launch.)
+        try:
+            from vivarium_vcornea.processes.vcornea_process import to_cc3d_value
+            inp = self.schema['inputs']
+            inj, end, on = (self.current_params.get(k, inp[k]['_default'])
+                            for k in ('InjuryTime', 'SimTime', 'IsInjury'))
+            if on is True and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                  for v in (inj, end)):
+                inj_mcs, end_mcs = to_cc3d_value(inp['InjuryTime'], inj), to_cc3d_value(inp['SimTime'], end)
+                if inj_mcs >= end_mcs:
+                    all_issues.setdefault('InjuryTime', []).append({
+                        'severity': 'ERROR', 'kind': 'malformed', 'tier': None, 'basis': None,
+                        'message': (f"Injury Time ({inj} days) is not before the end of the "
+                                    f"simulation ({end} days): the injury would never occur")})
+        except Exception:
+            pass
 
-        # Show warning dialog but allow user to proceed (pedagogical approach)
-        if errors or warnings:
+        def _lines(kind):
+            out = ""
+            for param_name, issues in all_issues.items():
+                picked = [i for i in issues if i.get('kind', 'malformed') == kind]
+                if picked:
+                    out += f"• {self.display_names.get(param_name, param_name)}:\n"
+                    out += "".join(f"  - {i['message']}\n" for i in picked)
+            return out
+
+        malformed, inadmissible, outside = (_lines(k) for k in
+                                            ('malformed', 'inadmissible', 'outside_range'))
+
+        # The answers recorded with the run (see launch_batch_simulation).
+        self._allow_inadmissible = False
+        self._confirmed_by_operator = None
+
+        # A specification that cannot be used as written is refused. There is
+        # nothing to confirm, and the process would refuse it as well.
+        if malformed:
+            QMessageBox.critical(
+                self, "Specification cannot be run",
+                "These values cannot be used as written, so the run was not started. "
+                "Correct them and press Run again.\n\n" + malformed)
+            return
+
+        if inadmissible or outside:
             msg = ""
-            if errors:
-                msg += f"⚠️ Found {len(errors)} parameter error(s):\n\n"
-                for param_name, issues in errors.items():
-                    display_name = self.display_names.get(param_name, param_name)
-                    msg += f"• {display_name}:\n"
-                    for issue in issues:
-                        msg += f"  - {issue['message']}\n"
-                msg += "\n"
-
-            if warnings:
-                msg += f"⚠️ Found {len(warnings)} parameter warning(s):\n\n"
-                for param_name, issues in warnings.items():
-                    display_name = self.display_names.get(param_name, param_name)
-                    msg += f"• {display_name}:\n"
-                    for issue in issues:
-                        msg += f"  - {issue['message']}\n"
-
-            msg += "\n⚠️ Running with invalid parameters may cause:\n"
-            msg += "  • Simulation crashes\n"
-            msg += "  • Nonsensical results\n"
-            msg += "  • Numerical instabilities\n\n"
-            msg += "Do you want to proceed anyway?"
-
+            if inadmissible:
+                msg += ("Outside a declared implementation limit:\n" + inadmissible + "\n"
+                        "What each limit means (a hard bound, a modeler's cap, a lattice edge) "
+                        "is in the parameter's range notes; the run may behave abnormally or "
+                        "may simply run.\n\n")
+            if outside:
+                msg += ("Outside a documented working or recommended range:\n" + outside + "\n"
+                        "These values run. The run is recorded as outside the working or "
+                        "recommended range, whose basis is stated for each parameter.\n\n")
+            msg += ("If you proceed, the run record will state that these findings were shown "
+                    "and confirmed by the operator"
+                    + (", and that values outside an implementation limit were allowed."
+                       if inadmissible else ".")
+                    + "\n\nProceed?")
             reply = QMessageBox.question(
-                self,
-                "Validation Issues Detected",
-                msg,
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-
+                self, "Values outside documented ranges", msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
                 return
+            self._confirmed_by_operator = True
+            self._allow_inadmissible = bool(inadmissible)
 
         # Detect sweep parameters and generate combinations
         is_sweep = self.detect_sweep_parameters()
@@ -2251,7 +2313,7 @@ class VCorneaMainWindow(QMainWindow):
             f"Total runs: {self.total_combinations}\n"
             f"Duration per run: {sim_time_days} days ({sim_time_mcs} MCS)\n"
             f"Output folder: {base_exp_name}_{timestamp}/\n"
-            f"Warnings: {len(all_issues)}",
+            f"Parameters with a finding (confirmed above): {len(all_issues)}",
             QMessageBox.Yes | QMessageBox.No
         )
 
@@ -2318,6 +2380,10 @@ class VCorneaMainWindow(QMainWindow):
             params_copy['exp_name'] = exp_name
             params_copy['replicates'] = replicates  # Let VCorneaProcess handle all replicates
             params_copy['creator'] = self.current_params.get('creator')  # OMEX provenance
+            # What the operator was shown and answered at launch; the process stores
+            # it in the run record (specification_check). None = nothing to confirm.
+            params_copy['allow_inadmissible'] = bool(getattr(self, '_allow_inadmissible', False))
+            params_copy['confirmed_by_operator'] = getattr(self, '_confirmed_by_operator', None)
 
             # Parameter-scan provenance (control-only keys; never written to
             # Parameters.py). Lets each per-run OMEX annotate its scan point and

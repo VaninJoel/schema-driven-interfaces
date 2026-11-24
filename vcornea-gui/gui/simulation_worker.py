@@ -151,8 +151,13 @@ class SimulationWorker(QObject):
                 # enough to identify what was intended.
                 meta_path = target / 'run_metadata.json'
                 if meta_path.exists():
+                    # The wrapper writes this record when it launches a replicate
+                    # (status 'running': run_id, seed, resolved parameters,
+                    # environment) and rewrites it with the outcome when the
+                    # replicate ends. 'running' therefore means "not finalized".
                     metadata = json.loads(meta_path.read_text())
-                    if only_unfinalized and metadata.get('simulation_status'):
+                    if only_unfinalized and metadata.get('simulation_status') not in (
+                            None, 'running'):
                         continue
                 else:
                     metadata = {
@@ -174,12 +179,20 @@ class SimulationWorker(QObject):
                     # Replicate-level record now agrees with its archive. (exp_dir's
                     # own run_metadata.json is the worker's record; leave it.)
                     meta_path.write_text(json.dumps(metadata, indent=2, default=str))
+                # The interrupted run's own specification, where the wrapper
+                # recorded it at launch; the batch-level GUI parameters otherwise.
+                audit = None
+                try:
+                    audit = json.loads((target / 'parameter_audit.json').read_text())
+                except Exception:
+                    pass
                 create_omex_archive(
                     run_output_dir=target,
                     run_metadata=metadata,
-                    sim_params=self.parameters,
+                    sim_params=metadata.get('parameters') or self.parameters,
                     include_model=False,   # the run never proved the project ran
                     status=status,
+                    parameter_audit=audit,
                 )
                 print(f"  > {status} archive written for {target.name}")
             except Exception as e:
@@ -263,10 +276,8 @@ class SimulationWorker(QObject):
             # Reality check: a clean subprocess exit (code 0) is necessary but
             # not sufficient. CC3D can exit normally even when it crashed on
             # startup before writing any output (e.g. UNC-cwd failures on
-            # Windows). Confirm by reading the VCorneaProcess-written
-            # run_metadata.json (its simulation_success field reflects whether
-            # cell_count_*.csv was actually produced) and, as a fallback,
-            # checking for any cell_count_*.csv anywhere under the run dir.
+            # Windows). The verdict is the one VCorneaProcess recorded for each
+            # replicate (run_metadata.json: simulation_status, output_check).
             true_success = self._verify_real_outputs(exit_code)
 
             if true_success:
@@ -409,44 +420,48 @@ except Exception as e:
             pass
 
 
-    def _verify_real_outputs(self, exit_code: int) -> bool:
-        """Return True only if the run produced real simulation output.
-
-        Subprocess exit code 0 alone is unreliable: CC3D can return 0 after
-        crashing on startup (e.g. UNC-cwd failures on Windows). We trust the
-        VCorneaProcess-written run_metadata.json if present, and fall back to
-        scanning the run dir for cell_count_*.csv.
-        """
-        if exit_code != 0:
-            return False
-
-        # Trust VCorneaProcess's own verdict if it wrote one (Fix B at the
-        # process layer sets simulation_success: False when no real outputs
-        # appeared even with exit 0).
+    def _replicate_records(self):
+        """run_metadata.json of every replicate the wrapper finalized under this
+        experiment (those carrying a final simulation_status)."""
+        records = []
         if self.exp_dir.exists():
-            for meta_path in self.exp_dir.rglob('run_metadata.json'):
+            for meta_path in sorted(self.exp_dir.rglob('run_metadata.json')):
                 try:
                     meta = json.loads(meta_path.read_text())
                 except Exception:
                     continue
-                if meta.get('simulation_success') is False:
-                    return False
+                if meta.get('simulation_status') not in (None, 'running'):
+                    records.append(meta)
+        return records
 
-        # Fallback: any cell_count CSV anywhere under the run dir counts.
-        if self.exp_dir.exists():
-            for _ in self.exp_dir.rglob('cell_count_*.csv'):
-                return True
+    def _verify_real_outputs(self, exit_code: int) -> bool:
+        """True only if the wrapper recorded every replicate as successful.
 
-        return False
+        The wrapper decides what a completed run is (VCorneaProcess, via
+        utils/output_check.py): it checks that the simulation reached its final
+        step and delivered the outputs THIS configuration requested. The GUI
+        follows that verdict. It used to look for a cell-count file instead, so a
+        completed run with cell counting switched off was reported as failed.
+        """
+        if exit_code != 0:
+            return False
+        records = self._replicate_records()
+        return bool(records) and all(r.get('simulation_status') == 'success' for r in records)
 
     def _format_failure_message(self, exit_code, stdout, stderr,
                                 stdout_log_path, stderr_log_path) -> str:
-        cause = (
-            f"Subprocess exit code: {exit_code} (0 = OS-level clean exit, "
-            f"but no cell_count_*.csv was produced — CC3D likely crashed on startup)."
-            if exit_code == 0
-            else f"Subprocess exit code: {exit_code}."
-        )
+        recorded = [f"replicate {r.get('replicate_id')}: {r.get('simulation_status')}"
+                    + (f" - {r.get('error_message')}" if r.get('error_message') else "")
+                    for r in self._replicate_records()
+                    if r.get('simulation_status') != 'success']
+        if exit_code != 0:
+            cause = f"Subprocess exit code: {exit_code}."
+        elif recorded:
+            cause = ("The wrapper process exited cleanly, but it recorded these replicates "
+                     "as not successful:\n  " + "\n  ".join(recorded))
+        else:
+            cause = ("The wrapper process exited cleanly (code 0) but left no replicate "
+                     "record with an outcome, so nothing shows that a simulation ran.")
         tail = (stderr or stdout or '').strip().splitlines()[-15:]
         tail_block = "\n".join(tail) if tail else "(no log output)"
         return (
