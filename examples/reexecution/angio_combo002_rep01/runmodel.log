@@ -1,0 +1,40 @@
+WARNING: Setting not set: PlayerSizes, func: log_py, file:C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py,lineno:25
+WARNING: Setting not set: PlayerSizesFloating, func: log_py, file:C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py,lineno:25
+WARNING: Setting not set: RecentSimulations, func: log_py, file:C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py,lineno:25
+INFO: Random number generator: MersenneTwister
+INFO: Step 0 
+INFO: Energy 0 
+INFO: Cells 400
+INFO: WILL RUN SIMULATION FROM BEGINNING
+
+Simulation ID: acb5fe89-e838-11f1-8f82-b222e59e965e
+Created: 11/24/2026 at 13:55:53
+searching time: 0.22229599952697754 sec
+writing time: 0.1707007884979248) sec
+searching time: 0.26181864738464355 sec
+writing time: 0.15650343894958496) sec
+searching time: 0.22657132148742676 sec
+writing time: 0.1578359603881836) sec
+searching time: 0.22021770477294922 sec
+writing time: 0.1728682518005371) sec
+searching time: 0.24114322662353516 sec
+writing time: 0.1421034336090088) sec
+searching time: 0.2683722972869873 sec
+writing time: 0.14197921752929688) sec
+searching time: 0.2626793384552002 sec
+writing time: 0.15675115585327148) sec
+searching time: 0.20110607147216797 sec
+writing time: 0.14594125747680664) sec
+searching time: 0.23350977897644043 sec
+writing time: 0.15246152877807617) sec
+searching time: 0.2520484924316406 sec
+writing time: 0.1571955680847168) sec
+Completed in 17.90 seconds
+Re-run complete: C:\Users\joelvanin\rr\angio\model\rerun_output\data.zarr
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.
+swig/python detected a memory leak of type 'CC3DXMLElement *', no destructor found.

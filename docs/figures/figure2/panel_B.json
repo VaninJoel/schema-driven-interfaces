@@ -1,0 +1,17 @@
+[
+  {
+    "value": 1.0,
+    "indicator": "✓",
+    "messages": "No finding: inside every range the schema declares"
+  },
+  {
+    "value": 3.0,
+    "indicator": "⚠️",
+    "messages": "WARNING: 3 pixels²/MCS is outside the documented working range [0.1, 2] (range set by published literature)"
+  },
+  {
+    "value": 12.0,
+    "indicator": "❌",
+    "messages": "ERROR: 12 pixels²/MCS is outside the declared implementation limit [0, 10] (range set by a numerical or implementation limit)"
+  }
+]

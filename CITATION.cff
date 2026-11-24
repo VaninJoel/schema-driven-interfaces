@@ -11,8 +11,18 @@ abstract: >-
 type: software
 license: MIT
 repository-code: "https://github.com/VaninJoel/schema-driven-interfaces"
-version: 1.1.0
-doi: 10.5281/zenodo.24516159
+version: 1.1.1
+doi: 10.5281/zenodo.24516158
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24516158
+    description: "All versions of this software (resolves to the latest)"
+  - type: doi
+    value: 10.5281/zenodo.24517425
+    description: "Version 1.1.1"
+  - type: doi
+    value: 10.5281/zenodo.24516159
+    description: "Version 1.1.0"
 date-released: "2026-11-24"
 authors:
   - family-names: Vanin

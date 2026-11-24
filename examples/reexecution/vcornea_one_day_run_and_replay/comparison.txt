@@ -1,0 +1,4 @@
+cell_count: archived cell_count_241.csv 25 rows; replay cell_count_241.csv 25 rows up to 24 h; archived rows in that period 25; identical: True
+surfactant: archived surfactant_241.csv 241 rows; replay surfactant_241.csv 241 rows up to 24 h; archived rows in that period 241; identical: True
+thickness_rep: archived thickness_rep_241.parquet 250 rows; replay thickness_rep_241.parquet 250 rows up to 24 h; archived rows in that period 250; identical: True
+ALL IDENTICAL
