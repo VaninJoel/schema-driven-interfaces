@@ -1,0 +1,6 @@
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: PlayerSizes
+  warnings.warn(msg)
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: PlayerSizesFloating
+  warnings.warn(msg)
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: RecentSimulations
+  warnings.warn(msg)

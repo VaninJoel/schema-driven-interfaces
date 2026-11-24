@@ -1,0 +1,35 @@
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: PlayerSizes
+  warnings.warn(msg)
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: PlayerSizesFloating
+  warnings.warn(msg)
+C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\logging.py:18: UserWarning: Setting not set: RecentSimulations
+  warnings.warn(msg)
+DEBUG: Read simulation data: <cc3d.core.CC3DSimulationDataHandler.CC3DSimulationData object at 0x0000015BB0642AE0>, func: , file:,lineno:0
+INFO: Random number generator: MersenneTwister
+INFO: 
+
+------------------PERFORMANCE REPORT:----------------------
+-----------------------------------------------------------
+TOTAL RUNTIME 5 m : 47 s : 545 ms = 347.545 s
+-----------------------------------------------------------
+-----------------------------------------------------------
+PYTHON STEPPABLE RUNTIMES
+  ConstraintInitializerSteppable:       14.96 ( 4.3%)
+                 GrowthSteppable:        0.50 ( 0.1%)
+                MitosisSteppable:        0.12 ( 0.0%)
+                  DeathSteppable:        1.31 ( 0.4%)
+        DifferentiationSteppable:        5.96 ( 1.7%)
+                   PlotSteppable:        0.65 ( 0.2%)
+              SecretionSteppable:        2.43 ( 0.7%)
+                   TEARSteppable:        1.41 ( 0.4%)
+-----------------------------------------------------------
+            Total Steppable Time:       27.34 ( 7.9%)
+    Compiled Code (C++) Run Time:      319.91 (92.0%)
+                      Other Time:        0.30 ( 0.1%)
+-----------------------------------------------------------
+
+
+#################################################
+# CompuCell3D Version: 4.7.0 Revision: 5 
+ Commit Label: f401d6d
+#################################################

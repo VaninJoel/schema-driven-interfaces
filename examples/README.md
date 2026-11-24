@@ -75,7 +75,8 @@ biological results.
   because the cells are compressed (to about 54% of their target area at
   lchem = 1000), not because the network has a different shape. Mean cell area
   was computed from the archived trajectories; the application does not write it
-  to `metrics.csv`. The lchem = 1000 runs carry the recorded note *outside the
+  to `metrics.csv`; the script and its per-run table are in
+  [`analysis/`](analysis/). The lchem = 1000 runs carry the recorded note *outside the
   recommended range [100, 800] (range set by exploratory presets)*: the runs are
   valid, and each archive records that the value left the documented range.
   Metrics are computed on a lattice that is periodic in both directions, and the
@@ -175,6 +176,9 @@ and one archive per application was re-executed.
 The test suites were run in the same clone and environment after updating the clone to commit `1ba4ee4`; the archive replays were run at `49d9494`. How a replay and the comparison
 are run is described in [`vivarium-angio/README.md`](../vivarium-angio/README.md)
 and [`vivarium-vcornea/README.md`](../vivarium-vcornea/README.md#re-executing-from-the-unpacked-archive).
+The outputs of these re-executions (tables, checksums, comparison results,
+the environment's package list and the test logs) are in
+[`reexecution/`](reexecution/).
 
 <details>
 <summary>Run IDs and random seeds of all 45 runs</summary>
