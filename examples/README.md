@@ -1,20 +1,32 @@
 # Example runs
 
-One parameter sweep for each case study, run with the released **v1.0.3**
-Windows installer the way a user would:
-1. Open the app and enter an experiment name and the operator name.
-2. Type a comma-separated list of values into one parameter field.
-3. Set the number of replicates and press **Run Simulation**.
+One parameter sweep for each case study, produced from a source checkout at
+commit `210b9c3` (three commits after `v1.0.4`, clean working tree) by
+operating the real GUI on Qt's off-screen platform:
 
-Every other parameter stayed at its schema default.
+```
+python examples/run_example_sweep.py angio   <out_dir> --name angio_lchem_sweep \
+    --operator "Joel Vanin" --replicates 10 lchem="100, 500, 1000"
+python examples/run_example_sweep.py vcornea <out_dir> --name vcornea_sls_sweep \
+    --operator "Joel Vanin" --replicates 5 --max-runs 3 SLS_Concentration="1500, 2000, 2500"
+```
+
+The script does what a user does: it enters an experiment name and the operator
+name, types a comma-separated list of values into one parameter field, sets the
+number of replicates and presses **Run Simulation**. The window, validation,
+worker, archives and reports are the application's own code; only the clicks are
+scripted, so the runs can be regenerated unattended. Every other parameter
+stayed at its schema default. These runs were not made with a packaged
+installer.
 
 | Case study | Sweep | Experiment report (start here) | Per-combination reports |
 |---|---|---|---|
-| **Angio-GUI** (integrated pattern) | Chemotaxis strength `lchem` = 100, 500, 1000 × 10 replicates (30 runs) | [experiment report](angio-gui_lchem_sweep/angio_lchem_sweep_20261021_114558_experiment_report.pdf) | [lchem=100](angio-gui_lchem_sweep/angio_lchem_sweep_combo001_omex_report.pdf) · [lchem=500](angio-gui_lchem_sweep/angio_lchem_sweep_combo002_omex_report.pdf) · [lchem=1000](angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
-| **V-Cornea GUI** (decoupled pattern) | Surfactant dose `SLS_Concentration` = 1500, 2000, 2500 × 5 replicates (15 runs), 30 simulated days, chemical injury at day 3 | [experiment report](vcornea_sls_sweep/vcornea_sls_sweep_20261021_115344_experiment_report.pdf) | [SLS=1500](vcornea_sls_sweep/vcornea_sls_sweep_combo001/vcornea_sls_sweep_combo001_omex_report.pdf) · [SLS=2000](vcornea_sls_sweep/vcornea_sls_sweep_combo002/vcornea_sls_sweep_combo002_omex_report.pdf) · [SLS=2500](vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
+| **Angio-GUI** (integrated pattern) | Chemotaxis strength `lchem` = 100, 500, 1000 × 10 replicates (30 runs), 100 Monte Carlo steps | [experiment report](angio-gui_lchem_sweep/angio_lchem_sweep_20261123_184815_experiment_report.pdf) | [lchem=100](angio-gui_lchem_sweep/angio_lchem_sweep_combo001_omex_report.pdf) · [lchem=500](angio-gui_lchem_sweep/angio_lchem_sweep_combo002_omex_report.pdf) · [lchem=1000](angio-gui_lchem_sweep/angio_lchem_sweep_combo003_omex_report.pdf) |
+| **V-Cornea GUI** (decoupled pattern) | Surfactant dose `SLS_Concentration` = 1500, 2000, 2500 × 5 replicates (15 runs), 30 simulated days, chemical injury at day 3 | [experiment report](vcornea_sls_sweep/vcornea_sls_sweep_20261123_184813_experiment_report.pdf) | [SLS=1500](vcornea_sls_sweep/vcornea_sls_sweep_combo001/vcornea_sls_sweep_combo001_omex_report.pdf) · [SLS=2000](vcornea_sls_sweep/vcornea_sls_sweep_combo002/vcornea_sls_sweep_combo002_omex_report.pdf) · [SLS=2500](vcornea_sls_sweep/vcornea_sls_sweep_combo003/vcornea_sls_sweep_combo003_omex_report.pdf) |
 
 The GUI writes all of these files automatically when a sweep finishes. The
-reports are generated from the archives alone.
+reports are generated from the archives alone, and they are exactly the files
+the application wrote; nothing was regenerated afterwards.
 
 - **Experiment report.** Describes the scan archive (`*_scan.omex`), which ties
   the sweep together. It shows the SED-ML that encodes the scan, the provenance
@@ -29,25 +41,67 @@ reports are generated from the archives alone.
   shows each replicate archive's validation results, the provenance, the run
   identity (seed, schema fingerprint, code version), and the **parameter
   credibility** check, which compares each executed value with the ranges the
-  schema documents. It also explains how to read the SED-ML, and includes plots
-  of each replicate and the replicate mean, and spatial snapshots (Angio-GUI).
+  schema documents and names the basis of each range. It also explains how to
+  read the SED-ML, and includes plots of each replicate and the replicate mean,
+  and spatial snapshots (Angio-GUI).
 
-What the reports show:
+The validation result in a report says that the archive is well-formed and
+exchangeable. The validator has no checker for CompuCell3D model files, so it
+does not check the model or its results.
 
-- **Angio-GUI.** The lchem=1000 report flags *Chemotaxis Strength 1000 vs
-  default 500: outside recommended range*. The run is valid, and the archive
-  records that it left the documented range. As chemotaxis strength rises from
-  100 to 1000, the final network breaks into more clusters (4.6 ± 1.0 → 8.5 ±
-  2.7) and the largest cluster shrinks (17,914 ± 211 → 10,477 ± 161 pixels).
-  Both differences are significant (Kruskal–Wallis p ≤ 0.001, n = 10 per value).
+## What the examples show, and what they do not
+
+These sweeps demonstrate the workflow: one field edited, replicates run,
+everything recorded, reports built from the archives. They are not new
+biological results.
+
+- **Angio-GUI.** This is a short run (100 Monte Carlo steps) that captures
+  early aggregation, not a developed vascular network.
+
+  | Final step, mean ± SD (n = 10) | lchem = 100 | lchem = 500 | lchem = 1000 | Kruskal–Wallis p |
+  |---|---|---|---|---|
+  | Clusters | 1.0 ± 0 | 1.0 ± 0 | 1.2 ± 0.4 | 0.126 |
+  | Largest cluster (sites) | 18,122 ± 25 | 14,234 ± 64 | 10,820 ± 101 | 2.5e-6 |
+  | Cell density (fraction of lattice) | 0.453 ± 0.001 | 0.356 ± 0.002 | 0.271 ± 0.003 | 2.5e-6 |
+  | Mean cell area (sites; target 50) | 45.3 | 35.6 | 27.1 | — |
+  | Mean VEGF | 1.98 ± 0.02 | 1.01 ± 0.01 | 0.616 ± 0.007 | 2.5e-6 |
+
+  How to read it. The cells form essentially one connected cluster at every
+  chemotaxis strength, so the cluster count does not separate the conditions; in
+  an earlier sweep with other seeds it happened to (p = 0.012), which shows that
+  it depends on the seeds at this run length. All 400 cells are present in every
+  run, so cell density is the mean cell area times 400 divided by the 40,000
+  lattice sites: density and largest-cluster size fall with chemotaxis strength
+  because the cells are compressed (to about 54% of their target area at
+  lchem = 1000), not because the network has a different shape. Mean cell area
+  was computed from the archived trajectories; the application does not write it
+  to `metrics.csv`. The lchem = 1000 runs carry the recorded note *outside the
+  recommended range [100, 800] (range set by exploratory presets)*: the runs are
+  valid, and each archive records that the value left the documented range.
+  Metrics are computed on a lattice that is periodic in both directions, and the
+  `metrics.csv` in each of the 30 archives was checked against a recomputation
+  from the archived trajectory (30 of 30 match).
+
+  The implementation follows the mechanism of Merks et al. 2008 but not its
+  parameter values (the schema states the differences entry by entry), so these
+  numbers are not comparable with that paper's.
+
 - **V-Cornea.** The surfactant dose sets how deep the injury goes and how long
-  the tissue takes to recover. Central epithelial thickness before injury is
-  about 38.5 µm at all three doses. After the day-3 injury it falls to 27.5 ±
-  1.6 µm (SLS 1500), 21.2 ± 1.5 µm (2000) and 16.7 ± 0.2 µm (2500), and it
-  recovers to 90% of its pre-injury value in 1.5, 2.7 and 5.4 days. At SLS 2500
-  the tissue is still thinner at day 30 (35.1 ± 2.6 µm against 43.0 µm at 1500).
-  The surfactant clearance half-life increases from 29.7 to 37.9 h. All
-  Kruskal–Wallis p ≤ 0.006, n = 5 per value.
+  the tissue takes to recover.
+
+  | Mean ± SD (n = 5) | SLS = 1500 | SLS = 2000 | SLS = 2500 | Kruskal–Wallis p |
+  |---|---|---|---|---|
+  | Central thickness before injury (µm) | 38.5 ± 0.4 | 38.6 ± 0.8 | 39.3 ± 0.2 | 0.030 |
+  | Central thickness, minimum after injury (µm) | 27.0 ± 0.5 | 21.1 ± 0.7 | 18.6 ± 1.3 | 0.002 |
+  | Days to recover 90% of pre-injury thickness | 1.6 ± 0.2 | 2.7 ± 0.4 | 4.9 ± 1.2 | 0.002 |
+  | Central thickness at day 30 (µm) | 41.4 ± 0.8 | 42.3 ± 1.8 | 36.4 ± 1.0 | 0.008 |
+  | Wing cells, minimum after injury | 92.4 ± 2.3 | 80.6 ± 3.4 | 75.6 ± 2.9 | 0.003 |
+  | Surfactant clearance half-life (h) | 29.9 ± 0.2 | 33.5 ± 0.6 | 37.2 ± 0.2 | 0.002 |
+
+  With five replicates per value the tests have little power and are not
+  corrected for the number of endpoints; read them as descriptive. The small
+  pre-injury difference (p = 0.030) arises before the dose can act, so it is
+  replicate-to-replicate variation.
 
 ## The archives
 
@@ -56,90 +110,87 @@ can open it. Every run has its own archive in its replicate folder, and it
 contains:
 
 - `simulation.sedml`: the SED-ML simulation description.
-- `run_metadata.json`: the resolved parameters and provenance.
+- `run_metadata.json`: the resolved parameters, the specification check, the
+  seed and what it was applied to, and the provenance.
 - `parameter_audit.json`: every parameter checked against its schema.
 - `environment.json` and `status.json`: the software environment and run outcome.
 - `metadata.rdf`: OMEX metadata (creator, license, citation, code version).
 - The logs, the model files, and the raw outputs. For Angio-GUI, this includes
-  the full Zarr spatial trajectory.
+  the full Zarr spatial trajectory and `metrics.csv`.
 
 The `*_scan.omex` archive at the top of each sweep holds the comparison SED-ML
 and the per-combination data that the experiment report plots.
 
-All 45 runs completed successfully. All archives record code `v1.0.3` (commit
-`493b273`, clean build) and creator Joel Vanin. Every seed was drawn
-independently at launch and recorded, and all 45 seeds are different.
+All 45 runs completed successfully. All archives record commit `210b9c3`
+(`v1.0.4-3-g210b9c3`, branch `fix/reviewer-code-findings`, no uncommitted
+changes) and creator Joel Vanin. Every seed was drawn independently at launch
+and recorded, and all 45 seeds are different. In V-Cornea the seed is applied to
+both CompuCell3D's generator and Python's, and each archive records that both
+were set.
 
 | | Angio-GUI | V-Cornea |
 |---|---|---|
-| Schema fingerprint | `sha256:0a6c2ceaca8b9cdf` | `sha256:d3c5ca23a40e24f9` |
-| Run time per replicate | 80–138 s | about 6.7 h (15 runs in parallel) |
+| Schema fingerprint | `sha256:7962f735412f08c2` | `sha256:d3c5ca23a40e24f9` |
+| Run time per replicate | 89–150 s | about 5.3 h (15 runs in parallel) |
 
-The schema fingerprints match the parameter tables in the article's
-supplementary material.
+The schema fingerprints match the parameter tables in `docs/supplementary/`.
+
+**What a seed reproduces.** Running the same parameters with the same seed on
+the same machine and software reproduces the stored outputs exactly
+(`tests/test_angio_reexecution.py`, `tests/test_vcornea_reexecution.py`). A seed
+does not carry over between different parameter values: CompuCell3D draws all
+its random numbers from one stream, so changing a parameter changes which draw
+is used where.
 
 <details>
 <summary>Run IDs and random seeds of all 45 runs</summary>
 
 | Run | Run ID | Random seed |
 |---|---|---|
-| Angio-GUI lchem=100 rep 1 | `4e3556aed1134530a475f0db137aae63` | 1186538411 |
-| Angio-GUI lchem=100 rep 2 | `e686353c5307497aba8cb3f5c10ce029` | 1591706957 |
-| Angio-GUI lchem=100 rep 3 | `502f984b2c0745e09385cd9d3671b806` | 1517375581 |
-| Angio-GUI lchem=100 rep 4 | `457a4d3cc8084f47b41407a0ed138a11` | 917905212 |
-| Angio-GUI lchem=100 rep 5 | `ff849d5eca2e428592c09ecd8b86014e` | 1497126697 |
-| Angio-GUI lchem=100 rep 6 | `b4d0406998ba45cd961aefb3424463bd` | 1769884084 |
-| Angio-GUI lchem=100 rep 7 | `f65cb42a9f4a43f68cecedee2fde9f89` | 515536928 |
-| Angio-GUI lchem=100 rep 8 | `675a59d9d56041b99985916230a701cc` | 63575998 |
-| Angio-GUI lchem=100 rep 9 | `9b9f6741dcc841bfb1dac600765c7302` | 579214122 |
-| Angio-GUI lchem=100 rep 10 | `adf9085876bc4575a25be15a67047057` | 2061748046 |
-| Angio-GUI lchem=500 rep 1 | `8b03118627204e82a33212fdcf7b3ce9` | 525065339 |
-| Angio-GUI lchem=500 rep 2 | `49ece175fef4486b93852ca497ba24ec` | 390316502 |
-| Angio-GUI lchem=500 rep 3 | `a7843462f1f643938d75a010f6600652` | 1687630425 |
-| Angio-GUI lchem=500 rep 4 | `ef51bc69968c49ffb6cc3b37a8a85680` | 235136279 |
-| Angio-GUI lchem=500 rep 5 | `27cfcb86d2da4a368700c020b269b601` | 921580233 |
-| Angio-GUI lchem=500 rep 6 | `badcb27e35c644df8ffeb0e990c94434` | 1606206427 |
-| Angio-GUI lchem=500 rep 7 | `77224f48e2ec4f03b3ccd9832ca8a4d4` | 185941731 |
-| Angio-GUI lchem=500 rep 8 | `47e086f2a9d249ee9df6b03c34acf941` | 2047667093 |
-| Angio-GUI lchem=500 rep 9 | `627bbe7ac48f4ff6a663b50b9e3b2dfd` | 2033775562 |
-| Angio-GUI lchem=500 rep 10 | `0dc75b73446742c193722b9e813ff904` | 1048620580 |
-| Angio-GUI lchem=1000 rep 1 | `958b2e6d4ee94a4f8a73e600478928b8` | 660225677 |
-| Angio-GUI lchem=1000 rep 2 | `3105cf20919b4d8ca4d40394c86079f0` | 55186854 |
-| Angio-GUI lchem=1000 rep 3 | `e17f4e02ca9a41a68ddbbb6876beaae5` | 1906219765 |
-| Angio-GUI lchem=1000 rep 4 | `79cdfe328af34472a51f51c03be9dd5a` | 1192207936 |
-| Angio-GUI lchem=1000 rep 5 | `d1bd2c05fb6242fd86f03d1f2b2a4a81` | 1735493633 |
-| Angio-GUI lchem=1000 rep 6 | `6d83688b8f7c4d8e85726808eae4823d` | 1982439393 |
-| Angio-GUI lchem=1000 rep 7 | `e8f01971b76e4fdaa3cc03e35a199ff1` | 146488917 |
-| Angio-GUI lchem=1000 rep 8 | `756e14166c584bc4aca597e876d0360f` | 910317449 |
-| Angio-GUI lchem=1000 rep 9 | `b1f8bb83a14c445a8959396c4daf23ab` | 1851522618 |
-| Angio-GUI lchem=1000 rep 10 | `ad92b3a6e412449baeb8b18851aa764b` | 431623095 |
-| V-Cornea SLS=1500 rep 1 | `26ca72ae54e741c58d829ff45d61e11c` | 310740925 |
-| V-Cornea SLS=1500 rep 2 | `9c8c7a5d4ff04eb9883665864ae7811f` | 477597378 |
-| V-Cornea SLS=1500 rep 3 | `ccb76777c46c4d4f99658235566f304a` | 614363402 |
-| V-Cornea SLS=1500 rep 4 | `4e1007ad835e44f4874d5e07d394d486` | 611214328 |
-| V-Cornea SLS=1500 rep 5 | `e2659bc5cf1e4ba2a1a278ebbd4063c5` | 1929517918 |
-| V-Cornea SLS=2000 rep 1 | `7bca68a07c7444eba99e9c3d9fb9f08a` | 1574844843 |
-| V-Cornea SLS=2000 rep 2 | `2028ccd8b559498d85fcc72ddcc9b14a` | 643665948 |
-| V-Cornea SLS=2000 rep 3 | `6229522dec944298ac2439500dad24e9` | 1797272279 |
-| V-Cornea SLS=2000 rep 4 | `840970cc33204cfeb5852e16ff83e765` | 321534142 |
-| V-Cornea SLS=2000 rep 5 | `4b621090bf1c458f9f82907bceb034c0` | 346823061 |
-| V-Cornea SLS=2500 rep 1 | `05d5f7919c214a27ad1ae86703cd9107` | 2038141807 |
-| V-Cornea SLS=2500 rep 2 | `16e8927d8ff345a3979fee655dc4804c` | 1634574597 |
-| V-Cornea SLS=2500 rep 3 | `1eec93e565c547b6a6cfd6ec2678b952` | 1865787388 |
-| V-Cornea SLS=2500 rep 4 | `1c514e66ca0745bba0800fbd92862d24` | 1573581721 |
-| V-Cornea SLS=2500 rep 5 | `c81046e0a13c41ebb5c4ab891ba0eedf` | 546445566 |
+| Angio-GUI lchem=100 rep 1 | `66dc78a6ccd14bab80ff750b58639733` | 198185322 |
+| Angio-GUI lchem=100 rep 2 | `df7631697cb44d05858785144f2da5e9` | 1738344046 |
+| Angio-GUI lchem=100 rep 3 | `df33a1edcf85448780cc37de32a65159` | 2045929536 |
+| Angio-GUI lchem=100 rep 4 | `45dd0f0146a040bf86dc5dfd640ff139` | 1535784999 |
+| Angio-GUI lchem=100 rep 5 | `331d27fa4dfc4db18b4a78ee615a0a38` | 1786945182 |
+| Angio-GUI lchem=100 rep 6 | `551e8e9fdf43488fb787e7d135eea55b` | 371364970 |
+| Angio-GUI lchem=100 rep 7 | `c572d95d47cf48d8a96ef74870aae805` | 349887123 |
+| Angio-GUI lchem=100 rep 8 | `a19808d63d024c2b91f1970c56379996` | 391713927 |
+| Angio-GUI lchem=100 rep 9 | `353db13cc3064a3d898ef959c0204eaf` | 1235584987 |
+| Angio-GUI lchem=100 rep 10 | `c008c73f61ea45298ba288e5ba1d3d0a` | 1110026456 |
+| Angio-GUI lchem=500 rep 1 | `33a78546b2f0495794ceee2e31a6430c` | 462244942 |
+| Angio-GUI lchem=500 rep 2 | `08c1108128d24b498df146a846060e5a` | 1850415588 |
+| Angio-GUI lchem=500 rep 3 | `066944b04135404aa81bd5dd566004e3` | 1518811918 |
+| Angio-GUI lchem=500 rep 4 | `4856099e79b5478c9008b2c0a5a96019` | 2015512825 |
+| Angio-GUI lchem=500 rep 5 | `880ba7046fda462187c34ed017ada63a` | 1455510720 |
+| Angio-GUI lchem=500 rep 6 | `2465cb6fedcd44888441422d594bcaee` | 585018796 |
+| Angio-GUI lchem=500 rep 7 | `e646eec367ff4ddc9185378437dc17d6` | 738229051 |
+| Angio-GUI lchem=500 rep 8 | `97b4e9c31b484bcb8e518d33d0fdf0cd` | 2041809786 |
+| Angio-GUI lchem=500 rep 9 | `072d8d32249c471b906cd939f33039bd` | 201218724 |
+| Angio-GUI lchem=500 rep 10 | `addc94a542a1467eaeef8715c5ecff05` | 429744752 |
+| Angio-GUI lchem=1000 rep 1 | `3e04559594bb4e23bef148ae3b4027e0` | 1698691488 |
+| Angio-GUI lchem=1000 rep 2 | `48a6b2a2882d435fb844b54494d856c0` | 1213542268 |
+| Angio-GUI lchem=1000 rep 3 | `42cdd5f0c6a247e7971adaaea1877528` | 775013793 |
+| Angio-GUI lchem=1000 rep 4 | `7757dd79ab61443197ea86dcef1d5961` | 90479371 |
+| Angio-GUI lchem=1000 rep 5 | `3444bae088e64b9e9d3d29672f8ef586` | 514314119 |
+| Angio-GUI lchem=1000 rep 6 | `556f85be01774e118bd6ec96c3280550` | 1354610026 |
+| Angio-GUI lchem=1000 rep 7 | `165eac7c9f6a47d58ee02001cf78e7d3` | 1916571327 |
+| Angio-GUI lchem=1000 rep 8 | `f6ca22ea09694b9ca0e31d7e6b249654` | 212264974 |
+| Angio-GUI lchem=1000 rep 9 | `c9aac0e1fd104d458fa3294db6275572` | 628337203 |
+| Angio-GUI lchem=1000 rep 10 | `eeccbd81b3024a548247f4ec4b7c7f2e` | 1249975569 |
+| V-Cornea SLS=1500 rep 1 | `80b7ca7516004448860b0b08dace29ae` | 2043774806 |
+| V-Cornea SLS=1500 rep 2 | `13898d7e69df416784e43ad5df4d5a88` | 2038607285 |
+| V-Cornea SLS=1500 rep 3 | `42011ef91a7d4b7197480efb37b5060f` | 1174182372 |
+| V-Cornea SLS=1500 rep 4 | `ebd4fdbc47674b2ebf334c9a13d6bbab` | 1040383161 |
+| V-Cornea SLS=1500 rep 5 | `94b986abf9864a558aa7043082af4942` | 1871028149 |
+| V-Cornea SLS=2000 rep 1 | `d3f6538dd563483d859253d0a267cec1` | 170115583 |
+| V-Cornea SLS=2000 rep 2 | `df016b6ca51348e29f64706557d81453` | 776236506 |
+| V-Cornea SLS=2000 rep 3 | `669e6187a8ed4b49a3feedfc87ee78bb` | 1771680398 |
+| V-Cornea SLS=2000 rep 4 | `b97685ca77ae4bb6809bab20af899e5e` | 596989275 |
+| V-Cornea SLS=2000 rep 5 | `6334f32f5edd4b5aa284ef478937591a` | 1168364392 |
+| V-Cornea SLS=2500 rep 1 | `a0514312feab4bf09899c4b091111c1a` | 941519068 |
+| V-Cornea SLS=2500 rep 2 | `79b8139ac75f47c795f28b1b2fea4f2e` | 283269580 |
+| V-Cornea SLS=2500 rep 3 | `02a7971b24c244f1815d1ba8f60f2f40` | 486386432 |
+| V-Cornea SLS=2500 rep 4 | `957686f9618a46c7bf8cf4a96cb6b861` | 2007765686 |
+| V-Cornea SLS=2500 rep 5 | `6adc0120a502459f82afbe57424302c1` | 344686615 |
 
 </details>
-
-**Note on the reports.** The runs and their archives are exactly what the v1.0.3
-installer produced. The PDF reports were then regenerated from those archives
-with the improved report tools of
-[#36](https://github.com/VaninJoel/schema-driven-interfaces/pull/36) and
-[#38](https://github.com/VaninJoel/schema-driven-interfaces/pull/38), running in
-the v1.0.3 installed environment. These tools add the per-replicate statistics,
-the parameter-credibility section in the Angio-GUI reports, and the paper-style
-thickness figure. They also count an X-bin with no epithelium left as zero
-thickness rather than a negative value. Version 1.0.4 and later write these
-reports directly. Regenerating left every per-run archive byte-identical. The
-Angio-GUI scan archive was rebuilt, and only its creation timestamp changed. The
-V-Cornea report tool only reads the archives.
