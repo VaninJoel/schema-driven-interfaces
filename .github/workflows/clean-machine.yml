@@ -1,0 +1,103 @@
+# Install from zero on a new virtual machine, following INSTALL.md, then run the
+# verify commands, the three test suites, and a re-execution of one example
+# archive per application.
+name: clean-machine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/clean-machine]
+
+jobs:
+  install-and-run:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash -el -o pipefail {0}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Miniforge (the only prerequisite INSTALL.md names)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: true
+          activate-environment: ""
+
+      - name: System libraries for Qt (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 libxcb-shape0
+
+      - name: conda env create -f environment.yml
+        id: create
+        run: |
+          conda --version
+          start=$(date +%s)
+          set +e
+          conda env create -f environment.yml
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "- \`conda env create\`: exit code $rc after $(( $(date +%s) - start )) s" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RUNNER_OS" != "Windows" ] && [ $rc -ne 0 ]; then exit $rc; fi
+
+      - name: Documented Windows workaround (only if the pip step failed)
+        if: runner.os == 'Windows' && steps.create.outputs.rc != '0'
+        run: |
+          envdir=$(conda env list | awk '$1=="vc"{print $NF}')
+          bat="$(cygpath -u "$envdir")/etc/conda/activate.d/vs2015_compiler_vars.bat"
+          ls -la "$bat"
+          rm -f "$bat"
+          start=$(date +%s)
+          conda env update -n vc -f environment.yml
+          echo "- workaround from INSTALL.md applied (deleted vs2015_compiler_vars.bat, \`conda env update\`): $(( $(date +%s) - start )) s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify (INSTALL.md section 4)
+        run: |
+          conda run -n vc --no-capture-output python -c "import cc3d; print('CompuCell3D OK', cc3d.__version__)"
+          conda run -n vc --no-capture-output python -c "import vivarium_vcornea, vivarium_angio; print('wrappers OK')"
+          conda run -n vc --no-capture-output python -c "import sys, numpy, pandas, zarr; print(sys.version.split()[0], numpy.__version__, pandas.__version__, zarr.__version__)"
+
+      - name: Tests - tests
+        if: always() && steps.create.conclusion == 'success'
+        run: |
+          conda run -n vc --no-capture-output python -m pytest tests -q --basetemp="$RUNNER_TEMP/t1" 2>&1 | tee tests.log
+          echo "- \`pytest tests\`: $(tail -1 tests.log)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tests - vivarium-angio
+        if: always() && steps.create.conclusion == 'success'
+        run: |
+          conda run -n vc --no-capture-output python -m pytest vivarium-angio -q --basetemp="$RUNNER_TEMP/t2" 2>&1 | tee angio.log
+          echo "- \`pytest vivarium-angio\`: $(tail -1 angio.log)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tests - vivarium-vcornea
+        if: always() && steps.create.conclusion == 'success'
+        run: |
+          conda run -n vc --no-capture-output python -m pytest vivarium-vcornea -q --basetemp="$RUNNER_TEMP/t3" 2>&1 | tee vcornea.log
+          echo "- \`pytest vivarium-vcornea\`: $(tail -1 vcornea.log)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Re-execute an Angio example archive
+        if: always() && steps.create.conclusion == 'success'
+        run: |
+          conda run -n vc --no-capture-output python .github/scripts/replay_check.py angio "$RUNNER_TEMP/ra" 2>&1 | tee ra.log
+          echo "- Angio archive replay: $(grep -E 'identical;|RESULT' ra.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Re-execute a V-Cornea example archive (one simulated day)
+        if: always() && steps.create.conclusion == 'success'
+        run: |
+          conda run -n vc --no-capture-output python .github/scripts/replay_check.py vcornea "$RUNNER_TEMP/rv" 2>&1 | tee rv.log
+          echo "- V-Cornea archive replay: $(grep -E 'identical:|RESULT' rv.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
