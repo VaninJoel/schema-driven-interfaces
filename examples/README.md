@@ -142,6 +142,40 @@ does not carry over between different parameter values: CompuCell3D draws all
 its random numbers from one stream, so changing a parameter changes which draw
 is used where.
 
+## Re-executing the examples
+
+Each archive carries the model it ran under `model/`, so it can be run again
+without the GUI. The table gives, for one archive of each application, the
+commands, the environment, what is expected and what was observed. The
+observations were made on 2026-11-24 in a fresh clone of this repository
+(commit `49d9494`) with a new conda environment created from `environment.yml`
+under another name (`conda env create -n sdi_clean -f environment.yml`, conda
+26.7.2, Windows 11). That command installed the conda packages and then failed
+in its pip step (exit code 1) with the Windows error `INSTALL.md` describes
+(`vs2015_compiler_vars.bat`); after the documented workaround, deleting that
+file and running `conda env update -n sdi_clean -f environment.yml`, the
+environment was complete. Both commands together took about 39 minutes with
+the machine's existing package cache. No terms-of-service prompt appeared for
+Anaconda's `defaults` channel, and this conda has no `conda tos` command. The
+environment resolved to Python 3.12.2, CompuCell3D 4.7.0, NumPy 2.2.6, pandas
+3.1.1 (the example archives were written with 3.0.6), Zarr 3.4.2, PyArrow
+18.1.0, vivarium-core 1.6.5 and biosimulators-utils 0.2.3. This is the same
+machine and operating system as the original runs; no other machine was tried,
+and one archive per application was re-executed.
+
+| | Angio-GUI | V-Cornea |
+|---|---|---|
+| Archive | `angio-gui_lchem_sweep/angio_lchem_sweep_combo002_rep01/angio_lchem_sweep_combo002_rep01.omex` (lchem = 500, seed 462244942) | `vcornea_sls_sweep/vcornea_sls_sweep_combo001/replicate_1/vcornea_sls_sweep_combo001.omex` (SLS = 1500, seed 2043774806) |
+| Commands, in the unpacked archive | `python -m cc3d.run_script -i model/angiogenesis.cc3d -o out` and `python model/run_model.py` | `python -m cc3d.run_script -i model/vCornea_v2.cc3d -o out`, then `python vivarium-vcornea/compare_replay.py . model/Simulation <final step>` |
+| Expected output | `model/native_output/step_<MCS>.npy` and `model/rerun_output/data.zarr`: every archived step (10, 20, …, 100) equal to the archived trajectory | `model/Simulation/cell_count_<N>.csv`, `surfactant_<N>.csv`, `thickness_rep_<N>.parquet`: every row equal to the archived tables |
+| Observed, full run | Both commands: all 10 archived steps identical (200 × 200 lattice, 3 fields). Each took one to two minutes | 30-day replay of the example archive (7200 steps, with `OPENBLAS_NUM_THREADS=1` as the wrapper sets it): all three tables equal to the archived ones in every value (721 cell-count rows, 7201 surfactant rows, 7210 thickness rows). The two CSV files are also byte-identical; the Parquet file's bytes differ while its contents are equal (not investigated; the pandas version differs). Run time 1 h 32 min |
+| Observed, brief run | not needed: the full run is brief | (1) A one-day run (240 steps, no injury, seed 20261124) was produced in that environment through the wrapper (`VCorneaProcess`, 3.5 minutes), its archive unpacked, and `model/vCornea_v2.cc3d` run with stock CompuCell3D, nothing edited: all three tables identical to the archived ones (25 cell-count rows, 241 surfactant rows, 250 thickness rows). (2) The example archive above with `SimTime` lowered to 240 steps in `model/Simulation/Parameters.py`: all three tables identical to the archived ones over that day (same row counts). Each replay took 3 to 6 minutes |
+| Test suites in that environment | `pytest tests`: 113 passed; `pytest vivarium-angio`: 65 passed | `pytest vivarium-vcornea`: 73 passed |
+
+The test counts are those of commit `49d9494`. How a replay and the comparison
+are run is described in [`vivarium-angio/README.md`](../vivarium-angio/README.md)
+and [`vivarium-vcornea/README.md`](../vivarium-vcornea/README.md#re-executing-from-the-unpacked-archive).
+
 <details>
 <summary>Run IDs and random seeds of all 45 runs</summary>
 
