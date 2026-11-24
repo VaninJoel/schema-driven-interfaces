@@ -1,0 +1,54 @@
+START Tue Nov 24 14:13:04 EST 2026
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.2.0, pluggy-1.7.0
+rootdir: C:\Users\joelvanin\sdi_clean
+configfile: pytest.ini
+plugins: anyio-4.16.0, platformdirs-4.14.8, zarr-3.4.2
+collected 73 items
+
+vivarium-vcornea\test_experiment_log.py ...                              [  4%]
+vivarium-vcornea\test_parameters_golden.py .....                         [ 10%]
+vivarium-vcornea\test_run_lifecycle.py ..................                [ 35%]
+vivarium-vcornea\test_vcornea_combo_report.py ......                     [ 43%]
+vivarium-vcornea\test_vcornea_descriptor_format.py .                     [ 45%]
+vivarium-vcornea\test_vcornea_omex_validation.py .......                 [ 54%]
+vivarium-vcornea\test_vcornea_review_fixes.py .......................... [ 90%]
+..                                                                       [ 93%]
+vivarium-vcornea\test_vcornea_units.py .....                             [100%]
+
+============================== warnings summary ===============================
+vivarium-vcornea/test_vcornea_combo_report.py::test_unsuccessful_runs_are_listed_not_dropped
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\kisao\core.py:11: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    import pkg_resources
+
+vivarium-vcornea/test_vcornea_combo_report.py::test_unsuccessful_runs_are_listed_not_dropped
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\combine\validation.py:14: DeprecationWarning: 'imghdr' is deprecated and slated for removal in Python 3.13
+    import imghdr
+
+vivarium-vcornea/test_vcornea_combo_report.py::test_replicate_statistics
+vivarium-vcornea/test_vcornea_combo_report.py::test_experiment_report_has_statistics_and_paper_thickness
+vivarium-vcornea/test_vcornea_combo_report.py::test_experiment_report_has_statistics_and_paper_thickness
+vivarium-vcornea/test_vcornea_combo_report.py::test_eroded_bin_has_zero_thickness_and_surfactant_half_life
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\scipy\stats\_stats_py.py:8674: RuntimeWarning: invalid value encountered in scalar divide
+    h /= ties
+
+vivarium-vcornea/test_vcornea_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\warnings.py:31: SedmlFeatureNotSupportedWarning: `C:\Users\JOELVA~1\AppData\Local\Temp\tmp4391q8hm\simulation.sedml` is encoded using L1V4. Only a few features introduced after L1V3 are supported. Most newer features, such as finer stylistic control of plots and parameter estimation, are not yet supported.
+    warnings.warn(termcolor.colored(message, Colors.warning.value), category)
+
+vivarium-vcornea/test_vcornea_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\warnings.py:31: SedmlFeatureNotSupportedWarning: Data descriptions skipped because data descriptions are not yet supported
+    warnings.warn(termcolor.colored(message, Colors.warning.value), category)
+
+vivarium-vcornea/test_vcornea_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\warnings.py:31: BioSimulatorsWarning: The SED document is potentially incorrect.
+    - Model `model_cc3d` has warnings.
+      - The model file `vcornea.cc3d` has warnings.
+        - No validation is available for models encoded in `urn:sedml:language:compucell3d`
+    - Output `report_outputs` has warnings.
+      - Some simulation tools will not be able to generate this output because it uses data from repeated tasks, which some simulation tools do not have the capability to execute.
+    warnings.warn(termcolor.colored(message, Colors.warning.value), category)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 73 passed, 9 warnings in 334.34s (0:05:34) ==================
+EXIT=0 WALL=363s END Tue Nov 24 14:19:07 EST 2026

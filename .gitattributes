@@ -3,3 +3,5 @@
 *.omex binary
 *.zip binary
 *.png binary
+# Re-execution outputs are stored byte for byte (no line-ending conversion).
+examples/reexecution/** -text

@@ -1,0 +1,73 @@
+START Tue Nov 24 14:09:14 EST 2026
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.2.0, pluggy-1.7.0
+rootdir: C:\Users\joelvanin\sdi_clean
+configfile: pytest.ini
+plugins: anyio-4.16.0, platformdirs-4.14.8, zarr-3.4.2
+collected 65 items
+
+vivarium-angio\test_angio_descriptor_format.py .                         [  1%]
+vivarium-angio\test_angio_gui_launch_check.py .....                      [  9%]
+vivarium-angio\test_angio_network_metrics.py .............               [ 29%]
+vivarium-angio\test_angio_omex_validation.py ...................         [ 58%]
+vivarium-angio\test_angio_program_facing.py ..............               [ 80%]
+vivarium-angio\test_angio_provenance.py ...                              [ 84%]
+vivarium-angio\test_angio_scan_archive.py .........                      [ 98%]
+vivarium-angio\test_angio_schema_read.py .                               [100%]
+
+============================== warnings summary ===============================
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+<frozen importlib._bootstrap>:488
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+..\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\Configuration\settingdict.py:10
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\Configuration\settingdict.py:10: DeprecationWarning: 'locale.getdefaultlocale' is deprecated and slated for removal in Python 3.15. Use setlocale(), getencoding() and getlocale() instead.
+    _enc = locale.getdefaultlocale()[1]
+
+vivarium-angio/test_angio_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\kisao\core.py:11: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    import pkg_resources
+
+vivarium-angio/test_angio_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\combine\validation.py:14: DeprecationWarning: 'imghdr' is deprecated and slated for removal in Python 3.13
+    import imghdr
+
+vivarium-angio/test_angio_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\warnings.py:31: SedmlFeatureNotSupportedWarning: `C:\Users\JOELVA~1\AppData\Local\Temp\tmpcphsb6uk\simulation.sedml` is encoded using L1V4. Only a few features introduced after L1V3 are supported. Most newer features, such as finer stylistic control of plots and parameter estimation, are not yet supported.
+    warnings.warn(termcolor.colored(message, Colors.warning.value), category)
+
+vivarium-angio/test_angio_omex_validation.py::test_success_archive_passes_combine_validator
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\biosimulators_utils\warnings.py:31: BioSimulatorsWarning: The SED document is potentially incorrect.
+    - Model `model_angio` has warnings.
+      - The model file `model/src/angiogenesis_process.py` has warnings.
+        - No validation is available for models encoded in `urn:sedml:language:compucell3d`
+    - Simulation `sim_mcs` has warnings.
+      - The time course simulation has an unusual number of steps. Check that the parameters of the time course are correct.
+        - Initial time: 0.0
+        - Output start time: 10.0
+        - Output end time: 100.0
+        - Number of steps: 9
+    warnings.warn(termcolor.colored(message, Colors.warning.value), category)
+
+vivarium-angio/test_angio_omex_validation.py::test_report_statistics_are_across_replicates
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\scipy\stats\_stats_py.py:8674: RuntimeWarning: invalid value encountered in scalar divide
+    h /= ties
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 65 passed, 19 warnings in 213.30s (0:03:33) =================
+EXIT=0 WALL=229s END Tue Nov 24 14:13:03 EST 2026

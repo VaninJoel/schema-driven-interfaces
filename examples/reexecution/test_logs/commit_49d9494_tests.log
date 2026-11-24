@@ -1,0 +1,55 @@
+START Tue Nov 24 13:54:08 EST 2026
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.2.0, pluggy-1.7.0
+rootdir: C:\Users\joelvanin\sdi_clean
+configfile: pytest.ini
+plugins: anyio-4.16.0, platformdirs-4.14.8, zarr-3.4.2
+collected 113 items
+
+tests\gui\test_angio_run_records.py ......                               [  5%]
+tests\gui\test_blas_threads.py ....                                      [  8%]
+tests\gui\test_default_output_dir.py ....                                [ 12%]
+tests\gui\test_descriptors_appear.py ................................... [ 43%]
+.....                                                                    [ 47%]
+tests\gui\test_every_button.py ..............                            [ 60%]
+tests\gui\test_export_provenance.py ...                                  [ 62%]
+tests\gui\test_random_interaction.py ............                        [ 73%]
+tests\gui\test_sweep_detection.py ..                                     [ 75%]
+tests\gui\test_vcornea_run_records.py ....                               [ 78%]
+tests\test_angio_reexecution.py .....                                    [ 83%]
+tests\test_schema_supplement.py ....                                     [ 86%]
+tests\test_spec_validation.py ..........                                 [ 95%]
+tests\test_vcornea_reexecution.py .....                                  [100%]
+
+============================== warnings summary ===============================
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+tests/gui/test_angio_run_records.py::test_success
+  <frozen importlib._bootstrap>:488: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+tests/gui/test_angio_run_records.py::test_success
+  C:\Users\joelvanin\miniforge3\envs\sdi_clean\Lib\site-packages\cc3d\core\Configuration\settingdict.py:10: DeprecationWarning: 'locale.getdefaultlocale' is deprecated and slated for removal in Python 3.15. Use setlocale(), getencoding() and getlocale() instead.
+    _enc = locale.getdefaultlocale()[1]
+
+tests/gui/test_export_provenance.py::test_vcornea_plot_panel_records_the_runs_behind_the_plot
+tests/gui/test_export_provenance.py::test_vcornea_plot_panel_records_the_runs_behind_the_plot
+  C:\Users\joelvanin\sdi_clean\vcornea-gui\gui\analysis_plots.py:173: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+    ax_qq.set_title("Combined Q-Q Plots"); ax_qq.grid(True, lw=0.1); ax_qq.legend(fontsize=7)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 113 passed, 16 warnings in 868.72s (0:14:28) =================
+EXIT=0 WALL=905s END Tue Nov 24 14:09:13 EST 2026

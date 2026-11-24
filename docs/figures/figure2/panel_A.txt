@@ -1,0 +1,20 @@
+'vedir': {
+    '_default': 1.0,
+    '_display_name': 'VEGF Diffusion Rate',
+    '_expert_level': 'intermediate',
+    '_unit': 'pixels²/MCS',
+    '_dimension': 'diffusivity',
+    '_mathematical_range': (0.0, 10.0),
+    '_physiological_range': (0.1, 2.0),
+    '_recommended_range': (0.5, 1.5),
+    '_range_evidence': {
+        'mathematical': {'basis': 'numerical_stability', 'refs': [], 'note': 'The explicit finite-differ […]'},
+        'physiological': {'basis': 'literature', 'refs': ['merks2006', 'merks2008'], 'note': '0.1–2 site²/MC […]'},
+        'recommended': {'basis': 'exploratory', 'refs': [], 'note': 'Presets 0.5 / 1.0 / 1.5 / 2.0. The gradien […]'},
+    },
+    '_ontology_term': 'cbo:MoleculeDiffusion',
+    '_dependencies': {'veder': 'Balance D/k determines gra […]', 'vesec': 'High diffusion smooths out […]'},
+    '_expected_behavior': {'low_value': 'Steep local gradient […]', 'high_value': 'Shallow global gradi […]'},
+    '_reference_paper': {'source': 'This model (angiogen […]', 'value': 1.0, 'notes': 'Merks et al. (2006,  […]'},
+    # … 21 further fields omitted (_updater, _emit, _description, _long_description, …)
+}
