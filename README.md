@@ -117,8 +117,9 @@ writes parameters only into a private per-replicate copy of it.
 ## How to cite
 
 Please cite the article above and the archived release of this software
-(v1.1.1: [doi:10.5281/zenodo.24517425](https://doi.org/10.5281/zenodo.24517425); all versions:
-[doi:10.5281/zenodo.24516158](https://doi.org/10.5281/zenodo.24516158)); see
+([doi:10.5281/zenodo.24516158](https://doi.org/10.5281/zenodo.24516158), which covers all
+versions; version 1.1.1 alone is
+[doi:10.5281/zenodo.24517425](https://doi.org/10.5281/zenodo.24517425)); see
 [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository" button uses it).
 If you use the V-Cornea model itself, also cite Vanin et al. (2025),
 *PLOS Comput Biol* 21(12):e1013410,
