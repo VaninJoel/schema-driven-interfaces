@@ -330,8 +330,8 @@ Experiment: adhesion_sweep
 
 ### Parameter Reference
 
-Every exposed parameter — its meaning, units, default, implementation-admissible
-range, evidence-supported range and the sources behind them — is defined in
+Every exposed parameter — its meaning, units, default, implementation
+limit, working range and what each range rests on — is defined in
 `AngiogenesisProcess.ports_schema()` and tabulated in
 Supplementary Table S1 of the paper. The same information is shown in the app: click the
 ⓘ button next to any parameter.

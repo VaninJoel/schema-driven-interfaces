@@ -44,8 +44,8 @@ CompuCell3D is launched with the current interpreter when it can import `cc3d`
 (the single-environment install), and through `conda run -n <cc3d_conda_env_name>`
 (default `vc`) otherwise. More examples are in [`experiments/`](experiments/).
 
-The full parameter schema — meaning, units, default, admissible and
-evidence-supported ranges and their sources — is tabulated in
+The full parameter schema — meaning, units, default, implementation limit and
+working range, and what each range rests on — is tabulated in
 Supplementary Table S2 of the paper.
 
 ## What a run writes

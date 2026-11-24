@@ -12,7 +12,7 @@ This repository is the software accompanying the article
 
 The unifying idea: a simulation is exposed as a Vivarium process whose
 `ports_schema()` declares every parameter together with its meaning, units,
-default, admissible and evidence-supported ranges, and the evidence behind them.
+default, implementation limit and working range, and what each range rests on.
 A PyQt5 GUI is **generated from that schema**, and the same definitions validate
 each run and are written into its provenance record — so the interface, the
 validation, the documentation and the run archive cannot drift apart.

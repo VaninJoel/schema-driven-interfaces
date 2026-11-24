@@ -79,8 +79,8 @@ stays visible in the schema, the fingerprint, and the generated documentation.
 
 | Field | Req. | Meaning |
 |---|---|---|
-| `_mathematical_range` | no* | What the implementation accepts. Outside → error. |
-| `_physiological_range` | no* | What the evidence supports. Outside → extrapolation warning. |
+| `_mathematical_range` | no* | Implementation limit: what the model code can run with (model function, not biology). Outside → refused unless explicitly allowed. The key name is historical. |
+| `_physiological_range` | no* | Working range: the values the model is meant to be used with; its basis is recorded in `_range_evidence` and it is physiological only where that basis is `literature`. Outside → warning, recorded as outside the working range. The key name is historical. |
 | `_recommended_range` | no* | Advised for this model's context of use. |
 | `_range_evidence` | yes | One entry per tier: `{basis, refs, locator, note}`. `basis` is one of `numerical_stability`, `literature`, `calibration`, `expert_judgement`, `exploratory`; `refs` are keys into the model's references registry; `locator` is `{table, equation, page}`. **New field**: today the justification lives in code comments only, and a bound with no evidence can say so (`exploratory`) instead of implying evidence that does not exist. |
 | `_warning_threshold` | no | Single value above which a warning is raised. |
@@ -288,17 +288,19 @@ the archive writer, which has no schema of its own:
 For every parameter the record carries: run value, documented default and
 whether they differ; the three range tiers and the value's position against
 each (`within`, `below`, `above`, `undeclared`, `not_applicable`); a
-**credibility** verdict — `supported` (inside the evidence-supported range),
-`admissible` (inside the declared tiers, no physiological range documented),
-`outside_recommended`, `extrapolation` (beyond the documented evidence),
-`inadmissible` (outside what the implementation accepts), `unassessable`
+**credibility** verdict — `supported` (inside the working range),
+`admissible` (inside the declared tiers, no working range documented),
+`outside_recommended`, `extrapolation` (outside the working range; the machine
+label is kept for existing archives and is shown to people as "outside the
+documented working range" with the basis of that range),
+`inadmissible` (outside an implementation limit), `unassessable`
 (numeric, no range documented) or `not_applicable` (switch/category); the
 `_range_evidence` for each tier with citations resolved through the model's
 registry; the default's provenance (`_reference_paper`); `_literature`;
 ontology term; fitting method; dependencies; affected outputs. A `summary`
 block gives counts and the lists of flagged parameters, and is copied into
 `run_metadata.json` as `parameter_credibility` so experiment logs can flag
-extrapolations without opening the archive.
+values outside a working range without opening the archive.
 
 The PDF reports (`make_omex_summary_pdf.py`, both `make_omex_combo_report.py`)
 render a **Parameter Credibility** section from it: a one-line summary, a table

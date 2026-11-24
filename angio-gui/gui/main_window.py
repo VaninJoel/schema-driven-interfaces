@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
+    range_tier_label,
     format_ontology_term,
     default_provenance_lines,
     literature_lines,
@@ -187,7 +188,11 @@ class ValidationInfoDialog(QDialog):
                 """
 
         # Explain validation ranges
-        html += "<h3>Validation Ranges Explained</h3>"
+        html += "<h3>Ranges of this parameter</h3>"
+        html += ("<p><small><b>Working range</b>: the values the model is meant to be "
+                 "used with; what it rests on is stated with it. "
+                 "<b>Implementation limit</b>: what the model code can run with; it "
+                 "concerns the model's function, not biology.</small></p>")
 
         # Check if we have a sweep (comma-separated values)
         is_sweep = isinstance(current_value, str) and ',' in str(current_value)
@@ -216,7 +221,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -234,7 +239,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -252,7 +257,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -276,7 +281,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
@@ -288,7 +293,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
@@ -300,7 +305,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
@@ -350,7 +355,7 @@ class ValidationInfoDialog(QDialog):
             <h3>What happens at launch</h3>
             <p style="color: #dc3545;">
             The value is outside the limit the schema declares for the implementation
-            (the "mathematical" range). What lies beyond that limit differs by parameter
+            (schema key _mathematical_range; the name is historical). What lies beyond that limit differs by parameter
             and is described in the range's own note above: for some it is a failure of
             the numerical scheme, for others a cap chosen by the modeler. The run starts
             only if you confirm it, and the confirmation is recorded with the run.
@@ -450,6 +455,7 @@ class ParameterInfoDialog(QDialog):
             unit = param_info.get('_unit', '')
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:
+                    label = range_tier_label(param_info, tier)
                     r = param_info[key]
                     html += (f"<li><span class='label'>{label}:</span> [{r[0]}, {r[1]}] {unit}"
                              f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
@@ -1388,7 +1394,7 @@ class AngiogenesisMainWindow(QMainWindow):
             <div class="feature"><strong>Schema-Driven Interface:</strong> All parameter info comes from scientific metadata</div>
             <div class="feature"><strong>Three Expertise Levels:</strong> Progressive disclosure hides complexity for beginners</div>
             <div class="feature"><strong>Literature Integration:</strong> Direct links to source papers via DOI</div>
-            <div class="feature"><strong>Smart Validation:</strong> Real-time checking against physiological ranges</div>
+            <div class="feature"><strong>Smart Validation:</strong> Real-time checking against each parameter's working range and implementation limit</div>
             <div class="feature"><strong>Preset Library:</strong> Pre-configured parameter sets from publications</div>
             <div class="feature"><strong>Parameter History:</strong> Load/save parameter configurations</div>
             <div class="feature"><strong>Reproducibility:</strong> Complete metadata saved with every run</div>
@@ -1517,12 +1523,12 @@ batch_sweep_20251106_143052/
         <div class="section">
             <h2>Tips for Successful Simulations</h2>
             <ul>
-                <li><span class="check">✓</span><strong>Stay within physiological ranges</strong> for biologically realistic results</li>
+                <li><span class="check">✓</span><strong>Stay within the working ranges</strong>: the values the model is meant to be used with (each range states what it rests on)</li>
                 <li><span class="check">✓</span><strong>Start with presets</strong> to understand typical parameter combinations</li>
                 <li><span class="check">✓</span><strong>Change one parameter at a time</strong> to understand its effect</li>
                 <li><span class="check">✓</span><strong>Check validation warnings</strong> before running</li>
                 <li><span class="check">✓</span><strong>Save interesting configurations</strong> using "Save Parameters"</li>
-                <li><span class="warning"></span> Values outside mathematical ranges may crash the simulation</li>
+                <li><span class="warning"></span> Values outside an implementation limit may crash the simulation</li>
                 <li><span class="warning"></span> Extreme parameter combinations may produce nonsensical results</li>
             </ul>
         </div>
@@ -2068,8 +2074,8 @@ batch_sweep_20251106_143052/
             if outside_working:
                 msg += (f"{len(outside_working)} parameter(s) outside the documented "
                         f"working range:\n\n" + _listing(outside_working) + "\n"
-                        "The run is then an extrapolation beyond what the schema "
-                        "documents, on the basis named for each range.\n\n")
+                        "These values run. The run is recorded as outside the working "
+                        "range, whose basis is named for each parameter.\n\n")
             msg += ("Run with these values? Your confirmation and each value's position "
                     "are recorded in the run record.")
 

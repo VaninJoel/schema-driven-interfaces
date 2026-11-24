@@ -35,7 +35,7 @@ GUI (PyQt5) → Vivarium process (VCorneaProcess) → CC3D subprocess
 - **Schema-Driven UI**: Controls generated from `VCorneaProcess.ports_schema()`
 - **Expertise Levels**: Basic, Intermediate, Advanced parameter visibility
 - **Batch Execution**: Parameter sweeps and replicates
-- **Validation**: Physiological range checks with inline feedback
+- **Validation**: Working-range and implementation-limit checks with inline feedback
 - **Metadata Capture**: Full parameter and run provenance
 
 ---

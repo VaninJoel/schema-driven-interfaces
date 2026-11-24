@@ -511,3 +511,47 @@ def test_a_table_that_cannot_be_read_for_lack_of_an_engine_is_not_called_complet
     assert entry['state'] == 'present, not read' and 'not read' in entry['detail']
     assert check['ok']          # the file carries the final step; contents unjudged
 
+
+
+# ---- 12. a run that cannot fit in a Windows path is refused before launch ----------
+def test_a_run_too_deep_for_a_windows_path_is_refused_with_what_to_shorten(tmp_path, monkeypatch):
+    from vivarium_vcornea.utils import path_budget as pb
+    monkeypatch.setattr(pb, 'limit_applies', lambda: True)     # as on Windows without long paths
+    deep = tmp_path / 'out'
+    while len(str(deep)) < 200:
+        deep = deep / 'a_folder_name_of_some_length'
+    proc = _process(deep, SLS_Concentration=1500.0)
+    launched = []
+    monkeypatch.setattr(VCorneaProcess, '_run_cc3d_simulation',
+                        lambda self, *a, **k: launched.append(a))
+    with pytest.raises(pb.OutputPathTooLong) as refused:
+        proc.next_update(1, _states(proc))
+    record, message = refused.value.record, str(refused.value)
+    assert record['length'] + record['margin'] > record['limit'] == 259
+    assert record['longest_path'].endswith('vCornea_v2Steppables.py')
+    assert f"at least {record['excess']} characters shorter" in message
+    assert str(deep) in message and 'Run not started' in message
+    assert not launched and not (tmp_path / 'out').exists()    # nothing created, nothing run
+
+
+def test_the_path_check_counts_the_working_copy_and_the_archive(tmp_path):
+    from vivarium_vcornea.utils import path_budget as pb
+    project = tmp_path / 'project'
+    (project / 'Simulation').mkdir(parents=True)
+    (project / 'Simulation' / 'model.py').write_text('')
+    base = Path('C:/r') if os.name == 'nt' else Path('/r')
+    short = pb.path_budget(base, 'run', project, n_replicates=10)
+    assert short['fits'] and short['excess'] == 0
+    assert short['longest_path'] == str(
+        base / 'run' / 'replicate_10' / 'vcornea_sim_xxxxxx' / 'Simulation' / 'model.py')
+    # A long run name appears twice (directory and archive name): the archive wins.
+    name = 'n' * 120
+    long = pb.path_budget(base, name, project)
+    assert long['longest_path'] == str(base / name / 'replicate_1' / f'{name}.omex')
+    assert not long['fits']
+    assert long['excess'] == long['length'] + long['margin'] - long['limit']
+    # Shortening the output folder by the stated number of characters is enough.
+    padded = pb.path_budget(Path(str(base) + 'x' * 40), name, project)
+    assert padded['excess'] == long['excess'] + 40
+    # Where the limit does not hold, nothing is refused.
+    assert pb.require_path_budget(base, name, project, enforce=False)['enforced'] is False

@@ -4327,6 +4327,13 @@ class VCorneaProcess(Process):
         else:
             output_base = Path.cwd() / "simulation_results"
         
+        # Windows refuses paths of 260 characters or more. Checked here, before
+        # anything is created, so the run is refused with the number of characters
+        # to shorten instead of failing half-way through the project copy
+        # (utils/path_budget.py).
+        from ..utils.path_budget import require_path_budget
+        require_path_budget(output_base, run_name, self.project_path, num_replicates)
+
         batch_output_dir = output_base / run_name
         batch_output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -4640,7 +4647,20 @@ class VCorneaProcess(Process):
                                  f"Check stderr.log in the output directory.")
             elif not output_check['ok']:
                 status = 'failed'
-                if output_check['completion_evidence'] is None:
+                if (output_check['completion_evidence'] is None
+                        and output_check.get('cc3d_end_of_run_report')):
+                    # CompuCell3D ran and ended normally, so this is not a start-up
+                    # failure: the run stopped before the step at which the model
+                    # writes its tables, or wrote them for another period.
+                    error_message = (
+                        f"Simulation process exited cleanly (code {exit_code}) and "
+                        f"CompuCell3D reported the end of a run, but the model did not "
+                        f"reach the final step of the requested period (step "
+                        f"{output_check['final_mcs'] + 1}): "
+                        f"{'; '.join(output_check['problems'])}. The run ended early or "
+                        f"covered a different period than requested."
+                    )
+                elif output_check['completion_evidence'] is None:
                     error_message = (
                         f"Simulation process exited cleanly (code {exit_code}) but nothing "
                         f"shows it reached its final step: "

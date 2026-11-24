@@ -109,8 +109,8 @@ JEM = {
     '_value_mapping': None,              # only for enumerated/boolean parameters
 
     # ---- admissible and supported values -----------------------------------
-    '_mathematical_range': (0.0, 100.0),   # the implementation accepts these; outside is an error
-    '_physiological_range': (2.0, 16.0),   # supported by evidence; outside is an extrapolation
+    '_mathematical_range': (0.0, 100.0),   # implementation limit: what the model code can run with
+    '_physiological_range': (2.0, 16.0),   # working range: values the model is meant to be used with (basis below)
     '_recommended_range': (2.0, 10.0),     # advised for this model's context of use
     '_range_evidence': {                 # one entry per tier; 'basis' says what kind of justification it is
         'mathematical': {

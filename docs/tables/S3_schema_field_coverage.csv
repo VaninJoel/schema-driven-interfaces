@@ -26,8 +26,8 @@ Units,_display_unit,no,Operator-facing unit and `display = stored × factor`.,,0
 Units,_conversion_factor,no,Operator-facing unit and `display = stored × factor`.,,0/11,3/79
 Units,_value_mapping,no,Labels for enumerated or boolean values.,,1/11,2/79
 Admissible and supported values,_range_evidence,yes,"One entry per tier: `{basis, refs, locator, note}`. `basis` is one of `numerical_stability`, `literature`, `calibration`, `expert_judgement`, `exploratory`; `refs` are keys into the model's references registry; `locator` is `{table, equation, page}`. **New field**: today the justification lives in code comments only, and a bound with no evidence can say so (`exploratory`) instead of implying evidence that does not exist.",mathematical: numerical_stability / physiological: literature / recommended: exploratory,10/11,58/79
-Admissible and supported values,_mathematical_range,no,What the implementation accepts. Outside → error.,"(0.0, 10.0)",9/11,5/79
-Admissible and supported values,_physiological_range,no,What the evidence supports. Outside → extrapolation warning.,"(0.1, 2.0)",9/11,27/79
+Admissible and supported values,_mathematical_range,no,"Implementation limit: what the model code can run with (model function, not biology). Outside → refused unless explicitly allowed. The key name is historical.","(0.0, 10.0)",9/11,5/79
+Admissible and supported values,_physiological_range,no,"Working range: the values the model is meant to be used with; its basis is recorded in `_range_evidence` and it is physiological only where that basis is `literature`. Outside → warning, recorded as outside the working range. The key name is historical.","(0.1, 2.0)",9/11,27/79
 Admissible and supported values,_recommended_range,no,Advised for this model's context of use.,"(0.5, 1.5)",9/11,31/79
 Admissible and supported values,_warning_threshold,no,Single value above which a warning is raised.,3.0,6/11,0/79
 Admissible and supported values,_presets,no,Named operating points `{label: value}`.,"{'slow_diffusion': 0.5, 'moderate_diffusion': 1.0 …",9/11,2/79

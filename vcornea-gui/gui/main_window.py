@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from schema_utils import (
     format_range_evidence,
     RANGE_TIERS,
+    range_tier_label,
     format_ontology_term,
     default_provenance_lines,
     evidence_basis_lines,
@@ -192,7 +193,11 @@ class ValidationInfoDialog(QDialog):
                 """
 
         # Explain validation ranges
-        html += "<h3>Validation Ranges Explained</h3>"
+        html += "<h3>Ranges of this parameter</h3>"
+        html += ("<p><small><b>Working range</b>: the values the model is meant to be "
+                 "used with; what it rests on is stated with it. "
+                 "<b>Implementation limit</b>: what the model code can run with; it "
+                 "concerns the model's function, not biology.</small></p>")
 
         # Check if we have a sweep (comma-separated values)
         is_sweep = isinstance(current_value, str) and ',' in str(current_value)
@@ -221,7 +226,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -239,7 +244,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -257,7 +262,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small><br>
                     <strong>Your values:</strong>
                 """
@@ -281,7 +286,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Physiological Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'physiological')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'physiological')}</small>
                 </div>
                 """
@@ -293,7 +298,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Recommended Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} Recommended range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'recommended')}</small>
                 </div>
                 """
@@ -305,7 +310,7 @@ class ValidationInfoDialog(QDialog):
 
                 html += f"""
                 <div class="range-item">
-                    <span class="label">{status} Mathematical Range:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
+                    <span class="label">{status} {range_tier_label(param_info, 'mathematical')}:</span> [{r[0]}, {r[1]}] {param_info.get('_unit', '')}<br>
                     <small>{format_range_evidence(param_info, 'mathematical')}</small>
                 </div>
                 """
@@ -528,6 +533,7 @@ class ParameterInfoDialog(QDialog):
             html += "<h3>Valid Ranges</h3><ul>"
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:
+                    label = range_tier_label(param_info, tier)
                     html += (f"<li><span class='label'>{label}:</span> {_fmt_range(param_info[key])}"
                              f"<br><small>{format_range_evidence(param_info, tier)}</small></li>")
             html += "</ul>"
@@ -2237,8 +2243,8 @@ class VCorneaMainWindow(QMainWindow):
                         "may simply run.\n\n")
             if outside:
                 msg += ("Outside a documented working or recommended range:\n" + outside + "\n"
-                        "These values run. Results are an extrapolation beyond the range the "
-                        "schema documents, on the basis stated for each range.\n\n")
+                        "These values run. The run is recorded as outside the working or "
+                        "recommended range, whose basis is stated for each parameter.\n\n")
             msg += ("If you proceed, the run record will state that these findings were shown "
                     "and confirmed by the operator"
                     + (", and that values outside an implementation limit were allowed."

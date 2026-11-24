@@ -554,24 +554,47 @@ def schema_to_json_serializable(schema: Dict) -> Dict:
 
 RANGE_TIERS = (
     # (schema key, tier name, human label)
-    ('_physiological_range', 'physiological', 'Physiological Range'),
-    ('_recommended_range', 'recommended', 'Recommended Range'),
-    ('_mathematical_range', 'mathematical', 'Mathematical Range'),
+    # The schema keys are historical; the names shown to people are these.
+    ('_physiological_range', 'physiological', 'Working range'),
+    ('_recommended_range', 'recommended', 'Recommended range'),
+    ('_mathematical_range', 'mathematical', 'Implementation limit'),
 )
 
+# Two different things, never to be read as one:
+#   working range         the values the model is meant to be used with. What it
+#                         rests on (its basis) is always shown beside it; it is
+#                         called physiological only where that basis is published
+#                         literature.
+#   implementation limit  what the model code can run with. It is about the
+#                         model's function, not about biology.
 RANGE_TIER_MEANING = {
-    'physiological': 'values the evidence supports; outside is an extrapolation',
+    'physiological': 'the values the model is meant to be used with; a value outside it '
+                     'runs and is recorded as outside the working range',
     'recommended': 'values advised for this model\'s context of use',
-    'mathematical': 'values the implementation accepts; outside is an error',
+    'mathematical': 'what the model code can run with (model function, not biology); a '
+                    'value outside it is refused unless explicitly allowed',
 }
 
+# Same words as the run-time findings (vivarium_*/utils/spec_validation.py) and
+# the reports (utils/parameter_audit.py).
 RANGE_BASIS_LABELS = {
-    'numerical_stability': 'numerical stability of the implementation',
-    'literature': 'published evidence',
-    'calibration': 'calibration against reference data',
-    'expert_judgement': 'modeler judgement',
-    'exploratory': 'exploratory, not evidence-based',
+    'numerical_stability': 'a numerical or implementation limit',
+    'literature': 'published literature',
+    'calibration': 'model calibration',
+    'expert_judgement': "the modeler's judgement",
+    'exploratory': 'exploratory presets',
 }
+
+
+def range_tier_label(param_info: Dict, tier: str) -> str:
+    """The name a range tier is shown under. The working range is called
+    physiological only when its recorded basis is published literature."""
+    label = {t: l for _, t, l in RANGE_TIERS}.get(tier, tier)
+    if tier == 'physiological':
+        entry = (param_info.get('_range_evidence') or {}).get(tier)
+        if isinstance(entry, dict) and entry.get('basis') == 'literature':
+            return f'{label} (physiological)'
+    return label
 
 
 def _format_locator(locator) -> str:
@@ -814,6 +837,7 @@ def extract_parameter_documentation(schema: Dict, output_format: str = 'markdown
                 for key, tier, label in RANGE_TIERS:
                     if key in param_info:
                         r = param_info[key]
+                        label = range_tier_label(param_info, tier)
                         doc += f"- **{label}**: [{r[0]}, {r[1]}]\n"
                         doc += f"  - {format_range_evidence(param_info, tier, fmt='markdown')}\n"
                 if '_default' in param_info:
