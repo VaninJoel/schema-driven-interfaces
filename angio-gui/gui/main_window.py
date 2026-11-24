@@ -451,7 +451,7 @@ class ParameterInfoDialog(QDialog):
 
         # Validation ranges
         if any(key in param_info for key, _, _ in RANGE_TIERS):
-            html += "<h3>Valid Ranges</h3><ul>"
+            html += "<h3>Ranges</h3><ul>"
             unit = param_info.get('_unit', '')
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:

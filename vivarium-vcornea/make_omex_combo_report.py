@@ -211,6 +211,14 @@ def _time_key(df):
                 df.columns[-1])
 
 
+# Quantity and unit on the y axis of each CSV signal. The surfactant table holds
+# the integral of the SLS field over the lattice; SLS is in arbitrary units.
+CSV_AXIS_LABELS = {
+    'cell_count': 'Cell count (cells)',
+    'surfactant': 'SLS total amount (field integral, a.u.)',
+}
+
+
 def make_csv_plots(reps, tmpdir):
     """reps: list of (label, omex, names). One figure per CSV signal, overlaying
     every replicate (thin) plus the across-replicate mean (bold)."""
@@ -255,7 +263,7 @@ def make_csv_plots(reps, tmpdir):
                 ax.fill_between(mean.index, mean - sd, mean + sd, color=line.get_color(),
                                 alpha=0.18, lw=0)
         ax.set_xlabel('Time (hours)', fontsize=8)
-        ax.set_ylabel('Value', fontsize=8)
+        ax.set_ylabel(CSV_AXIS_LABELS.get(prefix, prefix), fontsize=8)
         ax.tick_params(labelsize=7)
         ax.grid(True, alpha=0.3, lw=0.4)
         ax.legend(fontsize=7, ncol=min(len(cols), 4), frameon=False, loc='best')
@@ -958,12 +966,12 @@ def build_experiment_report(root, combos, out_pdf, unsuccessful=None):
 
     plots = []
     for ct in ['Superficial', 'Wing', 'Basal', 'Stem']:
-        p = line_plot('cell_count', ct, 'Cell count', f"{ct} cells across combinations",
+        p = line_plot('cell_count', ct, CSV_AXIS_LABELS['cell_count'], f"{ct} cells across combinations",
                       f"cc_{ct}.png")
         if p:
             plots.append((p, f"{ct}: replicate mean per combination vs Time, shaded "
                           "&plusmn;1 SD across replicates"))
-    p = line_plot('surfactant', 'Total Amount', 'Total amount',
+    p = line_plot('surfactant', 'Total Amount', CSV_AXIS_LABELS['surfactant'],
                   "Surfactant across combinations", "surf.png")
     if p:
         plots.append((p, "Surfactant Total Amount: replicate mean per combination vs Time, "

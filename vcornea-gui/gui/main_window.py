@@ -530,7 +530,7 @@ class ParameterInfoDialog(QDialog):
 
         # Validation ranges (shown in physical + simulation units)
         if any(k in param_info for k in ('_physiological_range', '_recommended_range', '_mathematical_range')):
-            html += "<h3>Valid Ranges</h3><ul>"
+            html += "<h3>Ranges</h3><ul>"
             for key, tier, label in RANGE_TIERS:
                 if key in param_info:
                     label = range_tier_label(param_info, tier)

@@ -252,7 +252,10 @@ def make_plots(omex: Path, datadesc, tmpdir: Path):
             for h in series:
                 ax.plot(t, data[h], linewidth=1.3, label=h)
             ax.set_xlabel('Time (hours)', fontsize=8)
-            ax.set_ylabel('Value', fontsize=8)
+            # quantity and unit by table (SLS is in arbitrary units)
+            ax.set_ylabel('Cell count (cells)' if 'cell_count' in src
+                          else 'SLS total amount (field integral, a.u.)' if 'surfactant' in src
+                          else Path(src).stem, fontsize=8)
             ax.tick_params(labelsize=7)
             ax.grid(True, alpha=0.3, linewidth=0.4)
             if len(series) > 1:
