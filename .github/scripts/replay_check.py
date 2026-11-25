@@ -19,6 +19,7 @@ ENV = {**os.environ, 'OPENBLAS_NUM_THREADS': '1'}
 
 
 ABNORMAL_EXITS = []
+KNOWN_EXITS = []      # crashed at exit after reporting completion (archived script)
 
 
 def run(cmd, cwd, tolerate_exit=False):
@@ -52,7 +53,13 @@ def angio(work):
          '-o', str(work / 'out')], work)
     native = {int(p.stem.split('_')[1]): np.load(p)
               for p in (work / 'model' / 'native_output').glob('step_*.npy')}
-    run([sys.executable, 'run_model.py'], work / 'model', tolerate_exit=True)
+    # The run_model.py inside archives written before v1.1.2 does not end the
+    # process itself; on Linux CompuCell3D then crashes during interpreter
+    # teardown, after the trajectory is written. That exit is tolerated here and
+    # reported; what it wrote is compared like any other output.
+    rm = run([sys.executable, 'run_model.py'], work / 'model', tolerate_exit=True)
+    if rm.returncode != 0 and 'Re-run complete' in rm.stdout:
+        KNOWN_EXITS.append(ABNORMAL_EXITS.pop())
     rerun = {step: np.array(data) for step, data in og._load_zarr_steps(
         work / 'model' / 'rerun_output' / 'data.zarr', strict=True)}
 
@@ -80,7 +87,7 @@ def vcornea(work):
     run([sys.executable, '-m', 'cc3d.run_script', '-i', 'model/vCornea_v2.cc3d',
          '-o', str(work / 'out')], work)
     done = run([sys.executable, str(REPO / 'vivarium-vcornea' / 'compare_replay.py'),
-                '.', 'model/Simulation', '241'], work, tolerate_exit=True)
+                '.', 'model/Simulation', '241'], work)
     print(done.stdout)
     return 'ALL IDENTICAL' in done.stdout
 
@@ -90,6 +97,9 @@ if __name__ == '__main__':
     work.mkdir(parents=True, exist_ok=True)
     ok = {'angio': angio, 'vcornea': vcornea}[which](work)
     print('RESULT:', 'identical to the archive' if ok else 'DIFFERS from the archive')
+    for what, code in KNOWN_EXITS:
+        print(f'KNOWN EXIT CRASH: `{what}` (script stored in the archive) ended with exit '
+              f'code {code} after printing "Re-run complete"; its output was compared')
     for what, code in ABNORMAL_EXITS:
         print(f'ABNORMAL EXIT: `{what}` ended with exit code {code} after writing its output')
     sys.exit(0 if ok and not ABNORMAL_EXITS else 1)

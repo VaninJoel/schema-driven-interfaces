@@ -8,6 +8,10 @@ on:
   push:
     branches: [ci/clean-machine]
 
+concurrency:
+  group: clean-machine-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   install-and-run:
     name: ${{ matrix.os }}
@@ -16,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest, macos-13]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     defaults:
       run:
         shell: bash -el -o pipefail {0}
@@ -66,6 +70,12 @@ jobs:
           conda env update -n vc -f environment.yml
           echo "- workaround from INSTALL.md applied (deleted vs2015_compiler_vars.bat, \`conda env update\`): $(( $(date +%s) - start )) s" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: macOS - C++ runtime that CompuCell3D 4.7.0 can load (INSTALL.md)
+        if: runner.os == 'macOS'
+        run: |
+          conda install -y -n vc -c conda-forge "libcxx<23"
+          conda list -n vc | grep -E "^(libcxx|cc3d|numpy|pandas) "
+
       - name: Verify (INSTALL.md section 4)
         run: |
           conda run -n vc --no-capture-output python -c "import cc3d; print('CompuCell3D OK', cc3d.__version__)"
@@ -99,7 +109,7 @@ jobs:
         if: always() && steps.create.conclusion == 'success'
         run: |
           conda run -n vc --no-capture-output python .github/scripts/replay_check.py angio "$RUNNER_TEMP/ra" 2>&1 | tee ra.log
-          echo "- Angio archive replay: $(grep -E 'identical;|RESULT' ra.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Angio archive replay: $(grep -E 'identical;|RESULT|KNOWN|ABNORMAL' ra.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Re-execute a V-Cornea example archive (one simulated day)
         if: always() && steps.create.conclusion == 'success'

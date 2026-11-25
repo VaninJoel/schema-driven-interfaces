@@ -4,6 +4,7 @@
 
 A replay shorter than the archived run is compared over the period it covers.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -34,3 +35,10 @@ for stem in ('cell_count', 'surfactant', 'thickness_rep'):
         print('   first differing row:', int(diff.idxmax()), Aw[diff].head(1).to_dict('records'),
               R[diff].head(1).to_dict('records'))
 print('ALL IDENTICAL' if ok else 'DIFFERENCES FOUND')
+# End here, with the verdict as exit status. On Linux this script was once seen
+# to abort during interpreter shutdown after printing its result ("terminate
+# called without an active exception", from a library's worker thread); the
+# comparison is complete at this point, so nothing is lost by not tearing down.
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(0 if ok else 1)
