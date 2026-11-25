@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [macos-latest]   # TEMPORARY while diagnosing macOS; restore all three
     defaults:
       run:
         shell: bash -el -o pipefail {0}
@@ -109,7 +109,7 @@ jobs:
         if: always() && steps.create.conclusion == 'success'
         run: |
           conda run -n vc --no-capture-output python .github/scripts/replay_check.py angio "$RUNNER_TEMP/ra" 2>&1 | tee ra.log
-          echo "- Angio archive replay: $(grep -E 'identical;|RESULT|KNOWN|ABNORMAL' ra.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Angio archive replay: $(grep -E 'identical|RESULT|KNOWN|ABNORMAL' ra.log | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Re-execute a V-Cornea example archive (one simulated day)
         if: always() && steps.create.conclusion == 'success'
